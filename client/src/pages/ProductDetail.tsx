@@ -993,7 +993,7 @@ const ProductDetail: React.FC = () => {
                   </>
                 )}
 
-                {/* Report Button - visible to non-owners */}
+                {/* Report Button - allows users to report policy violations */}
                 {!isOwner && product.status === 'available' && (
                   <Button
                     variant="outline"
@@ -1152,6 +1152,7 @@ const ProductDetail: React.FC = () => {
           </Flex>
 
           {/* View Dashboard Button - only for non-owners */}
+          {/* View seller profile and dashboard - links to seller public profile */}
           {user && user.id !== product.seller_id && (
             <Button
               mt={4}
@@ -1404,11 +1405,11 @@ const ProductDetail: React.FC = () => {
         </ModalContent>
       </Modal>
 
-      {/* Report Modal */}
+      {/* Report Modal for submitting trader reports */}
       <Modal isOpen={isReportOpen} onClose={() => setIsReportOpen(false)} size="md">
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>Report this Trader</ModalHeader>
+          <ModalHeader>Report Trader for Policy Violation</ModalHeader>
           <ModalCloseButton />
           <ModalBody>
             <VStack spacing={4}>

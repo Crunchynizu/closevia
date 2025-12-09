@@ -11,19 +11,19 @@ import (
 	"github.com/xashathebest/clovia/models"
 )
 
-// ReportHandler handles user reports
+// ReportHandler handles trader reports and violations
 type ReportHandler struct {
 	db *sql.DB
 }
 
-// NewReportHandler creates a new report handler
+// NewReportHandler creates a new report handler instance
 func NewReportHandler() *ReportHandler {
 	return &ReportHandler{
 		db: database.DB,
 	}
 }
 
-// CreateReport creates a new report against a trader
+// CreateReport creates and submits a new report against a trader
 func (h *ReportHandler) CreateReport(c *fiber.Ctx) error {
 	userID, ok := middleware.GetUserIDFromContext(c)
 	if !ok {
@@ -305,12 +305,12 @@ func (h *ReportHandler) GetUserReports(c *fiber.Ctx) error {
 	return c.JSON(models.APIResponse{
 		Success: true,
 		Data: fiber.Map{
-			"total":          totalReports,
-			"inappropriate":  inappropriateCount,
-			"counterfeit":    counterfeitCount,
-			"spam":           spamCount,
-			"scam":           scamCount,
-			"is_flagged":     totalReports > 0,
+			"total":         totalReports,
+			"inappropriate": inappropriateCount,
+			"counterfeit":   counterfeitCount,
+			"spam":          spamCount,
+			"scam":          scamCount,
+			"is_flagged":    totalReports > 0,
 		},
 	})
 }

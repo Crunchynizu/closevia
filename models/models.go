@@ -522,7 +522,7 @@ type SellerStats struct {
 	CompletedTrades int     `json:"completed_trades,omitempty"`
 }
 
-// Report represents a user report against another trader
+// Report represents a trader report for policy violations
 type Report struct {
 	ID              int       `json:"id"`
 	ReporterID      int       `json:"reporter_id"`
@@ -536,13 +536,13 @@ type Report struct {
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 
-	// Related data
+	// Related data for context
 	Reporter     *User    `json:"reporter,omitempty"`
 	ReportedUser *User    `json:"reported_user,omitempty"`
 	Product      *Product `json:"product,omitempty"`
 }
 
-// ReportCreate represents data for creating a report
+// ReportCreate represents payload for submitting a new trader report
 type ReportCreate struct {
 	ReportedUserID int    `json:"reported_user_id" validate:"required"`
 	ProductID      *int   `json:"product_id,omitempty"`
@@ -550,7 +550,7 @@ type ReportCreate struct {
 	Description    string `json:"description" validate:"required,min=10,max=1000"`
 }
 
-// ReportUpdate represents data for updating a report (admin only)
+// ReportUpdate represents data for updating report status (admin use only)
 type ReportUpdate struct {
 	Status          string `json:"status" validate:"required,oneof=pending reviewed dismissed resolved"`
 	ReviewerComment string `json:"reviewer_comment,omitempty"`

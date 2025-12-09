@@ -200,13 +200,13 @@ func main() {
 	notifs.Put("/:id/read", middleware.AuthMiddleware(), notificationHandler.MarkAsRead)
 	notifs.Put("/read-all", middleware.AuthMiddleware(), notificationHandler.MarkAllAsRead)
 
-	// Report routes
+	// Report routes for trader violations and policy enforcement
 	reports := api.Group("/reports")
-	reports.Post("/", middleware.AuthMiddleware(), reportHandler.CreateReport)
-	reports.Get("/", middleware.AuthMiddleware(), middleware.AdminMiddleware(), reportHandler.GetReports)
-	reports.Get("/:id", middleware.AuthMiddleware(), middleware.AdminMiddleware(), reportHandler.GetReportByID)
-	reports.Put("/:id", middleware.AuthMiddleware(), middleware.AdminMiddleware(), reportHandler.UpdateReport)
-	reports.Get("/user/:id", reportHandler.GetUserReports) // Public route to check if user is flagged
+	reports.Post("/", middleware.AuthMiddleware(), reportHandler.CreateReport)                                  // Submit new report
+	reports.Get("/", middleware.AuthMiddleware(), middleware.AdminMiddleware(), reportHandler.GetReports)       // Admin: list all reports
+	reports.Get("/:id", middleware.AuthMiddleware(), middleware.AdminMiddleware(), reportHandler.GetReportByID) // Admin: view report
+	reports.Put("/:id", middleware.AuthMiddleware(), middleware.AdminMiddleware(), reportHandler.UpdateReport)  // Admin: update status
+	reports.Get("/user/:id", reportHandler.GetUserReports)                                                      // Public: check if user flagged
 
 	// Admin routes
 	admin := api.Group("/admin")
