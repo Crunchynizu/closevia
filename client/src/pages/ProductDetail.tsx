@@ -33,6 +33,8 @@ import {
   Input,
   Tooltip,
   Grid,
+  Select,
+  Textarea,
 } from '@chakra-ui/react'
 import { 
   FiHeart, 
@@ -48,7 +50,7 @@ import {
 import { FaHandshake } from 'react-icons/fa'
 import { useAuth } from '../contexts/AuthContext'
 import { useProducts } from '../contexts/ProductContext'
-import { Product, User } from '../types'
+import { Product } from '../types'
 import { api } from '../services/api'
 import { getFirstImage, getImageUrl } from '../utils/imageUtils';
 import { getProductUrl } from '../utils/productUtils'
@@ -56,7 +58,6 @@ import TradeModal from '../components/TradeModal'
 import CounterfeitWarning from '../components/CounterfeitWarning'
 import ProximityBadge from '../components/ProximityBadge'
 import ResponseMetricsBadge from '../components/ResponseMetricsBadge'
-import FloatingTab from '../components/FloatingTab'
 import axios from 'axios';
 import { ChevronUpIcon, ChevronDownIcon, CloseIcon, StarIcon } from '@chakra-ui/icons'
 
@@ -67,7 +68,6 @@ const ProductDetail: React.FC = () => {
   const [product, setProduct] = useState<Product | null>(null)
   const [sellerProducts, setSellerProducts] = useState<Product[]>([])
   const [sellerStats, setSellerStats] = useState<any | null>(null)
-  const [sellerProfile, setSellerProfile] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [purchasing, setPurchasing] = useState(false)
@@ -84,6 +84,10 @@ const ProductDetail: React.FC = () => {
   const [loadingOffers, setLoadingOffers] = useState(false)
   const [offersModalOpen, setOffersModalOpen] = useState(false)
   const [offersSortBy, setOffersSortBy] = useState<'newest' | 'oldest' | 'accepted'>('accepted')
+  const [isReportOpen, setIsReportOpen] = useState(false)
+  const [reportReason, setReportReason] = useState('')
+  const [reportDescription, setReportDescription] = useState('')
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false)
 
   const navigate = useNavigate()
   const toast = useToast()
@@ -115,80 +119,17 @@ const ProductDetail: React.FC = () => {
     const loadSellerStats = async () => {
       if (!product) return
       try {
-        // Use the axios `api` client so requests go to the configured backend
-        // The backend API in this project is prefixed with /api
-        const resp = await api.get(`/api/users/${product.seller_id}/stats`)
-        if (resp && resp.data) {
-          setSellerStats(resp.data.data)
+        const response = await fetch(`/api/users/${product.seller_id}/stats`)
+        if (response.ok) {
+          const data = await response.json()
+          setSellerStats(data.data)
         }
       } catch (err) {
-        // Treat 404 (endpoint missing) as non-fatal and use safe defaults
-        if (axios.isAxiosError(err)) {
-          const status = err.response?.status
-          // eslint-disable-next-line no-console
-          console.debug('Seller stats request failed', { status, url: err.config?.url })
-          if (status === 404) {
-            // Provide sensible defaults so UI shows N/A instead of failing
-            setSellerStats({ avg_rating: null, positive_percent: null, total_trades: 0, avg_response_time: null })
-            return
-          }
-          // For other statuses, log details for debugging
-          // eslint-disable-next-line no-console
-          console.error('Failed to fetch seller stats:', JSON.stringify({
-            message: err.message,
-            status: err.response?.status,
-            url: err.config?.url,
-            data: err.response?.data,
-          }))
-        } else {
-          // eslint-disable-next-line no-console
-          console.error('Failed to fetch seller stats (non-Axios error):', err)
-        }
-        // Fallback defaults to keep UI stable
-        setSellerStats({ avg_rating: null, positive_percent: null, total_trades: 0, avg_response_time: null })
+        // ignore errors for this non-critical UX enhancement
+        console.error('Failed to fetch seller stats:', err)
       }
     }
     loadSellerStats()
-  }, [product])
-
-  // Load seller profile (to display uploaded profile picture)
-  useEffect(() => {
-    const loadSellerProfile = async () => {
-      if (!product) return
-      try {
-        const resp = await api.get(`/api/users/${product.seller_id}`)
-        // Debug: log the raw response for troubleshooting missing profile_picture
-        console.log('🔍 Seller profile response:', resp?.data)
-        const userData = resp.data?.data as User | undefined
-        console.log('🔍 User data extracted:', userData)
-        console.log('🔍 Profile picture value:', userData?.profile_picture)
-        console.log('🔍 Profile picture type:', typeof userData?.profile_picture)
-        
-        if (userData) {
-          // Normalize profile picture URL if it exists and is not empty
-          const profilePic = userData.profile_picture
-          if (profilePic && typeof profilePic === 'string' && profilePic.trim() !== '' && profilePic !== 'undefined') {
-            try {
-              const normalizedUrl = getImageUrl(profilePic)
-              console.log('✅ Profile picture URL:', profilePic, '-> Normalized:', normalizedUrl)
-              userData.profile_picture = normalizedUrl
-            } catch (e) {
-              console.error('❌ Failed to normalize profile picture URL:', e)
-              userData.profile_picture = undefined
-            }
-          } else {
-            console.log('⚠️ No valid profile picture found for user:', product.seller_id, '- Value:', profilePic, '- Type:', typeof profilePic)
-            userData.profile_picture = undefined
-          }
-        }
-        console.log('🔍 Final seller profile state:', userData)
-        setSellerProfile(userData || null)
-      } catch (err) {
-        console.error('❌ Failed to load seller profile', err)
-        setSellerProfile(null)
-      }
-    }
-    loadSellerProfile()
   }, [product])
 
   useEffect(() => {
@@ -379,6 +320,84 @@ const ProductDetail: React.FC = () => {
       setPurchasing(false)
     }
   }
+
+  const handleSubmitReport = async () => {
+    if (!user) {
+      toast({
+        title: 'Authentication required',
+        description: 'Please log in to report this trader',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      })
+      navigate('/login')
+      return
+    }
+
+    if (!product) return
+
+    if (!reportReason.trim()) {
+      toast({
+        title: 'Reason required',
+        description: 'Please select a reason for your report',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+
+    if (reportDescription.trim().length < 10) {
+      toast({
+        title: 'Description too short',
+        description: 'Please provide at least 10 characters of description',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+
+    try {
+      setIsSubmittingReport(true)
+      await api.post('/api/reports', {
+        reported_user_id: product.seller_id,
+        product_id: product.id,
+        reason: reportReason,
+        description: reportDescription,
+      })
+      
+      toast({
+        title: 'Report submitted',
+        description: 'Thank you for helping keep Clovia safe. We will review your report.',
+        status: 'success',
+        duration: 5000,
+        isClosable: true,
+      })
+      
+      // Reset and close modal
+      setReportReason('')
+      setReportDescription('')
+      setIsReportOpen(false)
+    } catch (err: unknown) {
+      let description = 'Failed to submit report';
+      if (axios.isAxiosError(err)) {
+        description = err.response?.data?.error || description;
+      } else if (err instanceof Error) {
+        description = err.message;
+      }
+      toast({
+        title: 'Report failed',
+        description,
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+    } finally {
+      setIsSubmittingReport(false)
+    }
+  }
+
 
   const openTrade = () => {
     if (!user) {
@@ -682,7 +701,7 @@ const ProductDetail: React.FC = () => {
   const canTradeOrPurchase = !isOwner && product.status === 'available'
 
   return (
-    <Box bg="#FFFDF1" minH="100vh" w="100%" pb={{ base: 20, lg: 6 }}>
+    <Box bg="#FFFDF1" minH="100vh" w="100%">
       <Container maxW="container.xl" py={8}>
         <VStack spacing={8} align="stretch"> 
          <Box bg="white" rounded="lg" shadow="sm" overflow="hidden">
@@ -862,6 +881,13 @@ const ProductDetail: React.FC = () => {
                     {product.category && (
                       <Badge colorScheme="purple">{product.category}</Badge>
                     )}
+                    {product.bidding_type && product.bidding_type !== 'none' && (
+                      <Badge 
+                        colorScheme={product.bidding_type === 'blind' ? 'orange' : 'green'}
+                      >
+                        {product.bidding_type === 'blind' ? '🔒 Blind Auction' : '📈 Open Bidding'}
+                      </Badge>
+                    )}
                   </HStack>
                   {product.suggested_value && product.suggested_value > 0 && (
                   <Text mt={2} color="gray.600" fontSize="sm">
@@ -967,6 +993,19 @@ const ProductDetail: React.FC = () => {
                   </>
                 )}
 
+                {/* Report Button - visible to non-owners */}
+                {!isOwner && product.status === 'available' && (
+                  <Button
+                    variant="outline"
+                    colorScheme="red"
+                    size="md"
+                    w="full"
+                    onClick={() => setIsReportOpen(true)}
+                  >
+                    Report this trader
+                  </Button>
+                )}
+
                 {isOwner && (
                   <HStack spacing={4} w="full">
                     <Button
@@ -1040,52 +1079,21 @@ const ProductDetail: React.FC = () => {
             About the Seller
           </Heading>
           <Flex justify="space-between" align="stretch" gap={6}>
-              <HStack spacing={4} flex={1}>
-              {sellerProfile?.profile_picture ? (
-                <Image
-                  src={sellerProfile.profile_picture}
-                  alt={sellerProfile.name || 'Seller'}
-                  w="60px"
-                  h="60px"
-                  borderRadius="full"
-                  objectFit="cover"
-                  flexShrink={0}
-                  fallback={
-                    <Box
-                      w="60px"
-                      h="60px"
-                      rounded="full"
-                      bg="brand.500"
-                      display="flex"
-                      alignItems="center"
-                      justifyContent="center"
-                      flexShrink={0}
-                    >
-                      <Text fontSize="24px" fontWeight="bold" color="white">
-                        {(product.seller_name ?? '?').charAt(0).toUpperCase()}
-                      </Text>
-                    </Box>
-                  }
-                  onError={(e) => {
-                    console.error('Failed to load seller profile image:', sellerProfile.profile_picture)
-                  }}
-                />
-              ) : (
-                <Box
-                  w="60px"
-                  h="60px"
-                  rounded="full"
-                  bg="brand.500"
-                  display="flex"
-                  alignItems="center"
-                  justifyContent="center"
-                  flexShrink={0}
-                >
-                  <Text fontSize="24px" fontWeight="bold" color="white">
-                    {(product.seller_name ?? '?').charAt(0).toUpperCase()}
-                  </Text>
-                </Box>
-              )}
+            <HStack spacing={4} flex={1}>
+              <Box
+                w="60px"
+                h="60px"
+                rounded="full"
+                bg="red.500"
+                display="flex"
+                alignItems="center"
+                justifyContent="center"
+                flexShrink={0}
+              >
+                <Text fontSize="24px" fontWeight="bold" color="white">
+                  {(product.seller_name ?? '?').charAt(0).toUpperCase()}
+                </Text>
+              </Box>
               <Box>
                 <Text
                   as={RouterLink}
@@ -1142,12 +1150,25 @@ const ProductDetail: React.FC = () => {
               </VStack>
             </SimpleGrid>
           </Flex>
+
+          {/* View Dashboard Button - only for non-owners */}
+          {user && user.id !== product.seller_id && (
+            <Button
+              mt={4}
+              colorScheme="brand"
+              variant="outline"
+              w="full"
+              onClick={() => navigate(`/users/${product.seller_id}`)}
+            >
+              View Seller Profile & Dashboard
+            </Button>
+          )}
         </Box>
 
         {/* Seller Products Section */}
         <Box bg="white" p={6} rounded="lg" shadow="sm">
           <Heading size="md" mb={6}>
-            Seller Products
+            Seller Products ({sellerProducts?.length || 0} listings)
           </Heading>
           <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} spacing={4}>
             {sellerProducts && sellerProducts.length > 0 ? (
@@ -1169,7 +1190,7 @@ const ProductDetail: React.FC = () => {
                       w="full"
                       h="full"
                       objectFit="cover"
-                      fallbackSrc="/barter.jpg"
+                      fallbackSrc="/images/placeholder.jpg"
                     />
                     <Badge position="absolute" top={2} right={2} colorScheme={p.status === 'available' ? 'teal' : p.status === 'sold' ? 'red' : 'orange'} fontSize="xs">
                       {p.status}
@@ -1382,9 +1403,72 @@ const ProductDetail: React.FC = () => {
           </ModalBody>
         </ModalContent>
       </Modal>
-      </Container>
 
-      <FloatingTab />
+      {/* Report Modal */}
+      <Modal isOpen={isReportOpen} onClose={() => setIsReportOpen(false)} size="md">
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Report this Trader</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <VStack spacing={4}>
+              <Box w="full">
+                <Text fontWeight="bold" mb={2}>Reason for Report</Text>
+                <Select
+                  value={reportReason}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setReportReason(e.target.value)}
+                  placeholder="Select a reason..."
+                >
+                  <option value="inappropriate">Inappropriate Behavior</option>
+                  <option value="counterfeit">Counterfeit/Fake Product</option>
+                  <option value="spam">Spam</option>
+                  <option value="scam">Scam/Fraud</option>
+                </Select>
+              </Box>
+              <Box w="full">
+                <Text fontWeight="bold" mb={2}>Description</Text>
+                <Textarea
+                  placeholder="Please provide details about your report (minimum 10 characters)..."
+                  value={reportDescription}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setReportDescription(e.target.value)}
+                  minH="120px"
+                />
+                <Text fontSize="xs" color="gray.500" mt={1}>
+                  {reportDescription.length} characters (minimum 10 required)
+                </Text>
+              </Box>
+              <Alert status="info" borderRadius="md">
+                <AlertIcon />
+                <Box>
+                  <Text fontSize="sm">Your report is confidential and will be reviewed by our team. We take all reports seriously.</Text>
+                </Box>
+              </Alert>
+            </VStack>
+          </ModalBody>
+          <ModalBody pt={0}>
+            <HStack spacing={4} w="full">
+              <Button
+                variant="outline"
+                w="full"
+                onClick={() => setIsReportOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                colorScheme="red"
+                w="full"
+                onClick={handleSubmitReport}
+                isLoading={isSubmittingReport}
+                loadingText="Submitting..."
+              >
+                Submit Report
+              </Button>
+            </HStack>
+          </ModalBody>
+        </ModalContent>
+      </Modal>
+
+      </Container>
     </Box>
    )
 }

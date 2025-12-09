@@ -30,7 +30,6 @@ export interface Product {
   image_urls: string[]
   seller_id: number
   seller_name?: string
-  seller_profile_picture?: string
   premium: boolean
   status: 'available' | 'sold' | 'traded' | 'locked'
   allow_buying: boolean
@@ -42,13 +41,14 @@ export interface Product {
   distance?: string // Calculated distance from user (e.g., "1.2km nearby")
   created_at: string
   updated_at: string
-  wishlist_count?: number;
-  counterfeit_confidence?: number;
-  counterfeit_flags?: string[];
+  wishlist_count?: number
+  bidding_type?: 'none' | 'blind' | 'open'
+  counterfeit_confidence?: number
+  counterfeit_flags?: string[]
   // latitude/longitude are declared on Product above; avoid duplicate declarations
-  latitude?: number;
-  longitude?: number;
-  offer_count?: number;
+  latitude?: number
+  longitude?: number
+  offer_count?: number
 
 }
 
@@ -74,6 +74,7 @@ export interface ProductCreate {
   location?: string
   condition: string
   category?: string
+  bidding_type?: string
 }
 
 export interface ProductUpdate {
@@ -87,6 +88,7 @@ export interface ProductUpdate {
   barter_only?: boolean
   location?: string
   condition?: string
+  bidding_type?: string
 }
 
 export interface OrderCreate {
@@ -346,4 +348,34 @@ export interface DeliveryUpdate {
   latitude?: number
   longitude?: number
   estimated_eta?: string
+}
+
+// Report Types
+export interface Report {
+  id: number
+  reporter_id: number
+  reported_user_id: number
+  product_id?: number
+  reason: 'inappropriate' | 'counterfeit' | 'spam' | 'scam'
+  description: string
+  status: 'pending' | 'reviewed' | 'dismissed' | 'resolved'
+  reviewer_id?: number
+  reviewer_comment?: string
+  created_at: string
+  updated_at: string
+  reporter?: User
+  reported_user?: User
+  product?: Product
+}
+
+export interface ReportCreate {
+  reported_user_id: number
+  product_id?: number
+  reason: 'inappropriate' | 'counterfeit' | 'spam' | 'scam'
+  description: string
+}
+
+export interface ReportUpdate {
+  status: 'pending' | 'reviewed' | 'dismissed' | 'resolved'
+  reviewer_comment?: string
 }

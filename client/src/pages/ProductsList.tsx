@@ -18,7 +18,6 @@ import { useProducts } from '../contexts/ProductContext'
 import { getFirstImage } from '../utils/imageUtils'
 import { getProductUrl } from '../utils/productUtils'
 import { formatPHP } from '../utils/currency'
-import FloatingTab from '../components/FloatingTab'
 
 const ProductsList: React.FC = () => {
   const { products, loading, error, searchProducts, clearError } = useProducts()
@@ -93,16 +92,23 @@ const ProductsList: React.FC = () => {
           ) : (
             <Text fontSize="sm" color="green.600" fontWeight="medium">Barter Only</Text>
           )}
-          <Badge colorScheme={p.status === 'available' ? 'green' : p.status === 'traded' ? 'blue' : 'red'}>
-            {p.status}
-          </Badge>
+          <HStack spacing={2}>
+            {p.wishlist_count > 0 && (
+              <Badge colorScheme="purple" variant="subtle" fontSize="xs">
+                ❤️ {p.wishlist_count}
+              </Badge>
+            )}
+            <Badge colorScheme={p.status === 'available' ? 'green' : p.status === 'traded' ? 'blue' : 'red'}>
+              {p.status}
+            </Badge>
+          </HStack>
         </HStack>
       </Box>
     </Box>
   )
 
   return (
-    <Box bg="#FFFDF1" minH="100vh" w="100%" pb={{ base: 20, lg: 6 }}>
+    <Box bg="#FFFDF1" minH="100vh" w="100%">
       <Container maxW="container.xl" py={6}>
         <VStack align="stretch" spacing={4}>
           <HStack justify="space-between" align="center">
@@ -143,8 +149,6 @@ const ProductsList: React.FC = () => {
           )}
         </VStack>
       </Container>
-
-      <FloatingTab />
     </Box>
   )
 }
