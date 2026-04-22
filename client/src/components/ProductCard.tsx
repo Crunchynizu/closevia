@@ -230,17 +230,23 @@ const ProductCard: React.FC<ProductCardProps> = ({
                   {product.price && product.price > 0
                     ? `₱${formatPriceCompact(product.price)}`
                     : product.estimated_value_min && product.estimated_value_max
-                      ? `₱${formatPriceCompact(product.estimated_value_min)} – ₱${formatPriceCompact(product.estimated_value_max)}`
+                      ? product.estimated_value_min === product.estimated_value_max
+                        ? `₱${formatPriceCompact(product.estimated_value_min)}`
+                        : `₱${formatPriceCompact(product.estimated_value_min)} – ₱${formatPriceCompact(product.estimated_value_max)}`
                       : 'Price Unavailable'}
                 </Text>
                 {product.price && product.price > 0 && product.estimated_value_min && product.estimated_value_max && (
                   <Text display={{ base: 'none', sm: 'block' }} fontSize="2xs" color={useColorModeValue('brand.600', 'brand.300')} lineHeight="1.25" mt={0.5} fontWeight="700" whiteSpace="nowrap">
-                    📊 Market Est. ₱{formatPriceUltraCompact(product.estimated_value_min)} – ₱{formatPriceUltraCompact(product.estimated_value_max)}
+                    📊 Market Est. {product.estimated_value_min === product.estimated_value_max
+                      ? `₱${formatPriceUltraCompact(product.estimated_value_min)}`
+                      : `₱${formatPriceUltraCompact(product.estimated_value_min)} – ₱${formatPriceUltraCompact(product.estimated_value_max)}`}
                   </Text>
                 )}
                 {product.price && product.price > 0 && product.estimated_value_min && product.estimated_value_max && (
                   <Text display={{ base: 'block', sm: 'none' }} fontSize="2xs" color={useColorModeValue('brand.600', 'brand.300')} lineHeight="1.2" mt={0.5} fontWeight="700" whiteSpace="nowrap">
-                    📊 Est. ₱{formatPriceUltraCompact(product.estimated_value_min)}-₱{formatPriceUltraCompact(product.estimated_value_max)}
+                    📊 Est. {product.estimated_value_min === product.estimated_value_max
+                      ? `₱${formatPriceUltraCompact(product.estimated_value_min)}`
+                      : `₱${formatPriceUltraCompact(product.estimated_value_min)}-₱${formatPriceUltraCompact(product.estimated_value_max)}`}
                   </Text>
                 )}
                 {(!product.price || product.price <= 0) && product.estimated_value_min && product.estimated_value_max && (

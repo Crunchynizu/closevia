@@ -75,6 +75,7 @@ import FloatingTab from '../components/FloatingTab'
 import VerifiedAvatar from '../components/VerifiedAvatar'
 import MediaGallery from '../components/MediaGallery'
 import TrustScoreCard from '../components/TrustScoreCard'
+import { formatEstimatedValueRange } from '../utils/currency'
 import axios from 'axios';
 import { CloseIcon } from '@chakra-ui/icons'
 
@@ -2271,7 +2272,7 @@ const ProductDetail: React.FC = () => {
                     </Text>
                     <Text fontWeight="800" fontSize="xl" color="gray.800" mt={1}>
                       {product.estimated_value_min && product.estimated_value_max
-                        ? `₱${(product.estimated_value_min).toLocaleString()}–₱${(product.estimated_value_max).toLocaleString()}`
+                        ? formatEstimatedValueRange(product.estimated_value_min, product.estimated_value_max)
                         : product.price && product.price > 0
                           ? `₱${product.price.toFixed(2)}`
                           : 'Est. Value Unavailable'}

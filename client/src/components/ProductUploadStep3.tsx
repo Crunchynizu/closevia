@@ -24,6 +24,7 @@ import {
 } from '@chakra-ui/react'
 import { ArrowBackIcon, CheckCircleIcon } from '@chakra-ui/icons'
 import { MdCheckCircle } from 'react-icons/md'
+import { formatEstimatedValueRange } from '../utils/currency'
 
 interface ReviewProduct {
   images: string[]
@@ -183,7 +184,7 @@ const ProductUploadStep3: React.FC<ProductUploadStep3Props> = ({
                 <Skeleton height="36px" borderRadius="md" speed={0.8} />
               ) : aiReliable ? (
                 <Heading fontSize="3xl" fontWeight="800">
-                  ₱{(aiMin || 0).toLocaleString()} – ₱{(aiMax || 0).toLocaleString()}
+                  {formatEstimatedValueRange(aiMin, aiMax)}
                 </Heading>
               ) : (
                 <Heading fontSize="3xl" fontWeight="800">

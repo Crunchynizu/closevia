@@ -1133,6 +1133,7 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
   const [uploadingChatPhoto, setUploadingChatPhoto] = useState(false)
   const chatPhotoInputRef = useRef<HTMLInputElement>(null)
   const [requestedProduct, setRequestedProduct] = useState<Product | null>(null)
+  const [requestedProducts, setRequestedProducts] = useState<Product[]>([])
   const [offeredProducts, setOfferedProducts] = useState<Product[]>([])
   const [loadingProducts, setLoadingProducts] = useState(false)
   const [selectedLocation, setSelectedLocation] = useState<string | null>(null)
@@ -1828,8 +1829,18 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
 
     try {
       setLoadingProducts(true)
-      const requested = await getProduct(trade.target_product_id)
-      setRequestedProduct(requested)
+      const sellerItems = (trade.items || []).filter((item: any) => {
+        const ob = (item?.offered_by ?? item?.offeredBy ?? '').toLowerCase()
+        return ob === 'seller' || ob === 'from_seller'
+      })
+      const requestedIds = Array.from(new Set([
+        Number(trade.target_product_id || 0),
+        ...sellerItems.map((item: any) => Number(item.product_id)).filter((pid: number) => Number.isFinite(pid) && pid > 0),
+      ].filter((pid) => pid > 0)))
+      const requestedResults = await Promise.all(requestedIds.map((pid: number) => getProduct(pid)))
+      const requestedResolved = requestedResults.filter(Boolean) as Product[]
+      setRequestedProducts(requestedResolved)
+      setRequestedProduct(requestedResolved[0] || null)
 
       // Only show items offered by the buyer (offered_by === 'buyer') in the "offered" column.
       // Some trades may store seller counter-offer items with offered_by === 'seller' G�� keep them separate.
@@ -2995,10 +3006,40 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
                                         : 'Requested'}
                                 </Badge>
                                 <Text fontSize="sm" color="gray.600">
-                                  ({isUserSeller ? "Your Item" : (isUserBuyer ? tradingPartner + "'s Item" : "Seller's Item")})
+                                  ({isUserSeller ? "Your Item" : (isUserBuyer ? tradingPartner + `'s ${requestedProducts.length > 1 ? 'Items' : 'Item'}` : `Seller's ${requestedProducts.length > 1 ? 'Items' : 'Item'}`)})
                                 </Text>
                               </HStack>
-                              {requestedProduct ? (
+                              {requestedProducts.length > 1 ? (
+                                <SimpleGrid columns={2} spacing={3} w="full" flex={1}>
+                                  {requestedProducts.map((product) => (
+                                    <VStack key={`requested-${product.id}`} spacing={2} align="stretch" h="full">
+                                      <Box w="full" bg="gray.50" borderRadius="md" overflow="hidden" aspectRatio="1" display="flex" alignItems="center" justifyContent="center">
+                                        <OptimizedImage
+                                          src={getFirstImage(product.image_urls)}
+                                          alt={product.title}
+                                          displayWidth="full"
+                                          displayHeight="100%"
+                                          objectFit="contain"
+                                          borderRadius="md"
+                                          fallbackSrc="/no-image.svg"
+                                          width={400}
+                                        />
+                                      </Box>
+                                      <Box flex={1}>
+                                        <Text fontWeight="600" fontSize="sm" color="gray.800" noOfLines={2}>
+                                          {product.title}
+                                        </Text>
+                                        <Badge bg="yellow.100" color="yellow.700" borderRadius="md" px={2} py={0.5} fontSize="10px" fontWeight="600" mt={2} mb={1}>
+                                          â‚±{Number(product.price || product.estimated_value_min || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </Badge>
+                                        <Text fontSize="xs" fontWeight="500" color="gray.500" noOfLines={3} mt={1}>
+                                          {product.description}
+                                        </Text>
+                                      </Box>
+                                    </VStack>
+                                  ))}
+                                </SimpleGrid>
+                              ) : requestedProduct ? (
                                 <>
                                   <Box w="full" bg="gray.50" borderRadius="md" overflow="hidden" aspectRatio="1" display="flex" alignItems="center" justifyContent="center">
                                     <OptimizedImage

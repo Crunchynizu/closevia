@@ -2480,11 +2480,23 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 			return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to unlock products"})
 		}
 
+		reciprocalTradeID, err := h.findReciprocalTradeForTradeTx(tx, tradeID, []string{"pending", "accepted", "accepted_by_one", "active", "awaiting_confirmation", "awaiting_other_party"})
+		if err != nil {
+			_ = tx.Rollback()
+			return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to locate reciprocal trade"})
+		}
+
 		// Update trade status
 		_, err = tx.Exec("UPDATE trades SET status='declined', updated_at=CURRENT_TIMESTAMP WHERE id = ?", tradeID)
 		if err != nil {
 			_ = tx.Rollback()
 			return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to decline trade"})
+		}
+		if reciprocalTradeID > 0 {
+			if _, err := tx.Exec("UPDATE trades SET status='declined', updated_at=CURRENT_TIMESTAMP WHERE id = ?", reciprocalTradeID); err != nil {
+				_ = tx.Rollback()
+				return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to decline reciprocal trade"})
+			}
 		}
 
 		// Check if this trade had a pending multi-way chain before we cancel it,
@@ -2662,6 +2674,55 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 			return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to update trade offer"})
 		}
 
+		autoConfirmed := false
+		if tradeOption == "meetup" {
+			reverseTradeID, reciprocalMatch, err := h.findExactReciprocalTradeTx(tx, tradeID, buyerID, sellerID, targetProductID, payload.OfferedProductIDs, payload.OfferedCashAmount, meetingType)
+			if err != nil {
+				_ = tx.Rollback()
+				return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to verify reciprocal trade match"})
+			}
+			if reciprocalMatch {
+				confirmedPIDs := uniquePositiveInts([]int{targetProductID, payload.OfferedProductIDs[0]})
+				if err := h.ensureProductsTradeableTx(tx, confirmedPIDs); err != nil {
+					_ = tx.Rollback()
+					return c.Status(409).JSON(models.APIResponse{Success: false, Error: err.Error()})
+				}
+				if _, err := tx.Exec(`
+					UPDATE trades
+					SET status = 'active',
+					    buyer_accepted = TRUE,
+					    seller_accepted = TRUE,
+					    updated_at = CURRENT_TIMESTAMP
+					WHERE id IN (?, ?)
+				`, tradeID, reverseTradeID); err != nil {
+					_ = tx.Rollback()
+					return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to auto-confirm reciprocal trade"})
+				}
+				if err := h.setProductStatusForTrade(tx, tradeID, "in_trade"); err != nil {
+					_ = tx.Rollback()
+					return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to lock products for reciprocal trade"})
+				}
+				if _, err := tx.Exec(`
+					UPDATE trades t
+					LEFT JOIN trade_items ti ON ti.trade_id = t.id
+					SET t.status='cancelled_due_to_conflict',
+					    t.cancellation_reason='Product committed to another trade',
+					    t.cancelled_by=?,
+					    t.cancelled_at=NOW(),
+					    t.buyer_accepted=FALSE,
+					    t.seller_accepted=FALSE,
+					    t.updated_at=CURRENT_TIMESTAMP
+					WHERE t.id NOT IN (?, ?)
+					  AND t.status IN ('pending','countered','pending_multiway','accepted','accepted_by_one')
+					  AND (t.target_product_id IN (?, ?) OR ti.product_id IN (?, ?))
+				`, userID, tradeID, reverseTradeID, confirmedPIDs[0], confirmedPIDs[1], confirmedPIDs[0], confirmedPIDs[1]); err != nil {
+					_ = tx.Rollback()
+					return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to clear conflicting trades"})
+				}
+				autoConfirmed = true
+			}
+		}
+
 		if err := tx.Commit(); err != nil {
 			_ = tx.Rollback()
 			return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to save trade changes"})
@@ -2700,11 +2761,19 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 			sellerEditMessage = fmt.Sprintf("%s removed %s from the offer for %s.", buyerName, summarizeTradeItemChanges(removedTitles), productTitle)
 		}
 
-		publishToUser(buyerID, sseEvent{Type: "trade_updated", Data: fiber.Map{"trade_id": tradeID, "status": "pending", "edited": true}})
-		publishToUser(sellerID, sseEvent{Type: "trade_updated", Data: fiber.Map{"trade_id": tradeID, "status": "pending", "edited": true}})
-		_, _ = h.db.Exec("INSERT INTO notifications (user_id, type, message, is_read) VALUES (?, 'trade_update', ?, FALSE)", sellerID, sellerEditMessage)
-		_, _ = h.db.Exec("INSERT INTO notifications (user_id, type, message, is_read) VALUES (?, 'trade_update', ?, FALSE)", buyerID, "Your offer changes were saved: "+productTitle)
-		_, _ = h.db.Exec("INSERT INTO trade_events (trade_id, actor_id, from_status, to_status, note) VALUES (?, ?, ?, ?, ?)", tradeID, userID, currentStatus, currentStatus, "Offer edited")
+		if autoConfirmed {
+			publishToUser(buyerID, sseEvent{Type: "trade_updated", Data: fiber.Map{"trade_id": tradeID, "status": "active", "auto_confirmed": true}})
+			publishToUser(sellerID, sseEvent{Type: "trade_updated", Data: fiber.Map{"trade_id": tradeID, "status": "active", "auto_confirmed": true}})
+			_, _ = h.db.Exec("INSERT INTO notifications (user_id, type, message, is_read) VALUES (?, 'trade_update', ?, FALSE)", buyerID, "Your updated offer matched an exact reverse offer and is now ongoing: "+productTitle)
+			_, _ = h.db.Exec("INSERT INTO notifications (user_id, type, message, is_read) VALUES (?, 'trade_update', ?, FALSE)", sellerID, "A reciprocal match was found after the offer update. Your trade is now ongoing: "+productTitle)
+			_, _ = h.db.Exec("INSERT INTO trade_events (trade_id, actor_id, from_status, to_status, note) VALUES (?, ?, ?, 'active', ?)", tradeID, userID, currentStatus, "Offer edited and auto-confirmed")
+		} else {
+			publishToUser(buyerID, sseEvent{Type: "trade_updated", Data: fiber.Map{"trade_id": tradeID, "status": "pending", "edited": true}})
+			publishToUser(sellerID, sseEvent{Type: "trade_updated", Data: fiber.Map{"trade_id": tradeID, "status": "pending", "edited": true}})
+			_, _ = h.db.Exec("INSERT INTO notifications (user_id, type, message, is_read) VALUES (?, 'trade_update', ?, FALSE)", sellerID, sellerEditMessage)
+			_, _ = h.db.Exec("INSERT INTO notifications (user_id, type, message, is_read) VALUES (?, 'trade_update', ?, FALSE)", buyerID, "Your offer changes were saved: "+productTitle)
+			_, _ = h.db.Exec("INSERT INTO trade_events (trade_id, actor_id, from_status, to_status, note) VALUES (?, ?, ?, ?, ?)", tradeID, userID, currentStatus, currentStatus, "Offer edited")
+		}
 	case "counter":
 		if err := validateOptionalWholePesoAmount(payload.CounterOfferedCashAmount); err != nil {
 			return c.Status(400).JSON(models.APIResponse{Success: false, Error: err.Error()})
@@ -2824,12 +2893,23 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 		}
 
 		column := "buyer_completed"
+		reciprocalColumn := "seller_completed"
 		if userID == sellerID {
 			column = "seller_completed"
+			reciprocalColumn = "buyer_completed"
 		}
 		log.Printf("Setting %s=TRUE for trade %d", column, tradeID)
 		_, err = h.db.Exec("UPDATE trades SET "+column+"=TRUE, updated_at=CURRENT_TIMESTAMP WHERE id = ?", tradeID)
 		if err == nil {
+			tx, txErr := h.db.Begin()
+			if txErr == nil {
+				reciprocalTradeID, reciprocalErr := h.findReciprocalTradeForTradeTx(tx, tradeID, []string{"active", "awaiting_other_party", "awaiting_confirmation"})
+				if reciprocalErr == nil && reciprocalTradeID > 0 {
+					_, _ = tx.Exec("UPDATE trades SET "+reciprocalColumn+"=TRUE, updated_at=CURRENT_TIMESTAMP WHERE id = ?", reciprocalTradeID)
+					_, _ = tx.Exec("UPDATE trades SET status='awaiting_other_party', updated_at=CURRENT_TIMESTAMP WHERE id = ? AND status = 'active'", reciprocalTradeID)
+				}
+				_ = tx.Commit()
+			}
 			log.Printf("Updated %s=TRUE for trade %d", column, tradeID)
 			var bc, sc bool
 			_ = h.db.QueryRow("SELECT buyer_completed, seller_completed FROM trades WHERE id = ?", tradeID).Scan(&bc, &sc)
@@ -2884,6 +2964,13 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 			return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to unlock products"})
 		}
 
+		reciprocalTradeID, err := h.findReciprocalTradeForTradeTx(tx, tradeID, []string{"pending", "accepted", "accepted_by_one", "active", "awaiting_confirmation", "awaiting_other_party"})
+		if err != nil {
+			_ = tx.Rollback()
+			log.Printf("[Cancel Trade] Failed to locate reciprocal trade: %v", err)
+			return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to locate reciprocal trade"})
+		}
+
 		// Update trade status with cancellation metadata
 		// Try with all columns first, fall back to status-only if columns don't exist
 		_, err = tx.Exec(`
@@ -2913,6 +3000,32 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 				_ = tx.Rollback()
 				log.Printf("[Cancel Trade] Fallback update also failed: %v", err)
 				return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to cancel trade: " + err.Error()})
+			}
+		}
+		if reciprocalTradeID > 0 {
+			if _, err := tx.Exec(`
+				UPDATE trades
+				SET status='cancelled',
+				    cancellation_reason = ?,
+				    cancelled_by = ?,
+				    cancelled_at = CURRENT_TIMESTAMP,
+				    cancelled_while_active = ?,
+				    updated_at = CURRENT_TIMESTAMP
+				WHERE id = ?
+			`, reason, userID, wasActive, reciprocalTradeID); err != nil {
+				if strings.Contains(err.Error(), "Unknown column") {
+					if _, err = tx.Exec(`
+						UPDATE trades
+						SET status='cancelled', updated_at = CURRENT_TIMESTAMP
+						WHERE id = ?
+					`, reciprocalTradeID); err != nil {
+						_ = tx.Rollback()
+						return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to cancel reciprocal trade: " + err.Error()})
+					}
+				} else {
+					_ = tx.Rollback()
+					return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to cancel reciprocal trade: " + err.Error()})
+				}
 			}
 		}
 
@@ -3236,6 +3349,25 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 			log.Printf("Delivery state payload missing action field")
 			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Missing action in delivery state payload"})
 		}
+		if deliveryPayload.DeliveryType != "" {
+			normalizedType := strings.ToLower(strings.TrimSpace(deliveryPayload.DeliveryType))
+			if normalizedType != "standard" && normalizedType != "express" {
+				return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Invalid delivery_type. Must be 'standard' or 'express'"})
+			}
+			deliveryPayload.DeliveryType = normalizedType
+		}
+		if deliveryPayload.BuyerConfirmedReceipt != nil && userID != buyerID {
+			return c.Status(403).JSON(models.APIResponse{Success: false, Error: "Only the buyer can confirm receipt"})
+		}
+		if deliveryPayload.SellerConfirmedDelivery != nil && userID != sellerID {
+			return c.Status(403).JSON(models.APIResponse{Success: false, Error: "Only the seller can confirm delivery"})
+		}
+		if deliveryPayload.PaymentConfirmed != nil && userID != sellerID {
+			return c.Status(403).JSON(models.APIResponse{Success: false, Error: "Only the seller can confirm payment"})
+		}
+		if deliveryPayload.ProofOfDelivery != "" && userID != sellerID {
+			return c.Status(403).JSON(models.APIResponse{Success: false, Error: "Only the seller can submit proof of delivery"})
+		}
 
 		// Process delivery state fields
 		if deliveryPayload.DeliveryType != "" {
@@ -3306,10 +3438,7 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 		// If delivery type was updated on the trade, propagate it to any pending/unclaimed delivery jobs
 		// created for this trade. Rider pages read from `deliveries.delivery_type`.
 		if deliveryPayload.DeliveryType != "" {
-			newType := strings.ToLower(strings.TrimSpace(deliveryPayload.DeliveryType))
-			if newType != "standard" && newType != "express" {
-				return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Invalid delivery_type. Must be 'standard' or 'express'"})
-			}
+			newType := deliveryPayload.DeliveryType
 
 			newCost := 30.0
 			if newType == "express" {
@@ -3518,16 +3647,8 @@ func (h *TradeHandler) completeTradeTransaction(tradeID int) error {
 		return fmt.Errorf("trade was already completed by another process")
 	}
 
-	// For MUTUAL TRADES: also complete the paired trade record
-	// Find the reverse/paired trade where roles are swapped
-	var pairedTradeID int
-	err = tx.QueryRow(`
-		SELECT id FROM trades
-		WHERE buyer_id = ? AND seller_id = ? 
-		AND status IN ('pending', 'accepted', 'active', 'awaiting_confirmation')
-		LIMIT 1
-	`, sellerID, buyerID).Scan(&pairedTradeID)
-
+	// For reciprocal one-item trades, also complete the exact mirrored trade record.
+	pairedTradeID, err := h.findReciprocalTradeForTradeTx(tx, tradeID, []string{"pending", "accepted", "active", "awaiting_confirmation", "awaiting_other_party"})
 	if err == nil && pairedTradeID > 0 && pairedTradeID != tradeID {
 		// Found a paired mutual trade - complete it too
 		log.Printf("[MUTUAL TRADE COMPLETE] Completing paired trade %d alongside trade %d", pairedTradeID, tradeID)
@@ -4836,15 +4957,8 @@ func (h *TradeHandler) CompleteTrade(c *fiber.Ctx) error {
 			return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to update trade completion"})
 		}
 
-		// 2. Identify and update paired mutual trade (if it exists as a separate record)
-		var pairedTradeID int
-		_ = tx.QueryRow(`
-			SELECT id FROM trades
-			WHERE (buyer_id = ? AND seller_id = ?) 
-			AND id != ?
-			AND status IN ('pending', 'accepted', 'active', 'awaiting_confirmation')
-			LIMIT 1
-		`, sellerID, buyerID, tradeID).Scan(&pairedTradeID)
+		// 2. Identify and update the exact mirrored reciprocal trade, if one exists.
+		pairedTradeID, _ := h.findReciprocalTradeForTradeTx(tx, tradeID, []string{"pending", "accepted", "active", "awaiting_confirmation", "awaiting_other_party"})
 
 		if pairedTradeID > 0 {
 			log.Printf("[INSTANT COMPLETE] Also updating paired mutual trade %d", pairedTradeID)
@@ -5145,6 +5259,106 @@ func (h *TradeHandler) ensureProductsTradeableTx(tx *sql.Tx, productIDs []int) e
 		}
 	}
 	return nil
+}
+
+func buildInClausePlaceholders(count int) string {
+	if count <= 0 {
+		return ""
+	}
+	placeholders := make([]string, count)
+	for i := range placeholders {
+		placeholders[i] = "?"
+	}
+	return strings.Join(placeholders, ",")
+}
+
+func (h *TradeHandler) getBuyerOfferedProductIDsTx(tx *sql.Tx, tradeID int) ([]int, error) {
+	rows, err := tx.Query(`
+		SELECT product_id
+		FROM trade_items
+		WHERE trade_id = ? AND offered_by = 'buyer'
+		ORDER BY id ASC
+	`, tradeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	productIDs := []int{}
+	for rows.Next() {
+		var pid int
+		if err := rows.Scan(&pid); err != nil {
+			return nil, err
+		}
+		if pid > 0 {
+			productIDs = append(productIDs, pid)
+		}
+	}
+	return productIDs, nil
+}
+
+func (h *TradeHandler) findReciprocalTradeForTradeTx(tx *sql.Tx, tradeID int, allowedStatuses []string) (int, error) {
+	if len(allowedStatuses) == 0 {
+		return 0, nil
+	}
+
+	var buyerID, sellerID, targetProductID int
+	var offeredCash float64
+	var meetingType string
+	if err := tx.QueryRow(`
+		SELECT buyer_id, seller_id, target_product_id,
+		       COALESCE(offered_cash_amount, 0),
+		       COALESCE(meeting_type, 'meetup')
+		FROM trades
+		WHERE id = ?
+		FOR UPDATE
+	`, tradeID).Scan(&buyerID, &sellerID, &targetProductID, &offeredCash, &meetingType); err != nil {
+		return 0, err
+	}
+
+	offeredProductIDs, err := h.getBuyerOfferedProductIDsTx(tx, tradeID)
+	if err != nil {
+		return 0, err
+	}
+	if len(offeredProductIDs) != 1 {
+		return 0, nil
+	}
+
+	statusPlaceholders := buildInClausePlaceholders(len(allowedStatuses))
+	args := []interface{}{tradeID, sellerID, buyerID, offeredProductIDs[0], offeredCash, meetingType, targetProductID}
+	for _, status := range allowedStatuses {
+		args = append(args, status)
+	}
+
+	var reciprocalTradeID int
+	err = tx.QueryRow(fmt.Sprintf(`
+		SELECT t.id
+		FROM trades t
+		JOIN trade_items ti ON ti.trade_id = t.id
+		WHERE t.id <> ?
+		  AND t.buyer_id = ?
+		  AND t.seller_id = ?
+		  AND t.target_product_id = ?
+		  AND COALESCE(t.offered_cash_amount, 0) = ?
+		  AND COALESCE(t.meeting_type, 'meetup') = ?
+		  AND ti.offered_by = 'buyer'
+		  AND ti.product_id = ?
+		  AND t.status IN (%s)
+		GROUP BY t.id
+		HAVING COUNT(ti.id) = 1
+		LIMIT 1
+		FOR UPDATE
+	`, statusPlaceholders), args...).Scan(&reciprocalTradeID)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if reciprocalTradeID == tradeID {
+		return 0, nil
+	}
+	return reciprocalTradeID, nil
 }
 
 func (h *TradeHandler) findExactReciprocalTradeTx(tx *sql.Tx, tradeID, buyerID, sellerID, targetProductID int, offeredProductIDs []int, offeredCash *float64, meetingType string) (int, bool, error) {
