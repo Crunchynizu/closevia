@@ -870,6 +870,19 @@ func normalizeOfferProductIDs(values []int) ([]int, error) {
 	return normalized, nil
 }
 
+func normalizeAdditionalTargetProductIDs(primaryTargetID int, values []int) ([]int, error) {
+	normalized := uniquePositiveInts(values)
+	if len(normalized) != len(values) {
+		return nil, fmt.Errorf("Additional target items must be valid and cannot contain duplicates")
+	}
+	for _, pid := range normalized {
+		if pid == primaryTargetID {
+			return nil, fmt.Errorf("Additional target items cannot include the primary target product")
+		}
+	}
+	return normalized, nil
+}
+
 func validateOptionalWholePesoAmount(amount *float64) error {
 	if amount == nil {
 		return nil
@@ -1039,6 +1052,11 @@ func (h *TradeHandler) CreateTrade(c *fiber.Ctx) error {
 		return c.Status(400).JSON(models.APIResponse{Success: false, Error: err.Error()})
 	}
 	payload.OfferedProductIDs = normalizedOfferIDs
+	normalizedAdditionalTargetIDs, err := normalizeAdditionalTargetProductIDs(payload.TargetProductID, payload.AdditionalTargetProductIDs)
+	if err != nil {
+		return c.Status(400).JSON(models.APIResponse{Success: false, Error: err.Error()})
+	}
+	payload.AdditionalTargetProductIDs = normalizedAdditionalTargetIDs
 	if payload.TargetProductID <= 0 {
 		return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Invalid target product ID"})
 	}
@@ -1218,11 +1236,35 @@ func (h *TradeHandler) CreateTrade(c *fiber.Ctx) error {
 		}
 	}
 
+	// Insert additional target products as seller-side trade items (multi-target bundle).
+	// These rows must exist before any auto-confirm/conflict logic runs so every
+	// requested seller product is locked and protected as part of the same trade.
+	for _, pid := range payload.AdditionalTargetProductIDs {
+		var addStatus string
+		var addSellerID int
+		if err := tx.QueryRow("SELECT status, seller_id FROM products WHERE id = ? FOR UPDATE", pid).Scan(&addStatus, &addSellerID); err != nil {
+			_ = tx.Rollback()
+			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Additional target product not found"})
+		}
+		if addSellerID != sellerID {
+			_ = tx.Rollback()
+			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "All target products must belong to the same seller"})
+		}
+		if addStatus != "available" {
+			_ = tx.Rollback()
+			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "One of the additional target products is no longer available"})
+		}
+		if _, err := tx.Exec("INSERT INTO trade_items (trade_id, product_id, offered_by) VALUES (?, ?, 'seller')", tradeID, pid); err != nil {
+			_ = tx.Rollback()
+			return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to attach additional target items"})
+		}
+	}
+
 	autoConfirmed := false
 	reverseTradeID := 0
 	reverseMeetingMismatchTradeID := 0
 	reverseMeetingMismatchType := ""
-	if isPeerToPeerTrade && payload.TradeOption == "meetup" {
+	if isPeerToPeerTrade && payload.TradeOption == "meetup" && len(payload.AdditionalTargetProductIDs) == 0 {
 		meetingType := strings.TrimSpace(payload.MeetingType)
 		if meetingType == "" {
 			meetingType = "meetup"
@@ -1233,7 +1275,17 @@ func (h *TradeHandler) CreateTrade(c *fiber.Ctx) error {
 			return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to verify reciprocal trade match"})
 		}
 		if autoConfirmed {
-			combinedProductIDs := uniquePositiveInts([]int{payload.TargetProductID, payload.OfferedProductIDs[0]})
+			combinedProductIDs, err := h.getTradeProductIDsTx(tx, tradeID)
+			if err != nil {
+				_ = tx.Rollback()
+				return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to load trade products"})
+			}
+			reverseProductIDs, err := h.getTradeProductIDsTx(tx, reverseTradeID)
+			if err != nil {
+				_ = tx.Rollback()
+				return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to load reciprocal trade products"})
+			}
+			combinedProductIDs = uniquePositiveInts(append(combinedProductIDs, reverseProductIDs...))
 			if err := h.ensureProductsTradeableTx(tx, combinedProductIDs); err != nil {
 				_ = tx.Rollback()
 				return c.Status(409).JSON(models.APIResponse{Success: false, Error: err.Error()})
@@ -1256,7 +1308,16 @@ func (h *TradeHandler) CreateTrade(c *fiber.Ctx) error {
 				return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to lock products for reciprocal trade"})
 			}
 
-			if _, err := tx.Exec(`
+			placeholders := strings.TrimSuffix(strings.Repeat("?,", len(combinedProductIDs)), ",")
+			conflictArgs := make([]interface{}, 0, 3+len(combinedProductIDs)*2)
+			conflictArgs = append(conflictArgs, userID, tradeID, reverseTradeID)
+			for _, pid := range combinedProductIDs {
+				conflictArgs = append(conflictArgs, pid)
+			}
+			for _, pid := range combinedProductIDs {
+				conflictArgs = append(conflictArgs, pid)
+			}
+			if _, err := tx.Exec(fmt.Sprintf(`
 				UPDATE trades t
 				LEFT JOIN trade_items ti ON ti.trade_id = t.id
 				SET t.status='cancelled_due_to_conflict',
@@ -1268,8 +1329,8 @@ func (h *TradeHandler) CreateTrade(c *fiber.Ctx) error {
 				    t.updated_at=CURRENT_TIMESTAMP
 				WHERE t.id NOT IN (?, ?)
 				  AND t.status IN ('pending','countered','pending_multiway','accepted','accepted_by_one')
-				  AND (t.target_product_id IN (?, ?) OR ti.product_id IN (?, ?))
-			`, userID, tradeID, reverseTradeID, combinedProductIDs[0], combinedProductIDs[1], combinedProductIDs[0], combinedProductIDs[1]); err != nil {
+				  AND (t.target_product_id IN (%s) OR ti.product_id IN (%s))
+			`, placeholders, placeholders), conflictArgs...); err != nil {
 				_ = tx.Rollback()
 				return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to clear conflicting trades"})
 			}
@@ -1280,31 +1341,6 @@ func (h *TradeHandler) CreateTrade(c *fiber.Ctx) error {
 				_ = tx.Rollback()
 				return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to verify reciprocal trade method mismatch"})
 			}
-		}
-	}
-
-	// Insert additional target products as seller-side trade items (multi-target bundle)
-	for _, pid := range payload.AdditionalTargetProductIDs {
-		if pid == payload.TargetProductID {
-			continue // skip duplicate of primary target
-		}
-		var addStatus string
-		var addSellerID int
-		if err := tx.QueryRow("SELECT status, seller_id FROM products WHERE id = ?", pid).Scan(&addStatus, &addSellerID); err != nil {
-			_ = tx.Rollback()
-			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Additional target product not found"})
-		}
-		if addSellerID != sellerID {
-			_ = tx.Rollback()
-			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "All target products must belong to the same seller"})
-		}
-		if addStatus != "available" {
-			_ = tx.Rollback()
-			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "One of the additional target products is no longer available"})
-		}
-		if _, err := tx.Exec("INSERT INTO trade_items (trade_id, product_id, offered_by) VALUES (?, ?, 'seller')", tradeID, pid); err != nil {
-			_ = tx.Rollback()
-			return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to attach additional target items"})
 		}
 	}
 

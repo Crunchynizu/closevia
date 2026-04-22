@@ -107,46 +107,19 @@ const Offers: React.FC = () => {
     return productTitles.get(productId) || 'Unnamed Item'
   }
 
-  const getRequestedItems = (trade: Trade) => {
-    const requested: Array<{ id: number; title?: string }> = []
-    const seen = new Set<number>()
-
-    if (trade.target_product_id && !seen.has(trade.target_product_id)) {
-      seen.add(trade.target_product_id)
-      requested.push({ id: trade.target_product_id, title: trade.product_title })
-    }
-
-    ;(trade.items || []).forEach((item: any) => {
-      const offeredBy = (item?.offered_by ?? item?.offeredBy ?? item?.sender ?? item?.from_user_role)
-      const role = typeof offeredBy === 'string' ? offeredBy.toLowerCase().trim() : ''
-      if (role !== 'seller' && role !== 'from_seller') return
-      const pid = Number(item.product_id ?? item.productId)
-      if (!Number.isFinite(pid) || pid <= 0 || seen.has(pid)) return
-      seen.add(pid)
-      requested.push({ id: pid, title: item.product_title ?? item.productTitle })
+  const getSellerRequestedItems = (trade: Trade) => {
+    return (trade.items || []).filter((item: any) => {
+      const offeredBy = (item?.offered_by ?? item?.offeredBy ?? '').toLowerCase()
+      return offeredBy === 'seller'
     })
-
-    return requested
   }
 
-  const getTradeDisplayTitle = (trade: Trade) => {
-    const requested = getRequestedItems(trade)
-    if (requested.length === 0) {
-      return getProductTitle(trade.target_product_id, trade.product_title)
-    }
+  const getRequestedBundleCount = (trade: Trade) => 1 + getSellerRequestedItems(trade).length
 
-    const firstTitle = getProductTitle(requested[0].id, requested[0].title)
-    if (requested.length === 1) return firstTitle
-    return `${firstTitle} + ${requested.length - 1} more`
-  }
-
-  const getTradeDisplaySubtitle = (trade: Trade) => {
-    const requested = getRequestedItems(trade)
-    if (requested.length <= 1) return ''
-    return requested
-      .slice(1, 3)
-      .map((item) => getProductTitle(item.id, item.title))
-      .join(', ')
+  const getRequestedBundleTitle = (trade: Trade) => {
+    const count = getRequestedBundleCount(trade)
+    const title = getProductTitle(trade.target_product_id, trade.product_title)
+    return count > 1 ? `${title} + ${count - 1} more` : title
   }
 
   useEffect(() => { 
@@ -754,12 +727,12 @@ const Offers: React.FC = () => {
               {/* Product Title */}
               <Box w="100%">
                 <Text fontWeight="600" fontSize="sm" noOfLines={2} color="gray.800">
-                  {getTradeDisplayTitle(trade)}
+                  {getRequestedBundleTitle(trade)}
                 </Text>
-                {getTradeDisplaySubtitle(trade) && (
-                  <Text fontSize="10px" color="gray.500" noOfLines={1}>
-                    Also includes: {getTradeDisplaySubtitle(trade)}
-                  </Text>
+                {getRequestedBundleCount(trade) > 1 && (
+                  <Badge colorScheme="blue" variant="subtle" fontSize="9px" mt={1}>
+                    {getRequestedBundleCount(trade)} requested items
+                  </Badge>
                 )}
               </Box>
 
@@ -1158,9 +1131,11 @@ const Offers: React.FC = () => {
 
                             {/* Product title and trade option */}
                             <VStack align="start" spacing={0.5} flex="1" overflow="hidden" mb={1}>
-                              <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getTradeDisplayTitle(t)}</Text>
-                              {getTradeDisplaySubtitle(t) && (
-                                <Text fontSize="9px" color="gray.500" noOfLines={1}>Also includes: {getTradeDisplaySubtitle(t)}</Text>
+                              <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getRequestedBundleTitle(t)}</Text>
+                              {getRequestedBundleCount(t) > 1 && (
+                                <Badge colorScheme="blue" variant="subtle" fontSize="8px" px={1} py={0}>
+                                  {getRequestedBundleCount(t)} requested items
+                                </Badge>
                               )}
                               {t.trade_option && (
                                 <Badge 
@@ -1286,9 +1261,11 @@ const Offers: React.FC = () => {
 
                           {/* Product title and trade option */}
                           <VStack align="start" spacing={0.5} flex="1" overflow="hidden" mb={1}>
-                            <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getTradeDisplayTitle(t)}</Text>
-                            {getTradeDisplaySubtitle(t) && (
-                              <Text fontSize="9px" color="gray.500" noOfLines={1}>Also includes: {getTradeDisplaySubtitle(t)}</Text>
+                            <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getRequestedBundleTitle(t)}</Text>
+                            {getRequestedBundleCount(t) > 1 && (
+                              <Badge colorScheme="blue" variant="subtle" fontSize="8px" px={1} py={0}>
+                                {getRequestedBundleCount(t)} requested items
+                              </Badge>
                             )}
                             {t.trade_option && (
                               <Badge 
@@ -1421,9 +1398,11 @@ const Offers: React.FC = () => {
 
                       {/* Product title and trade option */}
                       <VStack align="start" spacing={0.5} flex="1" overflow="hidden" mb={1}>
-                        <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getTradeDisplayTitle(t)}</Text>
-                        {getTradeDisplaySubtitle(t) && (
-                          <Text fontSize="9px" color="gray.500" noOfLines={1}>Also includes: {getTradeDisplaySubtitle(t)}</Text>
+                        <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getRequestedBundleTitle(t)}</Text>
+                        {getRequestedBundleCount(t) > 1 && (
+                          <Badge colorScheme="blue" variant="subtle" fontSize="8px" px={1} py={0}>
+                            {getRequestedBundleCount(t)} requested items
+                          </Badge>
                         )}
                         {t.trade_option && (
                           <Badge 
@@ -1546,7 +1525,12 @@ const Offers: React.FC = () => {
 
                       {/* Product title and trade option */}
                       <VStack align="start" spacing={0.5} flex="1" overflow="hidden" mb={1}>
-                        <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getTradeDisplayTitle(t)}</Text>
+                        <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getRequestedBundleTitle(t)}</Text>
+                        {getRequestedBundleCount(t) > 1 && (
+                          <Badge colorScheme="blue" variant="subtle" fontSize="8px" px={1} py={0}>
+                            {getRequestedBundleCount(t)} requested items
+                          </Badge>
+                        )}
                         {t.trade_option && (
                           <Badge 
                             colorScheme={t.trade_option === 'meetup' ? (t?.meeting_type === 'pickup' ? 'orange' : 'blue') : t.trade_option === 'delivery' ? 'green' : 'purple'}
@@ -1627,7 +1611,12 @@ const Offers: React.FC = () => {
                   >
                     <HStack justify="space-between" align="start" spacing={2}>
                       <VStack align="start" spacing={0.5} flex="1" overflow="hidden">
-                        <Text fontWeight="semibold" color="gray.800" fontSize="sm" noOfLines={1}>{getTradeDisplayTitle(t)}</Text>
+                        <Text fontWeight="semibold" color="gray.800" fontSize="sm" noOfLines={1}>{getRequestedBundleTitle(t)}</Text>
+                        {getRequestedBundleCount(t) > 1 && (
+                          <Badge colorScheme="blue" variant="subtle" fontSize="8px" px={1} py={0}>
+                            {getRequestedBundleCount(t)} requested items
+                          </Badge>
+                        )}
                         <Text fontSize="10px" color="gray.600" noOfLines={1}>Buyer: {(t.buyer_name || 'User').substring(0, 15)} • Trader: {(t.seller_name || 'User').substring(0, 15)}</Text>
                         <Text fontSize="9px" color="gray.400">Source: {t.source}</Text>
                       </VStack>
@@ -1663,7 +1652,12 @@ const Offers: React.FC = () => {
                   >
                     <HStack justify="space-between" align="start" spacing={2}>
                       <VStack align="start" spacing={0.5} flex="1" overflow="hidden">
-                        <Text fontWeight="semibold" color="gray.800" fontSize="sm" noOfLines={1}>{getTradeDisplayTitle(t)}</Text>
+                        <Text fontWeight="semibold" color="gray.800" fontSize="sm" noOfLines={1}>{getRequestedBundleTitle(t)}</Text>
+                        {getRequestedBundleCount(t) > 1 && (
+                          <Badge colorScheme="blue" variant="subtle" fontSize="8px" px={1} py={0}>
+                            {getRequestedBundleCount(t)} requested items
+                          </Badge>
+                        )}
                         <Text fontSize="10px" color="gray.600" noOfLines={1}>Buyer: {(t.buyer_name || 'User').substring(0, 15)} • Trader: {(t.seller_name || 'User').substring(0, 15)}</Text>
                         <Text fontSize="9px" color="red.400">Expired due to 7 days of inactivity</Text>
                       </VStack>
@@ -1723,7 +1717,7 @@ const Offers: React.FC = () => {
                   </Text>
                   {tradeToCancel && (
                     <Text fontSize="xs" color="gray.500" mt={2}>
-                      Product: {getTradeDisplayTitle(tradeToCancel)}
+                      Product: {getRequestedBundleTitle(tradeToCancel)}
                     </Text>
                   )}
                 </VStack>
@@ -1775,7 +1769,7 @@ const Offers: React.FC = () => {
                   </Text>
                   {tradeToDecline && (
                     <Text fontSize="xs" color="gray.500" mt={1}>
-                      Product: {getTradeDisplayTitle(tradeToDecline)}
+                      Product: {getRequestedBundleTitle(tradeToDecline)}
                     </Text>
                   )}
                 </VStack>

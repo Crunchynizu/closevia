@@ -485,6 +485,23 @@ const Dashboard: React.FC = () => {
     return productTitles.get(productId) || 'Unnamed Item'
   }
 
+  const getSellerRequestedItems = useCallback((trade: Trade) => {
+    return (trade.items || []).filter((item: any) => {
+      const offeredBy = (item?.offered_by ?? item?.offeredBy ?? '').toLowerCase()
+      return offeredBy === 'seller'
+    })
+  }, [])
+
+  const getRequestedBundleCount = useCallback((trade: Trade) => {
+    return 1 + getSellerRequestedItems(trade).length
+  }, [getSellerRequestedItems])
+
+  const getRequestedBundleTitle = useCallback((trade: Trade) => {
+    const count = getRequestedBundleCount(trade)
+    const title = getProductTitle(trade.target_product_id, trade.product_title)
+    return count > 1 ? `${title} + ${count - 1} more` : title
+  }, [getProductTitle, getRequestedBundleCount])
+
   const getTradeReceivedTitle = useCallback((trade: Trade): string => {
     if (trade.items && trade.items.length > 0) {
       return getProductTitle(Number(trade.items[0].product_id), trade.items[0].product_title)
@@ -2721,18 +2738,23 @@ const Dashboard: React.FC = () => {
           >
             <ProductThumb
               pid={trade.target_product_id}
-              alt={getProductTitle(trade.target_product_id, trade.product_title)}
+              alt={getRequestedBundleTitle(trade)}
               size="100%"
             />
           </Box>
           <VStack align="start" spacing={0} flex={1} minW={0}>
             <Text fontWeight="semibold" noOfLines={1} fontSize={{ base: 'sm', md: 'md' }}>
-              {getProductTitle(trade.target_product_id, trade.product_title)}
+              {getRequestedBundleTitle(trade)}
             </Text>
             <HStack spacing={2} mt={1} flexWrap="wrap">
               <Badge colorScheme={statusColor} variant="subtle" fontSize="2xs" px={1.5} py={0.5}>
                 {trade.status}
               </Badge>
+              {getRequestedBundleCount(trade) > 1 && (
+                <Badge colorScheme="blue" variant="subtle" fontSize="2xs" px={1.5} py={0.5}>
+                  {getRequestedBundleCount(trade)} requested items
+                </Badge>
+              )}
               <Text fontSize="xs" color="gray.600" noOfLines={1}>from {userName}</Text>
               {trade.created_at && (
                 <Text fontSize="xs" color="gray.500">
@@ -2881,8 +2903,10 @@ const Dashboard: React.FC = () => {
       if (!ob) return true
       return ob === 'buyer' || ob === 'from_buyer' || ob === 'sender'
     })
+    const requestedItems = getSellerRequestedItems(trade)
+    const requestedCount = 1 + requestedItems.length
 
-    const leftLabel = isIncoming ? 'Your Item' : 'Their Item'
+    const leftLabel = isIncoming ? 'Your Items' : 'Their Items'
     const rightLabel = isIncoming ? 'Their Items' : 'Your Items'
 
     const getOngoingStatusBadge = () => {
@@ -2937,13 +2961,25 @@ const Dashboard: React.FC = () => {
           bg="white"
         >
           <Box position="relative" w="full" h={{ base: '120px', md: '140px' }} display="flex" gap={1} p={2} bg="gray.50" flexWrap="nowrap" alignContent="flex-start" overflow="hidden">
-            {/* Your Item - Always flex=1 */}
-            <Box flex={1} position="relative" borderRadius="xl" overflow="hidden" minW="0" shadow="sm">
-              <ProductThumb
-                pid={trade.target_product_id}
-                alt={getProductTitle(trade.target_product_id, trade.product_title)}
-                size="100%"
-              />
+            {/* Requested seller items: primary target plus optional multi-product bundle items */}
+            <Box flex={1} display="flex" gap={1} minW="0" position="relative">
+              {[{ product_id: trade.target_product_id, product_title: trade.product_title, product_image_url: trade.product_image_url }, ...requestedItems].slice(0, 3).map((item: any, idx: number) => (
+                <Box key={`requested-${item.product_id || idx}`} flex={1} position="relative" borderRadius="xl" overflow="hidden" minW="0" shadow="sm">
+                  <ProductThumb
+                    pid={Number(item.product_id)}
+                    src={item.product_image_url}
+                    alt={getProductTitle(Number(item.product_id), item.product_title)}
+                    size="100%"
+                  />
+                  {idx === 2 && requestedCount > 3 && (
+                    <Box position="absolute" inset={0} bg="blackAlpha.600" display="flex" alignItems="center" justifyContent="center">
+                      <Text fontSize="xs" color="white" fontWeight="bold">
+                        +{requestedCount - 3}
+                      </Text>
+                    </Box>
+                  )}
+                </Box>
+              ))}
               <Badge position="absolute" top={1} left={1} bg={isIncoming ? 'blue.500' : 'brand.500'} color="white" fontSize="9px" fontWeight="700" px={2} py={0.5} borderRadius="md" shadow="sm">
                 {leftLabel}
               </Badge>
@@ -3006,7 +3042,7 @@ const Dashboard: React.FC = () => {
 
               <Box>
                 <Heading fontSize="md" fontWeight="700" color="gray.800" noOfLines={2} lineHeight="1.3" letterSpacing="tight">
-                  {getProductTitle(trade.target_product_id, trade.product_title)}
+                  {getRequestedBundleTitle(trade)}
                 </Heading>
               </Box>
 
@@ -3108,7 +3144,7 @@ const Dashboard: React.FC = () => {
         }}
         transition="all 0.2s ease"
         role="article"
-        aria-label={`Offer for ${getProductTitle(trade.target_product_id, trade.product_title)}`}
+        aria-label={`Offer for ${getRequestedBundleTitle(trade)}`}
       >
         {/* Image Section - Fixed Height */}
         <Box
@@ -3125,16 +3161,21 @@ const Dashboard: React.FC = () => {
           <ProductThumb
             pid={trade.target_product_id}
             src={trade.product_image_url}
-            alt={getProductTitle(trade.target_product_id, trade.product_title)}
+            alt={getRequestedBundleTitle(trade)}
             size="full"
           />
+          {getRequestedBundleCount(trade) > 1 && (
+            <Badge position="absolute" top={2} right={2} colorScheme="blue" fontSize="10px" borderRadius="md">
+              {getRequestedBundleCount(trade)} items
+            </Badge>
+          )}
         </Box>
 
         {/* Info Section */}
         <Box p={2} flex="1" display="flex" flexDirection="column" justifyContent="space-between">
           <Box>
             <Heading size="xs" noOfLines={1} fontSize="13px" lineHeight="1.3" mb={1} fontWeight="600">
-              {getProductTitle(trade.target_product_id, trade.product_title)}
+              {getRequestedBundleTitle(trade)}
             </Heading>
             <HStack spacing={0.5} fontSize="10px">
               <Avatar
@@ -4814,14 +4855,19 @@ const Dashboard: React.FC = () => {
                                       >
                                         <ProductThumb
                                           pid={trade.target_product_id}
-                                          alt={getProductTitle(trade.target_product_id, trade.product_title)}
+                                          alt={getRequestedBundleTitle(trade)}
                                           size="100%"
                                         />
                                       </Box>
                                       <VStack align="start" spacing={0} flex={1} minW={0}>
                                         <Text fontWeight="semibold" noOfLines={1} fontSize={{ base: 'sm', md: 'md' }}>
-                                          {getProductTitle(trade.target_product_id, trade.product_title)}
+                                          {getRequestedBundleTitle(trade)}
                                         </Text>
+                                        {getRequestedBundleCount(trade) > 1 && (
+                                          <Badge colorScheme="blue" variant="subtle" fontSize="2xs" px={1.5} py={0.5}>
+                                            {getRequestedBundleCount(trade)} requested items
+                                          </Badge>
+                                        )}
                                         <Text fontSize="xs" color="gray.600">{userName}</Text>
                                       </VStack>
                                       <Badge colorScheme="green" variant="subtle" fontSize="2xs" px={2} py={1}>
@@ -6105,7 +6151,7 @@ const Dashboard: React.FC = () => {
                     </Text>
                     {tradeToCancel && (
                       <Text fontSize="xs" color="gray.500" mt={2}>
-                        Product: {getProductTitle(tradeToCancel.target_product_id, tradeToCancel.product_title)}
+                        Product: {getRequestedBundleTitle(tradeToCancel)}
                       </Text>
                     )}
                   </VStack>
@@ -6158,7 +6204,7 @@ const Dashboard: React.FC = () => {
                     </Text>
                     {tradeToDecline && (
                       <Text fontSize="xs" color="gray.500" mt={1}>
-                        Product: {getProductTitle(tradeToDecline.target_product_id, tradeToDecline.product_title)}
+                        Product: {getRequestedBundleTitle(tradeToDecline)}
                       </Text>
                     )}
                   </VStack>
