@@ -22,6 +22,7 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
   const { getProduct } = useProducts()
   const { user } = useAuth()
   const [requestedProducts, setRequestedProducts] = useState<Product[]>([])
+  const [additionalRequested, setAdditionalRequested] = useState<Product[]>([])
   const [offered, setOffered] = useState<Product[]>([])
   const [loading, setLoading] = useState(false)
   const [counterOpen, setCounterOpen] = useState(false)
@@ -171,7 +172,26 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
         setOffered(placeholders)
       }
     }
-  }, [isOpen, effectiveTrade, activeOfferItems, requestedItemIds, requestedTradeItems])
+
+    // Instant placeholders for additional seller-side target products (multi-target mode)
+    const sellerSideItems = (effectiveTrade.items || []).filter((i: any) => {
+      const ob = (i?.offered_by ?? i?.offeredBy ?? '').toLowerCase()
+      return ob === 'seller'
+    })
+    if (sellerSideItems.length > 0) {
+      const sellerPlaceholders = sellerSideItems.map((item: any) => {
+        const pid = item.product_id ?? item.productId
+        const pTitle = item.product_title ?? item.productTitle ?? ''
+        const pImg = item.product_image_url ?? item.productImageUrl ?? ''
+        return buildPlaceholderProduct(Number(pid), pTitle, pImg)
+      }).filter((p: Product) => p.id > 0)
+      if (sellerPlaceholders.length > 0) {
+        setAdditionalRequested(sellerPlaceholders)
+      }
+    } else {
+      setAdditionalRequested([])
+    }
+  }, [isOpen, effectiveTrade, activeOfferItems])
 
   // Then fetch full product details in background (upgrades placeholder data)
   useEffect(() => {
@@ -187,6 +207,21 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
           if (p) details.push(p)
         }
         setOffered(details)
+
+        // Fetch full details for additional seller-side target products (multi-target mode)
+        const sellerSideItems = (effectiveTrade.items || []).filter((i: any) => {
+          const ob = (i?.offered_by ?? i?.offeredBy ?? '').toLowerCase()
+          return ob === 'seller'
+        })
+        const sellerDetails: Product[] = []
+        for (const item of sellerSideItems) {
+          const pid = item.product_id ?? (item as any).productId
+          if (pid && Number(pid) !== effectiveTrade.target_product_id) {
+            const p = await getProduct(Number(pid))
+            if (p) sellerDetails.push(p)
+          }
+        }
+        setAdditionalRequested(sellerDetails)
       } finally {
         setLoading(false)
       }
@@ -650,6 +685,14 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
                       <Text fontSize="11px" color="gray.500">Loading...</Text>
                     </Box>
                   ) : (
+                    <VStack spacing={1.5} align="stretch" h="100%">
+                      {[requested, ...additionalRequested].filter(Boolean).map((p) => (
+                        <Box key={`req-${p!.id}`} borderWidth="1px" borderColor="gray.200" borderRadius="md" overflow="hidden" bg="gray.50" display="flex" flexDirection="column">
+                          {renderProductCard(p!, { compact: true })}
+                        </Box>
+                      ))}
+                      {!requested && <Box p={2}><Text fontSize="11px" color="gray.500">No item</Text></Box>}
+                    </VStack>
                     <VStack spacing={1.5} align="stretch" h="100%">
                       {requestedProducts.map((product) => (
                         <Box key={`requested-${product.id}`} h="100%">
