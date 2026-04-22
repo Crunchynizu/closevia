@@ -56,6 +56,18 @@ func isImageUploadPath(path string) bool {
 	}
 }
 
+func localUploadPathFromRequest(path string) (string, bool) {
+	cleanPath := filepath.Clean(strings.TrimPrefix(path, "/"))
+	if cleanPath == "." || cleanPath == "" {
+		return "", false
+	}
+	uploadRoot := filepath.Clean("uploads")
+	if cleanPath != uploadRoot && !strings.HasPrefix(cleanPath, uploadRoot+string(filepath.Separator)) {
+		return "", false
+	}
+	return cleanPath, true
+}
+
 func sendMissingUploadPlaceholder(c *fiber.Ctx) error {
 	c.Set("Content-Type", "image/svg+xml")
 	c.Set("Cache-Control", "public, max-age=300")
@@ -195,8 +207,9 @@ func main() {
 		return c.Next()
 	})
 
-	// Serve static files (uploads directory)
-	app.Use("/uploads/products", func(c *fiber.Ctx) error {
+	// Serve static files (uploads directory). If a previously stored image file
+	// is missing from disk, return a lightweight placeholder instead of a 404.
+	app.Use("/uploads", func(c *fiber.Ctx) error {
 		if c.Method() != fiber.MethodGet && c.Method() != fiber.MethodHead {
 			return c.Next()
 		}
@@ -204,19 +217,17 @@ func main() {
 		if !isImageUploadPath(path) {
 			return c.Next()
 		}
-		filename := filepath.Base(path)
-		if filename == "." || filename == string(filepath.Separator) || filename == "" {
+		localPath, ok := localUploadPathFromRequest(path)
+		if !ok {
 			return c.Next()
 		}
-		localPath := filepath.Join("uploads", "products", filename)
 		if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
 			return c.Next()
 		}
-		log.Printf("Missing product upload %s; serving placeholder", path)
+		log.Printf("Missing upload image %s; serving placeholder", path)
 		return sendMissingUploadPlaceholder(c)
 	})
 	app.Static("/uploads", "./uploads")
-	app.Static("/uploads/products", "./uploads/products")
 
 	// Serve React build files with cache headers
 	app.Static("/", "./client/dist")

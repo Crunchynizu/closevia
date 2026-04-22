@@ -107,6 +107,21 @@ const Offers: React.FC = () => {
     return productTitles.get(productId) || 'Unnamed Item'
   }
 
+  const getSellerRequestedItems = (trade: Trade) => {
+    return (trade.items || []).filter((item: any) => {
+      const offeredBy = (item?.offered_by ?? item?.offeredBy ?? '').toLowerCase()
+      return offeredBy === 'seller'
+    })
+  }
+
+  const getRequestedBundleCount = (trade: Trade) => 1 + getSellerRequestedItems(trade).length
+
+  const getRequestedBundleTitle = (trade: Trade) => {
+    const count = getRequestedBundleCount(trade)
+    const title = getProductTitle(trade.target_product_id, trade.product_title)
+    return count > 1 ? `${title} + ${count - 1} more` : title
+  }
+
   useEffect(() => { 
     fetchAll()
     // Get current user ID from localStorage or API
@@ -712,8 +727,13 @@ const Offers: React.FC = () => {
               {/* Product Title */}
               <Box w="100%">
                 <Text fontWeight="600" fontSize="sm" noOfLines={2} color="gray.800">
-                  {getProductTitle(trade.target_product_id, trade.product_title)}
+                  {getRequestedBundleTitle(trade)}
                 </Text>
+                {getRequestedBundleCount(trade) > 1 && (
+                  <Badge colorScheme="blue" variant="subtle" fontSize="9px" mt={1}>
+                    {getRequestedBundleCount(trade)} requested items
+                  </Badge>
+                )}
               </Box>
 
               {/* Trade Option Badge */}
@@ -1111,7 +1131,12 @@ const Offers: React.FC = () => {
 
                             {/* Product title and trade option */}
                             <VStack align="start" spacing={0.5} flex="1" overflow="hidden" mb={1}>
-                              <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getProductTitle(t.target_product_id, t.product_title)}</Text>
+                              <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getRequestedBundleTitle(t)}</Text>
+                              {getRequestedBundleCount(t) > 1 && (
+                                <Badge colorScheme="blue" variant="subtle" fontSize="8px" px={1} py={0}>
+                                  {getRequestedBundleCount(t)} requested items
+                                </Badge>
+                              )}
                               {t.trade_option && (
                                 <Badge 
                                   colorScheme={t.trade_option === 'meetup' ? (t?.meeting_type === 'pickup' ? 'orange' : 'blue') : t.trade_option === 'delivery' ? 'green' : 'purple'}
@@ -1236,7 +1261,12 @@ const Offers: React.FC = () => {
 
                           {/* Product title and trade option */}
                           <VStack align="start" spacing={0.5} flex="1" overflow="hidden" mb={1}>
-                            <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getProductTitle(t.target_product_id, t.product_title)}</Text>
+                            <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getRequestedBundleTitle(t)}</Text>
+                            {getRequestedBundleCount(t) > 1 && (
+                              <Badge colorScheme="blue" variant="subtle" fontSize="8px" px={1} py={0}>
+                                {getRequestedBundleCount(t)} requested items
+                              </Badge>
+                            )}
                             {t.trade_option && (
                               <Badge 
                                 colorScheme={t.trade_option === 'meetup' ? (t?.meeting_type === 'pickup' ? 'orange' : 'blue') : t.trade_option === 'delivery' ? 'green' : 'purple'}
@@ -1368,7 +1398,12 @@ const Offers: React.FC = () => {
 
                       {/* Product title and trade option */}
                       <VStack align="start" spacing={0.5} flex="1" overflow="hidden" mb={1}>
-                        <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getProductTitle(t.target_product_id, t.product_title)}</Text>
+                        <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getRequestedBundleTitle(t)}</Text>
+                        {getRequestedBundleCount(t) > 1 && (
+                          <Badge colorScheme="blue" variant="subtle" fontSize="8px" px={1} py={0}>
+                            {getRequestedBundleCount(t)} requested items
+                          </Badge>
+                        )}
                         {t.trade_option && (
                           <Badge 
                             colorScheme={t.trade_option === 'meetup' ? 'blue' : t.trade_option === 'delivery' ? 'green' : 'purple'}
@@ -1490,7 +1525,12 @@ const Offers: React.FC = () => {
 
                       {/* Product title and trade option */}
                       <VStack align="start" spacing={0.5} flex="1" overflow="hidden" mb={1}>
-                        <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getProductTitle(t.target_product_id, t.product_title)}</Text>
+                        <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getRequestedBundleTitle(t)}</Text>
+                        {getRequestedBundleCount(t) > 1 && (
+                          <Badge colorScheme="blue" variant="subtle" fontSize="8px" px={1} py={0}>
+                            {getRequestedBundleCount(t)} requested items
+                          </Badge>
+                        )}
                         {t.trade_option && (
                           <Badge 
                             colorScheme={t.trade_option === 'meetup' ? (t?.meeting_type === 'pickup' ? 'orange' : 'blue') : t.trade_option === 'delivery' ? 'green' : 'purple'}
@@ -1571,7 +1611,12 @@ const Offers: React.FC = () => {
                   >
                     <HStack justify="space-between" align="start" spacing={2}>
                       <VStack align="start" spacing={0.5} flex="1" overflow="hidden">
-                        <Text fontWeight="semibold" color="gray.800" fontSize="sm" noOfLines={1}>{getProductTitle(t.target_product_id, t.product_title)}</Text>
+                        <Text fontWeight="semibold" color="gray.800" fontSize="sm" noOfLines={1}>{getRequestedBundleTitle(t)}</Text>
+                        {getRequestedBundleCount(t) > 1 && (
+                          <Badge colorScheme="blue" variant="subtle" fontSize="8px" px={1} py={0}>
+                            {getRequestedBundleCount(t)} requested items
+                          </Badge>
+                        )}
                         <Text fontSize="10px" color="gray.600" noOfLines={1}>Buyer: {(t.buyer_name || 'User').substring(0, 15)} • Trader: {(t.seller_name || 'User').substring(0, 15)}</Text>
                         <Text fontSize="9px" color="gray.400">Source: {t.source}</Text>
                       </VStack>
@@ -1607,7 +1652,12 @@ const Offers: React.FC = () => {
                   >
                     <HStack justify="space-between" align="start" spacing={2}>
                       <VStack align="start" spacing={0.5} flex="1" overflow="hidden">
-                        <Text fontWeight="semibold" color="gray.800" fontSize="sm" noOfLines={1}>{getProductTitle(t.target_product_id, t.product_title)}</Text>
+                        <Text fontWeight="semibold" color="gray.800" fontSize="sm" noOfLines={1}>{getRequestedBundleTitle(t)}</Text>
+                        {getRequestedBundleCount(t) > 1 && (
+                          <Badge colorScheme="blue" variant="subtle" fontSize="8px" px={1} py={0}>
+                            {getRequestedBundleCount(t)} requested items
+                          </Badge>
+                        )}
                         <Text fontSize="10px" color="gray.600" noOfLines={1}>Buyer: {(t.buyer_name || 'User').substring(0, 15)} • Trader: {(t.seller_name || 'User').substring(0, 15)}</Text>
                         <Text fontSize="9px" color="red.400">Expired due to 7 days of inactivity</Text>
                       </VStack>
@@ -1667,7 +1717,7 @@ const Offers: React.FC = () => {
                   </Text>
                   {tradeToCancel && (
                     <Text fontSize="xs" color="gray.500" mt={2}>
-                      Product: {getProductTitle(tradeToCancel.target_product_id, tradeToCancel.product_title)}
+                      Product: {getRequestedBundleTitle(tradeToCancel)}
                     </Text>
                   )}
                 </VStack>
@@ -1719,7 +1769,7 @@ const Offers: React.FC = () => {
                   </Text>
                   {tradeToDecline && (
                     <Text fontSize="xs" color="gray.500" mt={1}>
-                      Product: {getProductTitle(tradeToDecline.target_product_id, tradeToDecline.product_title)}
+                      Product: {getRequestedBundleTitle(tradeToDecline)}
                     </Text>
                   )}
                 </VStack>

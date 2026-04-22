@@ -3,6 +3,9 @@ import { API_BASE_URL } from '../services/api'
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
 
 const backendUrl = API_BASE_URL.replace(/\/$/, '')
+const LOCAL_IMAGE_FALLBACK = '/no-image.svg'
+const CLIENT_PUBLIC_IMAGE_PREFIXES = ['/assets/', '/images/', '/icons/']
+const CLIENT_PUBLIC_IMAGE_FILES = new Set(['/placeholder.svg', '/no-image.svg'])
 
 const isLoopbackUploadUrl = (url: URL): boolean => {
   return LOOPBACK_HOSTS.has(url.hostname) && url.pathname.startsWith('/uploads/')
@@ -10,19 +13,26 @@ const isLoopbackUploadUrl = (url: URL): boolean => {
 
 export const normalizeImageUrl = (imagePath: string | null | undefined): string => {
   if (!imagePath) return ''
+  const trimmedPath = imagePath.trim()
+  if (!trimmedPath) return ''
 
-  if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+  if (trimmedPath.startsWith('http://') || trimmedPath.startsWith('https://')) {
     try {
-      const url = new URL(imagePath)
+      const url = new URL(trimmedPath)
       if (isLoopbackUploadUrl(url)) {
         return `${backendUrl}${url.pathname}${url.search}${url.hash}`
       }
     } catch {
-      return imagePath
+      return trimmedPath
     }
   }
 
-  return imagePath
+  return trimmedPath
+}
+
+const isClientPublicImagePath = (path: string): boolean => {
+  if (CLIENT_PUBLIC_IMAGE_FILES.has(path)) return true
+  return CLIENT_PUBLIC_IMAGE_PREFIXES.some(prefix => path.startsWith(prefix))
 }
 
 // Cloudinary transformation helper - Build optimized URL with transformations
@@ -94,10 +104,14 @@ export const addCacheBuster = (url: string | null | undefined): string => {
 export const getImageUrl = (imagePath: string | null | undefined, cacheBust: boolean = false, optimize: boolean = false, width: number = 300): string => {
   if (!imagePath) {
     // Use a local static fallback to avoid external network failures
-    return '/placeholder.svg'
+    return LOCAL_IMAGE_FALLBACK
   }
 
   const normalizedPath = normalizeImageUrl(imagePath)
+  if (!normalizedPath) return LOCAL_IMAGE_FALLBACK
+  if (isClientPublicImagePath(normalizedPath)) {
+    return cacheBust ? addCacheBuster(normalizedPath) : normalizedPath
+  }
   
   // If it's already a full URL, optionally optimize if Cloudinary
   if (normalizedPath.startsWith('http://') || normalizedPath.startsWith('https://')) {
@@ -114,7 +128,7 @@ export const getImageUrl = (imagePath: string | null | undefined, cacheBust: boo
 export const getFirstImage = (imageUrls: string[] | null | undefined, optimize: boolean = false, width: number = 300): string => {
   if (!imageUrls || imageUrls.length === 0) {
     // Use a local static fallback to avoid external network failures
-    return '/placeholder.svg'
+    return LOCAL_IMAGE_FALLBACK
   }
   
   return getImageUrl(imageUrls[0], false, optimize, width)
