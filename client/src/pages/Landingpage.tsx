@@ -8,6 +8,7 @@ import {
 } from '@chakra-ui/react'
 import { HamburgerIcon } from '@chakra-ui/icons'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 
 import { FiArrowRight, FiPhone, FiPlay, FiStar, FiRefreshCw, FiShield, FiArrowUpRight, FiTruck, FiDownload } from 'react-icons/fi'
 import { FaHandshake, FaBoxOpen, FaLeaf, FaExchangeAlt } from 'react-icons/fa'
@@ -30,7 +31,7 @@ const C = {
 }
 
 /* ─── Navbar ─── */
-const Navbar = ({ navigate, onGetStarted }: { navigate: ReturnType<typeof useNavigate>; onGetStarted: () => void }) => {
+const Navbar = ({ navigate, onGetStarted, isLoggedIn }: { navigate: ReturnType<typeof useNavigate>; onGetStarted: () => void; isLoggedIn: boolean }) => {
   const { isOpen, onOpen, onClose } = useDisclosure()
 
   const navItems = ['Home', 'About', 'How It Works', 'Features', 'Contact Us']
@@ -92,10 +93,10 @@ const Navbar = ({ navigate, onGetStarted }: { navigate: ReturnType<typeof useNav
             fontWeight="600"
             _hover={{ bg: C.accentDark, transform: 'translateY(-2px)', boxShadow: 'lg' }}
             transition="all 0.3s"
-            onClick={onGetStarted}
+            onClick={isLoggedIn ? () => navigate('/dashboard') : onGetStarted}
             rightIcon={<Icon as={FiArrowUpRight} />}
           >
-            Sign Up
+            {isLoggedIn ? 'Home' : 'Sign Up'}
           </Button>
           <IconButton
             display={{ base: 'flex', md: 'none' }}
@@ -130,8 +131,8 @@ const Navbar = ({ navigate, onGetStarted }: { navigate: ReturnType<typeof useNav
                     {item}
                   </Link>
                 ))}
-                <Button bg={C.accent} color={C.white} w="full" borderRadius="full" onClick={() => { onClose(); onGetStarted() }} fontWeight="600">
-                  Sign Up
+                <Button bg={C.accent} color={C.white} w="full" borderRadius="full" onClick={() => { onClose(); isLoggedIn ? navigate('/dashboard') : onGetStarted() }} fontWeight="600">
+                  {isLoggedIn ? 'Home' : 'Sign Up'}
                 </Button>
               </Stack>
             </DrawerBody>
@@ -286,6 +287,7 @@ const LandingProductCard = ({ image, name, desc }: { image: string; name: string
    ═══════════════════════════════════════════ */
 const LandingPage: React.FC = () => {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const handleGetStarted = () => {
     navigate('/login')
   }
@@ -309,7 +311,7 @@ const LandingPage: React.FC = () => {
       }}
     >
       <style>{`html { scroll-behavior: smooth; scroll-padding-top: 80px; }`}</style>
-      <Navbar navigate={navigate} onGetStarted={handleGetStarted} />
+      <Navbar navigate={navigate} onGetStarted={handleGetStarted} isLoggedIn={!!user} />
 
       {/* ══════════ HERO SECTION ══════════ */}
       <Box

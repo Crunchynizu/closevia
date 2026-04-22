@@ -1,3 +1,5 @@
+//go:build ignore
+
 package main
 
 import (
@@ -13,11 +15,6 @@ import (
 	"github.com/xashathebest/clovia/database"
 	"github.com/xashathebest/clovia/services"
 )
-
-type productRecord struct {
-	ID     int
-	Images []string
-}
 
 func main() {
 	dryRun := flag.Bool("dry-run", true, "preview changes without writing to the database")
