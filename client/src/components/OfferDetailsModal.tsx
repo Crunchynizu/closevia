@@ -686,19 +686,12 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
                     </Box>
                   ) : (
                     <VStack spacing={1.5} align="stretch" h="100%">
-                      {[requested, ...additionalRequested].filter(Boolean).map((p) => (
-                        <Box key={`req-${p!.id}`} borderWidth="1px" borderColor="gray.200" borderRadius="md" overflow="hidden" bg="gray.50" display="flex" flexDirection="column">
-                          {renderProductCard(p!, { compact: true })}
-                        </Box>
-                      ))}
-                      {!requested && <Box p={2}><Text fontSize="11px" color="gray.500">No item</Text></Box>}
-                    </VStack>
-                    <VStack spacing={1.5} align="stretch" h="100%">
                       {requestedProducts.map((product) => (
                         <Box key={`requested-${product.id}`} h="100%">
                           {renderProductCard(product, { compact: true })}
                         </Box>
                       ))}
+                      {requestedProducts.length === 0 && <Box p={2}><Text fontSize="11px" color="gray.500">No item</Text></Box>}
                     </VStack>
                   )}
                 </Box>
