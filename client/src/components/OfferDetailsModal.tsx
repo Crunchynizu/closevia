@@ -21,7 +21,7 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
   const toast = useToast()
   const { getProduct } = useProducts()
   const { user } = useAuth()
-  const [requested, setRequested] = useState<Product | null>(null)
+  const [requestedProducts, setRequestedProducts] = useState<Product[]>([])
   const [additionalRequested, setAdditionalRequested] = useState<Product[]>([])
   const [offered, setOffered] = useState<Product[]>([])
   const [loading, setLoading] = useState(false)
@@ -106,6 +106,15 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
     })
     return filtered
   }, [effectiveTrade, activeOfferRole])
+  const requestedTradeItems = useMemo(() => {
+    const items = (effectiveTrade?.items || []) as Array<any>
+    return items.filter((i: any) => {
+      const offeredBy = (i?.offered_by ?? i?.offeredBy ?? i?.sender ?? i?.from_user_role)
+      if (typeof offeredBy !== 'string') return false
+      const v = offeredBy.toLowerCase().trim()
+      return v === 'seller' || v === 'from_seller'
+    })
+  }, [effectiveTrade])
   const offeredItemIds = useMemo(() => {
     const ids = activeOfferItems.map((i: any) => {
       const pid = (i?.product_id ?? i?.productId)
@@ -115,20 +124,41 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
       .filter((x: any) => typeof x === 'number' && !Number.isNaN(x)) as number[]
     return filtered
   }, [activeOfferItems])
+  const requestedItemIds = useMemo(() => {
+    const ids: number[] = []
+    const seen = new Set<number>()
+    const targetId = Number(effectiveTrade?.target_product_id || 0)
+    if (targetId > 0) {
+      ids.push(targetId)
+      seen.add(targetId)
+    }
+    requestedTradeItems.forEach((item: any) => {
+      const pid = Number(item?.product_id ?? item?.productId)
+      if (pid > 0 && !seen.has(pid)) {
+        seen.add(pid)
+        ids.push(pid)
+      }
+    })
+    return ids
+  }, [effectiveTrade, requestedTradeItems])
+  const requested = requestedProducts[0] || null
 
   // Immediately set placeholder data from trade object (no API call needed)
   useEffect(() => {
     if (!isOpen || !effectiveTrade) return
 
-    // Instant placeholder for requested (target) product
+    // Instant placeholders for requested (target + seller-side bundle) products
     const tradeAny = effectiveTrade as any
     const targetImg = tradeAny.product_image_url || tradeAny.productImageUrl || ''
     const targetTitle = effectiveTrade.product_title || ''
-    if (effectiveTrade.target_product_id) {
-      setRequested(prev => prev?.id === effectiveTrade.target_product_id ? prev :
-        buildPlaceholderProduct(effectiveTrade.target_product_id, targetTitle, targetImg)
-      )
-    }
+    const requestedPlaceholders = requestedItemIds.map((pid) => {
+      if (pid === effectiveTrade.target_product_id) {
+        return buildPlaceholderProduct(pid, targetTitle, targetImg)
+      }
+      const match = requestedTradeItems.find((item: any) => Number(item.product_id ?? item.productId) === pid)
+      return buildPlaceholderProduct(pid, match?.product_title ?? match?.productTitle, match?.product_image_url ?? match?.productImageUrl)
+    })
+    setRequestedProducts(requestedPlaceholders.filter((p) => p.id > 0))
 
     // Instant placeholders for offered items
     if (activeOfferItems.length > 0) {
@@ -169,8 +199,8 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
     ;(async () => {
       try {
         setLoading(true)
-        const req = await getProduct(effectiveTrade.target_product_id)
-        setRequested(req)
+        const requestedDetails = await Promise.all(requestedItemIds.map((pid) => getProduct(pid)))
+        setRequestedProducts(requestedDetails.filter(Boolean) as Product[])
         const details: Product[] = []
         for (const pid of offeredItemIds) {
           const p = await getProduct(pid)
@@ -196,7 +226,7 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
         setLoading(false)
       }
     })()
-  }, [isOpen, effectiveTrade, getProduct, offeredItemIds])
+  }, [isOpen, effectiveTrade, getProduct, offeredItemIds, requestedItemIds])
 
   const accept = async () => {
     if (!effectiveTrade || isAccepting) return
@@ -648,8 +678,8 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
             <Box>
               <Text fontSize="10px" fontWeight="bold" color="gray.700" mb={1.5} textTransform="uppercase">Items</Text>
               <Grid templateColumns={{ base: '1fr', md: '1fr 1fr' }} gap={1.5}>
-                {/* Requested Items (primary + any additional from multi-target mode) */}
-                <Box>
+                {/* Requested Items */}
+                <Box borderWidth="1px" borderColor="gray.200" borderRadius="md" overflow="hidden" bg="gray.50" display="flex" flexDirection="column" h="100%">
                   {loading ? (
                     <Box p={2} textAlign="center">
                       <Text fontSize="11px" color="gray.500">Loading...</Text>
@@ -662,6 +692,13 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
                         </Box>
                       ))}
                       {!requested && <Box p={2}><Text fontSize="11px" color="gray.500">No item</Text></Box>}
+                    </VStack>
+                    <VStack spacing={1.5} align="stretch" h="100%">
+                      {requestedProducts.map((product) => (
+                        <Box key={`requested-${product.id}`} h="100%">
+                          {renderProductCard(product, { compact: true })}
+                        </Box>
+                      ))}
                     </VStack>
                   )}
                 </Box>

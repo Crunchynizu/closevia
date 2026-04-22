@@ -95,6 +95,7 @@ import { prepareImageForAIAnalysis, prepareImageForUpload } from '../utils/image
 import { PRODUCT_CATEGORIES } from '../utils/categories'
 import { checkMultipleImageQuality, getQualityLabel, getQualityColorScheme, type ImageQualityResult as ClientQualityResult } from '../utils/imageQualityChecker'
 import { getBackupPriceEstimate } from '../utils/priceEstimator'
+import { formatEstimatedValueRange } from '../utils/currency'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -2120,7 +2121,7 @@ const AddProduct: React.FC = () => {
                 return estimate ? (
                   <>
                     <Text fontSize="lg" fontWeight="bold" color={aiEstimate ? 'purple.900' : 'orange.700'}>
-                      ₱{Number(estimate.min).toLocaleString()} – ₱{Number(estimate.max).toLocaleString()}
+                      {formatEstimatedValueRange(estimate.min, estimate.max)}
                     </Text>
                     <Text fontSize="10px" color="purple.700" mt={1}>
                       Use this as a guide when setting your asking price.
@@ -2430,7 +2431,7 @@ const AddProduct: React.FC = () => {
             return estimate ? (
               <>
                 <Heading fontSize="2xl" fontWeight="bold" color={aiEstimate ? 'gray.800' : 'orange.700'}>
-                  ₱{Number(estimate.min).toLocaleString()} – ₱{Number(estimate.max).toLocaleString()}
+                  {formatEstimatedValueRange(estimate.min, estimate.max)}
                 </Heading>
                 <Text fontSize="10px" color="gray.500" mt={1}>
                   Use this as a guide when setting your asking price.

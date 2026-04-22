@@ -1835,4 +1835,3 @@ const Offers: React.FC = () => {
 }
 
 export default Offers
-

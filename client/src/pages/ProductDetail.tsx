@@ -75,6 +75,7 @@ import FloatingTab from '../components/FloatingTab'
 import VerifiedAvatar from '../components/VerifiedAvatar'
 import MediaGallery from '../components/MediaGallery'
 import TrustScoreCard from '../components/TrustScoreCard'
+import { formatEstimatedValueRange } from '../utils/currency'
 import axios from 'axios';
 import { CloseIcon } from '@chakra-ui/icons'
 
