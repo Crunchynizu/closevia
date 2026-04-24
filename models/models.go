@@ -201,6 +201,7 @@ type Product struct {
 	SellerID             int               `json:"seller_id"`
 	SellerName           string            `json:"seller_name,omitempty"`
 	SellerProfilePicture string            `json:"seller_profile_picture,omitempty"`
+	SellerPremiumTier    string            `json:"seller_premium_tier,omitempty"`
 	Premium              bool              `json:"premium"`
 	Status               string            `json:"status" validate:"oneof=available sold traded locked suspended deleted"`
 	AllowBuying          bool              `json:"allow_buying"` // Whether buying is allowed
@@ -240,6 +241,8 @@ type Product struct {
 	OfferCount           int               `json:"offer_count"`
 	ViewCount            int               `json:"view_count,omitempty"`
 	BoostedAt            *time.Time        `json:"boosted_at,omitempty"`
+	BoostDurationHours   int               `json:"boost_duration_hours,omitempty"`
+	FeaturedOrder        *int              `json:"featured_order,omitempty"`
 	OrganizationTags     []Organization    `json:"organization_tags,omitempty"` // Tagged organizations
 }
 
@@ -454,17 +457,20 @@ type ReviewSummary struct {
 
 // TradeCreate represents payload to create a trade
 type TradeCreate struct {
-	TargetProductID      int      `json:"target_product_id" validate:"required"`
-	OfferedProductIDs    []int    `json:"offered_product_ids" validate:"omitempty,dive,gt=0"`
-	Message              string   `json:"message"`
-	OfferedCashAmount    *float64 `json:"offered_cash_amount,omitempty"`
-	TradeOption          string   `json:"trade_option" validate:"required,oneof=meetup delivery"`
-	MeetingType          string   `json:"meeting_type" validate:"omitempty,oneof=meetup pickup"`
-	DeliveryAddress      string   `json:"delivery_address,omitempty"`
-	DeliveryType         string   `json:"delivery_type,omitempty" validate:"omitempty,oneof=standard express"`
-	DeliveryInstructions string   `json:"delivery_instructions,omitempty"`
-	PaymentMethod              string `json:"payment_method,omitempty" validate:"omitempty,oneof=cod upfront"`
-	AdditionalTargetProductIDs []int  `json:"additional_target_product_ids,omitempty" validate:"omitempty,dive,gt=0"`
+	TargetProductID            int      `json:"target_product_id" validate:"required"`
+	OfferedProductIDs          []int    `json:"offered_product_ids" validate:"omitempty,dive,gt=0"`
+	Message                    string   `json:"message"`
+	OfferedCashAmount          *float64 `json:"offered_cash_amount,omitempty"`
+	TradeOption                string   `json:"trade_option" validate:"required,oneof=meetup delivery"`
+	MeetingType                string   `json:"meeting_type" validate:"omitempty,oneof=meetup pickup"`
+	DeliveryAddress            string   `json:"delivery_address,omitempty"`
+	DeliveryType               string   `json:"delivery_type,omitempty" validate:"omitempty,oneof=standard express"`
+	DeliveryInstructions       string   `json:"delivery_instructions,omitempty"`
+	PaymentMethod              string   `json:"payment_method,omitempty" validate:"omitempty,oneof=cod upfront"`
+	AdditionalTargetProductIDs []int    `json:"additional_target_product_ids,omitempty" validate:"omitempty,dive,gt=0"`
+	MeetupLocation             string   `json:"meetup_location,omitempty"`
+	MeetupDate                 string   `json:"meetup_date,omitempty"`
+	MeetupTime                 string   `json:"meetup_time,omitempty"`
 }
 
 // TradeAction represents accept/decline/counter actions
@@ -835,24 +841,25 @@ type TrustFactor struct {
 
 // SellerStats represents seller statistics for display on product pages
 type SellerStats struct {
-	UserID           int                 `json:"user_id"`
-	AvgRating        float64             `json:"avg_rating"`
-	PositivePercent  float64             `json:"positive_percent"`
-	TotalTrades      int                 `json:"total_trades"`
-	AvgResponseTime  string              `json:"avg_response_time"`
-	TotalFeedback    int                 `json:"total_feedback"`
-	ResponseMetric   string              `json:"response_metric,omitempty"`   // "excellent", "good", etc.
-	MemberSinceYear  int                 `json:"member_since_year,omitempty"` // Year user joined
-	CompletedTrades  int                 `json:"completed_trades,omitempty"`
-	CancelledTrades  int                 `json:"cancelled_trades,omitempty"`
-	PendingTrades    int                 `json:"pending_trades,omitempty"`
-	TrustScore       int                 `json:"trust_score"`               // 0-100 calculated trust score
-	TrustLevel       string              `json:"trust_level"`               // "trusted", "new", "risky"
-	ReportCount      int                 `json:"report_count"`              // Number of reviewed/resolved reports
-	HasReports       bool                `json:"has_reports"`               // Whether user has been reported
-	TrustFactors     []TrustFactor       `json:"trust_factors,omitempty"`   // Detailed breakdown of trust score
-	ConductSummary   *UserConductSummary `json:"conduct_summary,omitempty"` // Trade quality & conduct grades
-	HasActiveDispute bool                `json:"has_active_dispute"`        // Whether user has an active unresolved dispute
+	UserID             int                 `json:"user_id"`
+	AvgRating          float64             `json:"avg_rating"`
+	PositivePercent    float64             `json:"positive_percent"`
+	TotalTrades        int                 `json:"total_trades"`
+	AvgResponseTime    string              `json:"avg_response_time"`
+	ResponseSampleSize int                 `json:"response_sample_size"`
+	TotalFeedback      int                 `json:"total_feedback"`
+	ResponseMetric     string              `json:"response_metric,omitempty"`   // "excellent", "good", etc.
+	MemberSinceYear    int                 `json:"member_since_year,omitempty"` // Year user joined
+	CompletedTrades    int                 `json:"completed_trades,omitempty"`
+	CancelledTrades    int                 `json:"cancelled_trades,omitempty"`
+	PendingTrades      int                 `json:"pending_trades,omitempty"`
+	TrustScore         int                 `json:"trust_score"`               // 0-100 calculated trust score
+	TrustLevel         string              `json:"trust_level"`               // "trusted", "new", "risky"
+	ReportCount        int                 `json:"report_count"`              // Number of reviewed/resolved reports
+	HasReports         bool                `json:"has_reports"`               // Whether user has been reported
+	TrustFactors       []TrustFactor       `json:"trust_factors,omitempty"`   // Detailed breakdown of trust score
+	ConductSummary     *UserConductSummary `json:"conduct_summary,omitempty"` // Trade quality & conduct grades
+	HasActiveDispute   bool                `json:"has_active_dispute"`        // Whether user has an active unresolved dispute
 }
 
 // Report represents a trader report for policy violations

@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from './AuthContext'
 import { useNotification } from './NotificationContext'
 import { api, API_BASE_URL } from '../services/api'
-import { isAuthInvalid, markAuthInvalid } from '../utils/authEvents'
+import { isAuthInvalid, markAuthInvalidIfAuthenticated } from '../utils/authEvents'
 import { isNotificationAllowed } from '../utils/notificationPreferences'
 
 type RealtimeContextValue = {
@@ -36,7 +36,7 @@ const POLL_INTERVAL_MS = 60000
 const SSE_MESSAGE_DEDUP_WINDOW = 2000  // Prevent duplicate SSE messages within 2 seconds
 
 export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, token } = useAuth()
+  const { user } = useAuth()
   const { showNotification } = useNotification()
   const queryClient = useQueryClient()
   const streamAbortRef = useRef<AbortController | null>(null)
@@ -142,7 +142,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         seenNotifIdsRef.current = new Set(ids)
       }
     } catch { }
-  }, [user, token, showNotification, shouldNotify])
+  }, [user, showNotification, shouldNotify])
 
   useEffect(() => {
     if (!user) {
@@ -296,12 +296,11 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const readStream = async () => {
       try {
         const response = await fetch(url, {
-          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
           credentials: 'include',
           signal: controller.signal,
         })
         if (response.status === 401) {
-          markAuthInvalid('unauthorized')
+          markAuthInvalidIfAuthenticated('unauthorized')
           return
         }
         if (!response.ok || !response.body) return
@@ -341,16 +340,16 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         streamAbortRef.current = null
       }
     }
-  }, [user, token, getSseBaseUrl, shouldNotify, showNotification, queryClient, refreshCounts])
+  }, [user, getSseBaseUrl, shouldNotify, showNotification, queryClient, refreshCounts])
 
-  useEffect(() => { if (user) refreshCounts() }, [user, token, refreshCounts])
+  useEffect(() => { if (user) refreshCounts() }, [user, refreshCounts])
 
   // Polling fallback when SSE may not deliver (e.g. tab backgrounded, connection issues)
   useEffect(() => {
     if (!user) return
     const interval = setInterval(refreshCounts, POLL_INTERVAL_MS)
     return () => clearInterval(interval)
-  }, [user, token, refreshCounts])
+  }, [user, refreshCounts])
 
   const refreshMultiWayTrades = useCallback(() => {
     if (refreshCallbacksRef.current.multiway) {

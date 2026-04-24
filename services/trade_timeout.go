@@ -329,7 +329,7 @@ func dissolveExpiredMultiwayChains(db *sql.DB) error {
 		`, c.tradeID)
 
 		// Notify all parties
-		msg := "A multi-way trade match has expired because not all parties accepted within 3 days. Your items are available again."
+		msg := "A multi-way Trade Connect has expired because not all parties accepted within 3 days. Your items are available again."
 		for _, uid := range []int{c.u1, c.u2, c.u3} {
 			if uid <= 0 {
 				continue
@@ -471,7 +471,7 @@ func expireOngoingMultiwayChains(db *sql.DB) error {
 	return nil
 }
 
-// expireStaleLikeLoops finds trade matching like-loops that nobody has canceled
+// expireStaleLikeLoops finds Trade Connect like-loops that nobody has canceled
 // but 3 days have passed since creation. It marks them as cancelled.
 func expireStaleLikeLoops(db *sql.DB) error {
 	// Check if trade_like_loops table exists

@@ -2307,7 +2307,10 @@ func (h *UserHandler) GetSavedProducts(c *fiber.Ctx) error {
 		SELECT 
 			p.id, p.title, p.description, p.price, p.image_urls, p.seller_id,
 			p.premium, p.status, p.allow_buying, p.barter_only, p.location,
-			p.condition, p.suggested_value, p.category, p.created_at, p.updated_at,
+			p.condition, p.suggested_value, p.category,
+			COALESCE(p.location_type, 'no_location') AS location_type,
+			p.pickup_latitude, p.pickup_longitude, COALESCE(p.pickup_address, '') AS pickup_address,
+			p.created_at, p.updated_at,
 			u.name as seller_name,
 			sp.created_at as saved_at
 		FROM saved_products sp
@@ -2329,15 +2332,31 @@ func (h *UserHandler) GetSavedProducts(c *fiber.Ctx) error {
 	for rows.Next() {
 		var product models.Product
 		var savedAt string
+		var locationType sql.NullString
+		var pickupLat, pickupLon sql.NullFloat64
+		var pickupAddress sql.NullString
 		err := rows.Scan(
 			&product.ID, &product.Title, &product.Description, &product.Price,
 			&product.ImageURLs, &product.SellerID, &product.Premium, &product.Status,
 			&product.AllowBuying, &product.BarterOnly, &product.Location,
 			&product.Condition, &product.SuggestedValue, &product.Category,
+			&locationType, &pickupLat, &pickupLon, &pickupAddress,
 			&product.CreatedAt, &product.UpdatedAt, &product.SellerName, &savedAt,
 		)
 		if err != nil {
 			continue
+		}
+		if locationType.Valid {
+			product.LocationType = locationType.String
+		}
+		if pickupLat.Valid {
+			product.PickupLatitude = &pickupLat.Float64
+		}
+		if pickupLon.Valid {
+			product.PickupLongitude = &pickupLon.Float64
+		}
+		if pickupAddress.Valid {
+			product.PickupAddress = pickupAddress.String
 		}
 		products = append(products, product)
 	}
@@ -2393,60 +2412,61 @@ func (h *UserHandler) GetSellerStats(c *fiber.Ctx) error {
 		MemberSinceYear: userCreatedAt.Year(),
 	}
 
-	// Calculate total trades (all completed trades involving this user)
+	// Count each trade row once and keep lifecycle buckets mutually exclusive.
+	// Total trades is the sum of completed, pending/ongoing, and cancelled/closed attempts.
 	err = h.db.QueryRow(`
-		SELECT COUNT(*) FROM trades 
-		WHERE (seller_id = ? OR buyer_id = ?) AND status IN ('completed', 'auto_completed')
-	`, userID, userID).Scan(&stats.TotalTrades)
-	if err != nil {
-		stats.TotalTrades = 0
-	}
-
-	// Calculate completed trades (synonymous with TotalTrades in this context, but explicitly checks completion criteria)
-	err = h.db.QueryRow(`
-		SELECT COUNT(*) FROM trades 
-		WHERE (seller_id = ? OR buyer_id = ?) AND status IN ('completed', 'auto_completed')
-	`, userID, userID).Scan(&stats.CompletedTrades)
+		SELECT
+			COUNT(DISTINCT CASE WHEN status IN ('completed', 'auto_completed') THEN id END) AS completed_trades,
+			COUNT(DISTINCT CASE WHEN status IN ('pending', 'pending_multiway', 'accepted', 'accepted_by_one', 'accepted_by_both', 'countered', 'active', 'ongoing', 'awaiting_confirmation', 'multiway_active') THEN id END) AS pending_trades,
+			COUNT(DISTINCT CASE WHEN status IN ('cancelled', 'cancelled_due_to_conflict', 'declined', 'rejected', 'expired', 'broken') THEN id END) AS cancelled_trades
+		FROM trades
+		WHERE seller_id = ? OR buyer_id = ?
+	`, userID, userID).Scan(&stats.CompletedTrades, &stats.PendingTrades, &stats.CancelledTrades)
 	if err != nil {
 		stats.CompletedTrades = 0
-	}
-
-	// Calculate cancelled trades
-	err = h.db.QueryRow(`
-		SELECT COUNT(*) FROM trades 
-		WHERE (seller_id = ? OR buyer_id = ?) AND status = 'cancelled'
-	`, userID, userID).Scan(&stats.CancelledTrades)
-	if err != nil {
+		stats.PendingTrades = 0
 		stats.CancelledTrades = 0
 	}
+	stats.TotalTrades = stats.CompletedTrades + stats.PendingTrades + stats.CancelledTrades
 
-	// Calculate pending trades
-	err = h.db.QueryRow(`
-		SELECT COUNT(*) FROM trades 
-		WHERE (seller_id = ? OR buyer_id = ?) AND status IN ('pending', 'accepted', 'active', 'awaiting_confirmation')
-	`, userID, userID).Scan(&stats.PendingTrades)
-	if err != nil {
-		stats.PendingTrades = 0
-	}
-
-	// Calculate average rating and positive feedback percentage from reviews table
+	// Calculate average rating and positive feedback percentage from actual user
+	// reviews, including the newer post-trade review records.
 	var avgRating sql.NullFloat64
 	var totalReviews sql.NullInt64
 	var positivePercent sql.NullFloat64
 
 	err = h.db.QueryRow(`
 		SELECT 
-			COALESCE(AVG(rating), 0) AS avg_rating,
+			AVG(rating) AS avg_rating,
 			COUNT(*) AS total_reviews,
-			COALESCE(SUM(CASE WHEN rating >= 4 THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0), 0) AS positive_feedback
-		FROM reviews
-		WHERE reviewed_user_id = ?
-	`, userID).Scan(&avgRating, &totalReviews, &positivePercent)
+			SUM(CASE WHEN rating >= 4 THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0) AS positive_feedback
+		FROM (
+			SELECT r.rating
+			FROM reviews r
+			WHERE r.reviewed_user_id = ?
 
-	if err == nil && avgRating.Valid {
-		stats.AvgRating = avgRating.Float64
+			UNION ALL
+
+			SELECT tr.rating
+			FROM trade_reviews tr
+			JOIN trades t ON t.id = tr.trade_id
+			WHERE tr.is_followup = FALSE
+			  AND tr.reviewer_id <> ?
+			  AND t.status IN ('completed', 'auto_completed', 'history')
+			  AND (
+				(tr.reviewer_id = t.buyer_id AND t.seller_id = ?)
+				OR
+				(tr.reviewer_id = t.seller_id AND t.buyer_id = ?)
+			  )
+		) user_reviews
+	`, userID, userID, userID, userID).Scan(&avgRating, &totalReviews, &positivePercent)
+
+	if err == nil && totalReviews.Valid {
 		stats.TotalFeedback = int(totalReviews.Int64)
-		if positivePercent.Valid {
+		if stats.TotalFeedback > 0 && avgRating.Valid {
+			stats.AvgRating = avgRating.Float64
+		}
+		if stats.TotalFeedback > 0 && positivePercent.Valid {
 			stats.PositivePercent = positivePercent.Float64
 		}
 	}
@@ -2462,19 +2482,38 @@ func (h *UserHandler) GetSellerStats(c *fiber.Ctx) error {
 		stats.ResponseMetric = "poor"
 	}
 
-	// Calculate average response time (estimated as minutes from trade creation to first completion activity)
+	// Calculate average response time from actual chat replies. If there are no
+	// replied-to incoming messages, keep the public label explicit instead of
+	// guessing from trade update timestamps.
 	var avgResponseTimeMinutes sql.NullFloat64
+	var responseSampleSize sql.NullInt64
 	err = h.db.QueryRow(`
-		SELECT AVG(TIMESTAMPDIFF(MINUTE, created_at, CASE 
-			WHEN seller_completed THEN COALESCE(updated_at, NOW())
-			ELSE NOW()
-		END)) as avg_response_minutes
-		FROM trades
-		WHERE seller_id = ? AND created_at > DATE_SUB(NOW(), INTERVAL 90 DAY)
-		LIMIT 100
-	`, userID).Scan(&avgResponseTimeMinutes)
+		SELECT AVG(TIMESTAMPDIFF(MINUTE, replies.first_incoming_at, replies.first_reply_at)) AS avg_response_minutes,
+		       COUNT(*) AS response_samples
+		FROM (
+			SELECT incoming.conversation_id,
+			       incoming.first_incoming_at,
+			       (
+			         SELECT MIN(m2.created_at)
+			         FROM messages m2
+			         WHERE m2.conversation_id = incoming.conversation_id
+			           AND m2.sender_id = ?
+			           AND m2.created_at > incoming.first_incoming_at
+			       ) AS first_reply_at
+			FROM (
+				SELECT c.id AS conversation_id, MIN(m.created_at) AS first_incoming_at
+				FROM conversations c
+				JOIN messages m ON m.conversation_id = c.id AND m.sender_id <> ?
+				WHERE (c.buyer_id = ? OR c.seller_id = ?)
+				  AND c.created_at > DATE_SUB(NOW(), INTERVAL 90 DAY)
+				GROUP BY c.id
+			) incoming
+		) replies
+		WHERE replies.first_reply_at IS NOT NULL
+	`, userID, userID, userID, userID).Scan(&avgResponseTimeMinutes, &responseSampleSize)
 
-	if err == nil && avgResponseTimeMinutes.Valid {
+	if err == nil && avgResponseTimeMinutes.Valid && responseSampleSize.Valid && responseSampleSize.Int64 > 0 {
+		stats.ResponseSampleSize = int(responseSampleSize.Int64)
 		minutes := int(avgResponseTimeMinutes.Float64)
 		if minutes < 60 {
 			stats.AvgResponseTime = fmt.Sprintf("%dm", minutes)
@@ -2486,7 +2525,7 @@ func (h *UserHandler) GetSellerStats(c *fiber.Ctx) error {
 			stats.AvgResponseTime = fmt.Sprintf("%dd", days)
 		}
 	} else {
-		stats.AvgResponseTime = "N/A"
+		stats.AvgResponseTime = "Not enough data"
 	}
 
 	// --- Trust Score Computation (0-100) with detailed breakdown ---
@@ -2568,7 +2607,7 @@ func (h *UserHandler) GetSellerStats(c *fiber.Ctx) error {
 	// responding to messages/offers)
 	responsePoints := 0
 	responseStatus := "warn"
-	if avgResponseTimeMinutes.Valid {
+	if avgResponseTimeMinutes.Valid && responseSampleSize.Valid && responseSampleSize.Int64 > 0 {
 		minutes := int(avgResponseTimeMinutes.Float64)
 		if minutes <= 360 { // Fast (within hours)
 			responsePoints = 15
@@ -2588,15 +2627,13 @@ func (h *UserHandler) GetSellerStats(c *fiber.Ctx) error {
 
 	// 6. Trade Success Rate: 10 points
 	var totalAttempted int
-	_ = h.db.QueryRow("SELECT COUNT(*) FROM trades WHERE (seller_id = ? OR buyer_id = ?) AND status IN ('completed', 'auto_completed', 'cancelled')", userID, userID).Scan(&totalAttempted)
+	totalAttempted = stats.CompletedTrades + stats.CancelledTrades
 
 	successPoints := 0 // New users start at 0 — earned only after trade attempts
 	successStatus := "warn"
 	if totalAttempted > 0 {
 		successStatus = "pass"
-		var successCount int
-		_ = h.db.QueryRow("SELECT COUNT(*) FROM trades WHERE (seller_id = ? OR buyer_id = ?) AND status IN ('completed', 'auto_completed')", userID, userID).Scan(&successCount)
-		successRate := (float64(successCount) / float64(totalAttempted)) * 100
+		successRate := (float64(stats.CompletedTrades) / float64(totalAttempted)) * 100
 		if successRate >= 90 {
 			successPoints = 10
 		} else if successRate >= 70 {
@@ -2612,27 +2649,8 @@ func (h *UserHandler) GetSellerStats(c *fiber.Ctx) error {
 	}
 	trustFactors = append(trustFactors, models.TrustFactor{Label: "Trade success", Status: successStatus, Points: successPoints, Max: 10})
 
-	// Cancellation penalty: deduct points for recent cancellations. A cancel
-	// made while the trade was ongoing (accepted/active) is weighted heavier
-	// than one made while still pending.
-	var recentActiveCancels, recentPendingCancels int
-	_ = h.db.QueryRow(`
-		SELECT COUNT(*) FROM trades
-		WHERE cancelled_by = ? AND cancelled_while_active = TRUE
-		  AND cancelled_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 30 DAY)
-	`, userID).Scan(&recentActiveCancels)
-	_ = h.db.QueryRow(`
-		SELECT COUNT(*) FROM trades
-		WHERE cancelled_by = ? AND (cancelled_while_active = FALSE OR cancelled_while_active IS NULL)
-		  AND cancelled_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 30 DAY)
-	`, userID).Scan(&recentPendingCancels)
-	cancelPenalty := recentActiveCancels*5 + recentPendingCancels*2
-	if cancelPenalty > 30 {
-		cancelPenalty = 30
-	}
-
-	// Sum all factors
-	totalScore := verifiedPoints + tradePoints + ratingPoints + reportPoints + responsePoints + successPoints - cancelPenalty
+	// Sum displayed factors exactly so the visible breakdown reconciles with the final score.
+	totalScore := verifiedPoints + tradePoints + ratingPoints + reportPoints + responsePoints + successPoints
 	if totalScore > 100 {
 		totalScore = 100
 	}

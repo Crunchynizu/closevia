@@ -1,60 +1,66 @@
 const TOKEN_KEY = 'clovia_token'
 const USER_KEY = 'clovia_user'
+const AUTHENTICATED_SESSION_KEY = 'clovia_authenticated_session'
 
 export const getStoredToken = (): string | null => {
-  const sessionToken = sessionStorage.getItem(TOKEN_KEY)
-  if (sessionToken) return sessionToken
-
-  const legacyToken = localStorage.getItem(TOKEN_KEY)
-  if (legacyToken) {
-    sessionStorage.setItem(TOKEN_KEY, legacyToken)
-    localStorage.removeItem(TOKEN_KEY)
-    return legacyToken
-  }
-
+  try { sessionStorage.removeItem(TOKEN_KEY) } catch {}
+  try { localStorage.removeItem(TOKEN_KEY) } catch {}
   return null
 }
 
 export const setStoredToken = (token: string | null): void => {
-  if (token) {
-    sessionStorage.setItem(TOKEN_KEY, token)
-  } else {
-    sessionStorage.removeItem(TOKEN_KEY)
-  }
-  localStorage.removeItem(TOKEN_KEY)
+  void token
+  try { sessionStorage.removeItem(TOKEN_KEY) } catch {}
+  try { localStorage.removeItem(TOKEN_KEY) } catch {}
 }
 
 export const getStoredUser = (): string | null => {
-  const sessionUser = sessionStorage.getItem(USER_KEY)
-  if (sessionUser) return sessionUser
+  const localUser = localStorage.getItem(USER_KEY)
+  if (localUser) return localUser
 
-  const legacyUser = localStorage.getItem(USER_KEY)
-  if (!legacyUser) return null
-
-  // Older builds stored user data without guaranteeing a usable token in this
-  // browser tab. Only migrate it when this session also has auth material.
-  if (getStoredToken()) {
-    sessionStorage.setItem(USER_KEY, legacyUser)
-    localStorage.removeItem(USER_KEY)
-    return legacyUser
+  const legacySessionUser = sessionStorage.getItem(USER_KEY)
+  if (legacySessionUser) {
+    localStorage.setItem(USER_KEY, legacySessionUser)
+    sessionStorage.removeItem(USER_KEY)
+    return legacySessionUser
   }
 
-  localStorage.removeItem(USER_KEY)
   return null
 }
 
 export const setStoredUser = (value: string | null): void => {
   if (value) {
-    sessionStorage.setItem(USER_KEY, value)
+    localStorage.setItem(USER_KEY, value)
   } else {
-    sessionStorage.removeItem(USER_KEY)
+    localStorage.removeItem(USER_KEY)
   }
-  localStorage.removeItem(USER_KEY)
+  try { sessionStorage.removeItem(USER_KEY) } catch {}
+}
+
+export const hasStoredAuthenticatedSession = (): boolean => {
+  try {
+    return localStorage.getItem(AUTHENTICATED_SESSION_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+export const setStoredAuthenticatedSession = (value: boolean): void => {
+  try {
+    if (value) {
+      localStorage.setItem(AUTHENTICATED_SESSION_KEY, 'true')
+    } else {
+      localStorage.removeItem(AUTHENTICATED_SESSION_KEY)
+    }
+  } catch {
+    // Ignore storage failures; auth still works in-memory for the current tab.
+  }
 }
 
 export const clearStoredAuth = (): void => {
   setStoredToken(null)
   setStoredUser(null)
-  localStorage.removeItem(TOKEN_KEY)
-  localStorage.removeItem(USER_KEY)
+  try { localStorage.removeItem(TOKEN_KEY) } catch {}
+  try { sessionStorage.removeItem(TOKEN_KEY) } catch {}
+  try { sessionStorage.removeItem(USER_KEY) } catch {}
 }

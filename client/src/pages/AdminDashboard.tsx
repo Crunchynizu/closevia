@@ -159,7 +159,7 @@ const DATA_EXPLORER_GROUPS = [
       { key: 'products', label: 'Products' },
       { key: 'trades', label: 'Trades' },
       { key: 'multiway_trades', label: 'Multiway Trades' },
-      { key: 'trade_matches', label: 'Trade Matches' },
+      { key: 'trade_matches', label: 'Trade Connects' },
       { key: 'categories', label: 'Categories' },
       { key: 'reviews', label: 'Reviews' },
       { key: 'reports', label: 'Reports / Flags' },
@@ -3343,12 +3343,12 @@ const AdminDashboard: React.FC = () => {
     const updateSetting = (key: string, value: string) => setPremiumData((prev: any) => ({ ...prev, settings: { ...(prev.settings || {}), [key]: value } }));
     const updatePlan = (index: number, key: string, value: any) => setPremiumData((prev: any) => ({ ...prev, plans: (prev.plans || []).map((p: any, i: number) => i === index ? { ...p, [key]: value } : p) }));
     const updateCapability = (index: number, key: string, value: any) => setPremiumData((prev: any) => ({ ...prev, plans: (prev.plans || []).map((p: any, i: number) => i === index ? { ...p, capabilities: { ...(p.capabilities || {}), [key]: value } } : p) }));
-    const addPlan = () => setPremiumData((prev: any) => ({ ...prev, plans: [...(prev.plans || []), { plan_key: `custom_${Date.now()}`, name: 'Custom Plan', description: '', tier: 'promo', billing_type: 'promo', duration_days: 30, price: 0, badge_label: 'Promo', access_scope: 'basic', capabilities: { listing_limit: 10, active_trade_limit: 5, monthly_boost_limit: 0, free_boost_enabled: false, premium_badge_enabled: false, featured_listing_enabled: false, wider_visibility_enabled: false, analytics_enabled: false, priority_support_enabled: false, advanced_trade_tools_enabled: false }, is_active: true, sort_order: (prev.plans || []).length * 10 } ] }));
+    const addPlan = () => setPremiumData((prev: any) => ({ ...prev, plans: [...(prev.plans || []), { plan_key: `custom_${Date.now()}`, name: 'Custom Plan', description: '', tier: 'promo', billing_type: 'promo', duration_days: 30, price: 0, badge_label: 'Promo', access_scope: 'basic', capabilities: { listing_limit: 10, active_trade_limit: 5, monthly_boost_limit: 0, boost_duration_hours: 3, free_boost_enabled: false, premium_badge_enabled: false, featured_listing_enabled: false, wider_visibility_enabled: false, analytics_enabled: false, priority_support_enabled: false, advanced_trade_tools_enabled: false }, is_active: true, sort_order: (prev.plans || []).length * 10 } ] }));
     const duplicatePlan = (plan: any) => setPremiumData((prev: any) => ({ ...prev, plans: [...(prev.plans || []), { ...plan, id: undefined, plan_key: `${plan.plan_key}_copy_${Date.now()}`, name: `${plan.name} Copy`, sort_order: (prev.plans || []).length * 10 }] }));
     const updateFeature = (index: number, key: string, value: any) => setPremiumData((prev: any) => ({ ...prev, features: (prev.features || []).map((f: any, i: number) => i === index ? { ...f, [key]: value } : f) }));
     const updatePromo = (index: number, key: string, value: any) => setPremiumData((prev: any) => ({ ...prev, promotions: (prev.promotions || []).map((p: any, i: number) => i === index ? { ...p, [key]: value } : p) }));
     const updatePromoCapability = (index: number, key: string, value: any) => setPremiumData((prev: any) => ({ ...prev, promotions: (prev.promotions || []).map((p: any, i: number) => i === index ? { ...p, capabilities: { ...(p.capabilities || {}), [key]: value } } : p) }));
-    const addPromo = () => setPremiumData((prev: any) => ({ ...prev, promotions: [{ title: 'New Premium Promo', plan_key: '', discounted_price: 49, start_at: '', end_at: '', capabilities: { monthly_boost_limit: 1, free_boost_enabled: true }, overrides_capabilities: false, is_active: true }, ...(prev.promotions || [])] }));
+    const addPromo = () => setPremiumData((prev: any) => ({ ...prev, promotions: [{ title: 'New Premium Promo', plan_key: '', discounted_price: 49, start_at: '', end_at: '', capabilities: { monthly_boost_limit: 1, boost_duration_hours: 3, free_boost_enabled: true }, overrides_capabilities: false, is_active: true }, ...(prev.promotions || [])] }));
 
     return (
       <VStack spacing={6} pr={20} align="stretch" w="full">
@@ -3393,10 +3393,11 @@ const AdminDashboard: React.FC = () => {
                     </SimpleGrid>
                     <Divider my={4} />
                     <Text fontWeight="800" fontSize="xs" color={mutedTextColor} mb={3}>Limits</Text>
-                    <SimpleGrid columns={{ base: 1, md: 3 }} spacing={3}>
+                    <SimpleGrid columns={{ base: 1, md: 4 }} spacing={3}>
                       <Box><FormLabel fontSize="xs">Listing limit</FormLabel><Input size="sm" type="number" value={plan.capabilities?.listing_limit ?? 10} onChange={(e) => updateCapability(index, 'listing_limit', Number(e.target.value))} /></Box>
                       <Box><FormLabel fontSize="xs">Active trade limit</FormLabel><Input size="sm" type="number" value={plan.capabilities?.active_trade_limit ?? 5} onChange={(e) => updateCapability(index, 'active_trade_limit', Number(e.target.value))} /></Box>
                       <Box><FormLabel fontSize="xs">Monthly boost limit</FormLabel><Input size="sm" type="number" value={plan.capabilities?.monthly_boost_limit ?? 0} onChange={(e) => updateCapability(index, 'monthly_boost_limit', Number(e.target.value))} /></Box>
+                      <Box><FormLabel fontSize="xs">Boost duration (hours)</FormLabel><Input size="sm" type="number" min={0} value={plan.capabilities?.boost_duration_hours ?? 0} onChange={(e) => updateCapability(index, 'boost_duration_hours', Number(e.target.value))} /></Box>
                     </SimpleGrid>
                     <Text fontWeight="800" fontSize="xs" color={mutedTextColor} mt={4} mb={3}>Capabilities</Text>
                     <SimpleGrid columns={{ base: 1, md: 2 }} spacing={2}>
@@ -3432,11 +3433,12 @@ const AdminDashboard: React.FC = () => {
                     <Box><FormLabel fontSize="xs">Active</FormLabel><Switch colorScheme="purple" isChecked={!!promo.is_active} onChange={(e) => updatePromo(index, 'is_active', e.target.checked)} /></Box>
                   </SimpleGrid>
                   <Divider my={3} />
-                  <SimpleGrid columns={{ base: 1, md: 4 }} spacing={3} alignItems="end">
+                  <SimpleGrid columns={{ base: 1, md: 5 }} spacing={3} alignItems="end">
                     <Box><FormLabel fontSize="xs">Override base plan</FormLabel><Switch colorScheme="purple" isChecked={!!promo.overrides_capabilities} onChange={(e) => updatePromo(index, 'overrides_capabilities', e.target.checked)} /></Box>
                     <Box><FormLabel fontSize="xs">Listing limit</FormLabel><Input size="sm" type="number" value={promo.capabilities?.listing_limit ?? ''} onChange={(e) => updatePromoCapability(index, 'listing_limit', e.target.value === '' ? '' : Number(e.target.value))} placeholder="No change" /></Box>
                     <Box><FormLabel fontSize="xs">Active trades</FormLabel><Input size="sm" type="number" value={promo.capabilities?.active_trade_limit ?? ''} onChange={(e) => updatePromoCapability(index, 'active_trade_limit', e.target.value === '' ? '' : Number(e.target.value))} placeholder="No change" /></Box>
                     <Box><FormLabel fontSize="xs">Monthly boosts</FormLabel><Input size="sm" type="number" value={promo.capabilities?.monthly_boost_limit ?? ''} onChange={(e) => updatePromoCapability(index, 'monthly_boost_limit', e.target.value === '' ? '' : Number(e.target.value))} placeholder="No change" /></Box>
+                    <Box><FormLabel fontSize="xs">Boost duration (hours)</FormLabel><Input size="sm" type="number" min={0} value={promo.capabilities?.boost_duration_hours ?? ''} onChange={(e) => updatePromoCapability(index, 'boost_duration_hours', e.target.value === '' ? '' : Number(e.target.value))} placeholder="No change" /></Box>
                   </SimpleGrid>
                   <SimpleGrid columns={{ base: 1, md: 3 }} spacing={2} mt={3}>
                     {[['free_boost_enabled', 'Free boosts'], ['featured_listing_enabled', 'Featured placement'], ['wider_visibility_enabled', 'Wider visibility']].map(([key, label]) => <HStack key={key} justify="space-between" p={2} bg={cardBg} borderRadius="md"><Text fontSize="xs" fontWeight="700">{label}</Text><Switch size="sm" colorScheme="purple" isChecked={!!promo.capabilities?.[key]} onChange={(e) => updatePromoCapability(index, key, e.target.checked)} /></HStack>)}

@@ -9,7 +9,8 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-const AuthCookieName = "__Host-clovia_session"
+const HostAuthCookieName = "__Host-clovia_session"
+const SecureAuthCookieName = "__Secure-clovia_session"
 const DevAuthCookieName = "clovia_session"
 
 func isProduction() bool {
@@ -49,18 +50,36 @@ func AuthCookieSecure() bool {
 	return isProduction()
 }
 
+func AuthCookieDomain() string {
+	return strings.TrimSpace(os.Getenv("AUTH_COOKIE_DOMAIN"))
+}
+
+func AuthCookiePath() string {
+	if value := strings.TrimSpace(os.Getenv("AUTH_COOKIE_PATH")); value != "" {
+		return value
+	}
+	return "/"
+}
+
 func PrimaryAuthCookieName() string {
 	if AuthCookieSecure() {
-		return AuthCookieName
+		if AuthCookieDomain() == "" && AuthCookiePath() == "/" {
+			return HostAuthCookieName
+		}
+		return SecureAuthCookieName
 	}
 	return DevAuthCookieName
 }
 
 func AuthCookieNames() []string {
-	if PrimaryAuthCookieName() == AuthCookieName {
-		return []string{AuthCookieName, DevAuthCookieName}
+	switch PrimaryAuthCookieName() {
+	case HostAuthCookieName:
+		return []string{HostAuthCookieName, SecureAuthCookieName, DevAuthCookieName}
+	case SecureAuthCookieName:
+		return []string{SecureAuthCookieName, HostAuthCookieName, DevAuthCookieName}
+	default:
+		return []string{DevAuthCookieName, HostAuthCookieName, SecureAuthCookieName}
 	}
-	return []string{DevAuthCookieName, AuthCookieName}
 }
 
 func SessionIdleTimeout() time.Duration {
@@ -79,10 +98,17 @@ func SetAuthCookie(c *fiber.Ctx, token string) {
 	}
 	sameSite := AuthCookieSameSite()
 	secure := AuthCookieSecure() || sameSite == "None"
+	primaryName := PrimaryAuthCookieName()
+	domain := AuthCookieDomain()
+	if primaryName == HostAuthCookieName {
+		// Browsers reject __Host- cookies if Domain is present.
+		domain = ""
+	}
 	c.Cookie(&fiber.Cookie{
-		Name:     PrimaryAuthCookieName(),
+		Name:     primaryName,
 		Value:    token,
-		Path:     "/",
+		Path:     AuthCookiePath(),
+		Domain:   domain,
 		HTTPOnly: true,
 		Secure:   secure,
 		SameSite: sameSite,
@@ -95,10 +121,15 @@ func ClearAuthCookie(c *fiber.Ctx) {
 	sameSite := AuthCookieSameSite()
 	secure := AuthCookieSecure() || sameSite == "None"
 	for _, name := range AuthCookieNames() {
+		domain := AuthCookieDomain()
+		if name == HostAuthCookieName {
+			domain = ""
+		}
 		c.Cookie(&fiber.Cookie{
 			Name:     name,
 			Value:    "",
-			Path:     "/",
+			Path:     AuthCookiePath(),
+			Domain:   domain,
 			HTTPOnly: true,
 			Secure:   secure,
 			SameSite: sameSite,

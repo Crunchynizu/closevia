@@ -118,6 +118,8 @@ const ProductDetail: React.FC = () => {
   const [loadingProducts, setLoadingProducts] = useState(false)
   const [upgradingPremium, setUpgradingPremium] = useState(false)
   const [boosting, setBoosting] = useState(false)
+  const [subscriptionData, setSubscriptionData] = useState<any>(null)
+  const [subscriptionLoading, setSubscriptionLoading] = useState(false)
   const trackedViewRef = useRef<string | null>(null)
 
   const navigate = useNavigate()
@@ -143,6 +145,19 @@ const ProductDetail: React.FC = () => {
       toast({ id: 'failed-update-cover-image', title: 'Failed to update cover image', status: 'error', duration: 3000 })
     } finally {
       setIsSettingCover(false)
+    }
+  }
+
+  const fetchSubscriptionData = async () => {
+    if (!user) return
+    try {
+      setSubscriptionLoading(true)
+      const response = await api.get('/api/payments/subscription')
+      setSubscriptionData(response.data?.data || null)
+    } catch {
+      setSubscriptionData(null)
+    } finally {
+      setSubscriptionLoading(false)
     }
   }
 
@@ -287,7 +302,7 @@ const ProductDetail: React.FC = () => {
         const response = await api.get(`/api/trades?direction=outgoing&status=pending&limit=100`)
         const trades = Array.isArray(response.data?.data) ? response.data.data : []
 
-        // Check if any pending trade matches current product ID
+        // Check if any pending Trade Connect references the current product ID
         const hasPending = trades.some((trade: any) => trade.target_product_id === product.id)
         setHasPendingOfferOnProduct(hasPending)
       } catch (error) {
@@ -300,6 +315,14 @@ const ProductDetail: React.FC = () => {
 
     checkPendingOffer()
   }, [product, user]);
+
+  useEffect(() => {
+    if (!product || !user || user.id !== product.seller_id) {
+      setSubscriptionData(null)
+      return
+    }
+    fetchSubscriptionData()
+  }, [product?.seller_id, user?.id])
 
   const checkWishlistStatus = async () => {
     if (!product || !user) return;
@@ -806,16 +829,11 @@ const ProductDetail: React.FC = () => {
     if (!product || upgradingPremium) return
     try {
       setUpgradingPremium(true)
-      const response = await api.post(`/api/payments/premium/${product.id}`)
-      if (response.data?.success && response.data?.data?.checkout_url) {
-        window.location.href = response.data.data.checkout_url
-      } else {
-        throw new Error('Failed to create checkout session')
-      }
+      navigate('/premium')
     } catch (error: any) {
       toast({
         id: 'premium-upgrade-error',
-        title: 'Upgrade Failed',
+        title: 'Unable to open plans',
         description: error.response?.data?.error || error.message || 'An error occurred',
         status: 'error',
       })
@@ -850,6 +868,7 @@ const ProductDetail: React.FC = () => {
         })
         markProductBoosted(product.id, new Date().toISOString())
         fetchProduct() // Refresh to update boosted_at
+        fetchSubscriptionData()
       }
     } catch (error: any) {
       const errorMsg = error.response?.data?.error || error.message || 'An error occurred'
@@ -1034,6 +1053,50 @@ const ProductDetail: React.FC = () => {
   const isOwner = user && user.id === product.seller_id
   const isUnavailable = product.status === 'traded' || product.status === 'sold' || product.status === 'locked'
   const canTradeOrPurchase = !isOwner && product.status === 'available'
+  const currentTier = ((subscriptionData?.tier || user?.premium_tier || (user?.is_premium ? 'plus' : 'free')) as string).toLowerCase() as 'free' | 'plus' | 'pro'
+  const planMeta = {
+    free: { label: 'Free', color: 'gray', fallbackBoosts: 0 },
+    plus: { label: 'Plus', color: 'blue', fallbackBoosts: 3 },
+    pro: { label: 'Pro', color: 'purple', fallbackBoosts: 10 },
+  }[currentTier] || { label: 'Free', color: 'gray', fallbackBoosts: 0 }
+  const monthlyBoostLimit = Number(subscriptionData?.monthly_boost_limit ?? planMeta.fallbackBoosts)
+  const rawBoostsRemaining = subscriptionData?.boosts_remaining
+  const boostsRemaining = typeof rawBoostsRemaining === 'number' ? rawBoostsRemaining : Number(rawBoostsRemaining)
+  const hasKnownBoostsRemaining = Number.isFinite(boostsRemaining)
+  const hasBoostAccess = monthlyBoostLimit > 0
+  const hasBoostsAvailable = hasBoostAccess && (!hasKnownBoostsRemaining || boostsRemaining > 0)
+  const upgradePlanLabel = currentTier === 'free' ? 'Upgrade to Plus' : currentTier === 'plus' ? 'Upgrade to Pro' : ''
+  const boostButtonLabel = hasKnownBoostsRemaining && boostsRemaining <= 0 ? 'No boosts left' : 'Boost Listing'
+  const boostSummary = hasBoostAccess
+    ? hasKnownBoostsRemaining
+      ? `${boostsRemaining} of ${monthlyBoostLimit} boosts left this month`
+      : `${monthlyBoostLimit} boosts included each month`
+    : currentTier === 'pro'
+      ? 'Boost access is not enabled for this plan configuration.'
+      : 'Boosts are available on paid plans.'
+  const reviewCount = Number(sellerStats?.total_feedback ?? sellerStats?.review_count ?? 0)
+  const hasReviews = reviewCount > 0
+  const averageRating = Number(sellerStats?.avg_rating ?? 0)
+  const positivePercent = Number(sellerStats?.positive_percent ?? 0)
+  const completedTrades = Number(sellerStats?.completed_trades ?? 0)
+  const cancelledTrades = Number(sellerStats?.cancelled_trades ?? 0)
+  const pendingTrades = Number(sellerStats?.pending_trades ?? 0)
+  const totalTrades = Number(sellerStats?.total_trades ?? (completedTrades + cancelledTrades + pendingTrades))
+  const responseLabel = sellerStats?.avg_response_time && sellerStats.avg_response_time !== 'N/A'
+    ? sellerStats.avg_response_time
+    : 'Not enough data'
+  const trustLevelLabel = sellerStats?.trust_level === 'trusted'
+    ? 'Trusted Trader'
+    : sellerStats?.trust_level === 'new'
+      ? 'New Trader'
+      : sellerStats?.trust_level
+        ? 'Needs Review'
+        : ''
+  const activityBreakdown = [
+    { label: 'Successful', value: completedTrades, color: 'green.500', bg: 'green.50' },
+    { label: 'Cancelled', value: cancelledTrades, color: 'red.500', bg: 'red.50' },
+    { label: 'Pending', value: pendingTrades, color: 'orange.500', bg: 'orange.50' },
+  ]
 
   const formatPrice = (value: unknown): string => {
     const num = Number(value)
@@ -1083,12 +1146,12 @@ const ProductDetail: React.FC = () => {
 
   return (
     <Box bg="#FFFDF1" minH="100vh" w="100%" pb={{ base: 20, lg: 6 }}>
-      <Container maxW="container.xl" py={{ base: 4, md: 8 }}>
-        <VStack spacing={8} align="stretch">
-          <Box bg="white" borderRadius="3xl" overflow="hidden" shadow="xl" p={{ base: 2, md: 4 }}>
-            <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={6}>
+      <Container maxW="container.xl" py={{ base: 2, md: 8 }} px={{ base: 2.5, md: 4 }}>
+        <VStack spacing={{ base: 3, md: 8 }} align="stretch">
+          <Box bg="white" borderRadius={{ base: 'xl', md: '3xl' }} overflow="hidden" shadow={{ base: 'sm', md: 'xl' }} p={{ base: 0, md: 4 }}>
+            <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={{ base: 2, md: 6 }}>
               {/* Product Media Gallery */}
-              <VStack spacing={3} align="stretch" p={{ base: 2, md: 4 }}>
+              <VStack spacing={{ base: 2, md: 3 }} align="stretch" p={{ base: 0, md: 4 }}>
                 <Box position="relative">
                   <MediaGallery
                     imageUrls={product.image_urls}
@@ -1172,13 +1235,13 @@ const ProductDetail: React.FC = () => {
 
               {/* Product Details */}
               <Box
-                p={{ base: 4, md: 5, lg: 6 }}
+                p={{ base: 3, md: 5, lg: 6 }}
                 display="flex"
                 flexDirection="column"
                 bg={detailBg}
-                borderRadius="3xl"
+                borderRadius={{ base: 'xl', md: '3xl' }}
                 borderWidth="0"
-                boxShadow="sm"
+                boxShadow={{ base: 'none', md: 'sm' }}
                 bgGradient="linear(to-br, gray.50, white)"
                 maxW="560px"
                 w="100%"
@@ -1191,20 +1254,20 @@ const ProductDetail: React.FC = () => {
                   '--pd-surface': detailSurface,
                 }}
               >
-                <VStack spacing={6} align="stretch" flex={1}>
+                <VStack spacing={{ base: 3, md: 6 }} align="stretch" flex={1}>
                   {/* Counterfeit Warning */}
                   {product && <CounterfeitWarning productId={product.id} />}
 
                   <Box>
-                    <VStack spacing={4} align="stretch">
+                    <VStack spacing={{ base: 3, md: 4 }} align="stretch">
                       {/* Section 1: Header */}
                       <Box>
-                        <Flex justify="space-between" align="flex-start" gap={3} flexDirection={{ base: 'column', md: 'row' }}>
-                          <VStack align="start" spacing={2} flex={1} minW={0}>
+                        <Flex justify="space-between" align="flex-start" gap={{ base: 2, md: 3 }} flexDirection={{ base: 'column', md: 'row' }}>
+                          <VStack align="start" spacing={{ base: 1.5, md: 2 }} flex={1} minW={0}>
                             <Heading
                               mb={0}
                               color="var(--pd-text)"
-                              fontSize={{ base: 'xl', md: '2xl' }}
+                              fontSize={{ base: 'lg', md: '2xl' }}
                               lineHeight="1.25"
                               wordBreak="break-word"
                             >
@@ -1272,10 +1335,10 @@ const ProductDetail: React.FC = () => {
                             )}
                           </VStack>
 
-                          <VStack spacing={1} align={{ base: 'start', md: 'end' }} flexShrink={0} w={{ base: 'full', md: 'auto' }}>
+                          <Flex align="center" justify="space-between" gap={2} flexShrink={0} w={{ base: 'full', md: 'auto' }} direction={{ base: 'row', md: 'column' }}>
                             <Text
                               color="var(--pd-text)"
-                              fontSize={{ base: '2xl', md: '3xl' }}
+                              fontSize={{ base: 'xl', md: '3xl' }}
                               lineHeight="1"
                               fontWeight="800"
                               whiteSpace="nowrap"
@@ -1287,7 +1350,7 @@ const ProductDetail: React.FC = () => {
                                   : 'Price Unavailable'}
                             </Text>
 
-                            <HStack spacing={1} justify="flex-end" flexWrap="wrap" maxW={{ base: '130px', md: '156px' }}>
+                            <HStack spacing={1} justify="flex-end" flexWrap="wrap">
                               <Tooltip label={isSaved ? 'Saved' : 'Save'} hasArrow>
                                 <IconButton
                                   onClick={handleSaveToggle}
@@ -1356,16 +1419,16 @@ const ProductDetail: React.FC = () => {
                                 </Tooltip>
                               )}
                             </HStack>
-                          </VStack>
+                          </Flex>
                         </Flex>
                       </Box>
 
-                      <Divider borderColor="var(--pd-border)" />
+                      <Divider borderColor="var(--pd-border)" opacity={{ base: 0.6, md: 1 }} />
 
                       {/* Section 2: AI estimate bar */}
                       <Box>
                         <VStack align="stretch" spacing={2}>
-                          <Text fontSize="sm" fontWeight="600" color="var(--pd-text)">
+                          <Text fontSize={{ base: 'xs', md: 'sm' }} fontWeight="700" color="var(--pd-text)">
                             AI Estimate
                           </Text>
                           {hasFairRange ? (
@@ -1402,13 +1465,22 @@ const ProductDetail: React.FC = () => {
                               </Text>
                             </>
                           ) : (
-                            <Text fontSize="sm" color="var(--pd-muted)">
-                              AI fair-value range is not available yet.
+                            <VStack align="start" spacing={1}>
+                              <Text fontSize="sm" color="var(--pd-muted)">
+                                AI estimate is not available yet for this listing.
+                              </Text>
+                              {isOwner && (
+                                <Text fontSize="xs" color="var(--pd-muted)">
+                                  You can regenerate product details to create an estimate.
+                                </Text>
+                              )}
+                            </VStack>
+                          )}
+                          {hasFairRange && (
+                            <Text fontSize={{ base: 'xs', md: 'sm' }} color="var(--pd-muted)">
+                              {estimateGapNote}
                             </Text>
                           )}
-                          <Text fontSize="sm" color="var(--pd-muted)">
-                            {estimateGapNote}
-                          </Text>
                         </VStack>
                       </Box>
 
@@ -1416,15 +1488,17 @@ const ProductDetail: React.FC = () => {
 
                   </Box>
 
-                  <Divider borderColor={detailBorder} />
+                  <Divider borderColor={detailBorder} opacity={{ base: 0.6, md: 1 }} />
 
                   {/* Product Info: Location, Condition, Category */}
-                  <Box px={1} bg="transparent">
+                  <Box px={0} bg="transparent">
                     <Wrap spacing={2} align="center">
                       {product.location && (
                         <WrapItem>
                           <HStack spacing={1} px={3} py={1.5} borderRadius="full" bg="white" shadow="sm">
-                            <Text fontSize="xs" fontWeight="600" color="brand.500">📍</Text>
+                            <Text fontSize="xs" fontWeight="600" color="brand.500">
+                              {product.location_type === 'pickup_location' ? 'Pickup location:' : 'Product location:'}
+                            </Text>
                             <Text fontSize="xs" color={detailText} fontWeight="700">{product.location}</Text>
                           </HStack>
                         </WrapItem>
@@ -1450,25 +1524,25 @@ const ProductDetail: React.FC = () => {
                     </Wrap>
                   </Box>
 
-                  <Divider borderColor={detailBorder} opacity={0.6} />
+                   <Divider borderColor={detailBorder} opacity={0.6} />
 
                   <Box
-                    p={5}
-                    borderRadius="2xl"
+                    p={{ base: 3, md: 5 }}
+                    borderRadius={{ base: 'xl', md: '2xl' }}
                     bg="white"
                     shadow="sm"
                     borderWidth="0"
                   >
-                    <Heading size="sm" mb={3} color={detailText} fontWeight="600">
+                    <Heading size="sm" mb={{ base: 2, md: 3 }} color={detailText} fontWeight="700">
                       Description
                     </Heading>
                     <Text
                       color={detailMuted}
-                      lineHeight="tall"
+                      lineHeight={{ base: '1.55', md: 'tall' }}
                       fontSize="sm"
                       whiteSpace="pre-line"
                       wordBreak="break-word"
-                      noOfLines={isDescriptionExpanded ? undefined : 6}
+                      noOfLines={isDescriptionExpanded ? undefined : 4}
                     >
                       {product.description}
                     </Text>
@@ -1490,15 +1564,15 @@ const ProductDetail: React.FC = () => {
                 </VStack>
 
                 {/* Action Buttons: full-width primary + compact Offers icon square */}
-                <VStack spacing={{ base: 3, md: 4 }} mt={{ base: 2, md: 3 }} pt={0}>
+                <VStack spacing={{ base: 2.5, md: 4 }} mt={{ base: 1, md: 3 }} pt={0}>
                   {!isOwner && product.status === 'available' && (
                     <VStack spacing={{ base: 2, md: 3 }} w="full">
-                        <HStack w="full" spacing={3} align="stretch">
+                        <HStack w="full" spacing={{ base: 2, md: 3 }} align="stretch">
                           <Tooltip label={hasPendingOfferOnProduct ? "You already have a pending offer on this product" : "Propose a trade"}>
                             <Button
                               flex={1}
-                              size="lg"
-                              borderRadius="2xl"
+                              size={{ base: 'md', md: 'lg' }}
+                              borderRadius={{ base: 'xl', md: '2xl' }}
                               fontWeight="800"
                               bg={hasPendingOfferOnProduct ? 'gray.300' : 'brand.500'}
                               color="white"
@@ -1516,8 +1590,8 @@ const ProductDetail: React.FC = () => {
                           <Tooltip label="Offer to buy this item with cash">
                             <Button
                               flex={1}
-                              size="lg"
-                              borderRadius="2xl"
+                              size={{ base: 'md', md: 'lg' }}
+                              borderRadius={{ base: 'xl', md: '2xl' }}
                               fontWeight="800"
                               variant="outline"
                               colorScheme="orange"
@@ -1539,10 +1613,10 @@ const ProductDetail: React.FC = () => {
                             <IconButton
                               aria-label="View offers"
                               icon={<FaHandshake />}
-                              w={{ base: "48px", md: "52px" }}
-                              h={{ base: "48px", md: "52px" }}
-                              minW={{ base: "48px", md: "52px" }}
-                              borderRadius="2xl"
+                              w={{ base: "40px", md: "52px" }}
+                              h={{ base: "40px", md: "52px" }}
+                              minW={{ base: "40px", md: "52px" }}
+                              borderRadius={{ base: 'xl', md: '2xl' }}
                               variant="outline"
                               colorScheme="brand"
                               borderWidth="2px"
@@ -1560,15 +1634,15 @@ const ProductDetail: React.FC = () => {
                   )}
 
                   {isOwner && (
-                    <VStack spacing={4} w="full" align="stretch">
-                      <HStack spacing={{ base: 2, md: 4 }} w="full">
+                    <VStack spacing={{ base: 2.5, md: 4 }} w="full" align="stretch">
+                      <HStack spacing={{ base: 2, md: 4 }} w="full" align="stretch">
                         <Button
                           variant="outline"
                           colorScheme="gray"
-                          size="lg"
+                          size={{ base: 'md', md: 'lg' }}
                           flex={1}
                           fontWeight="800"
-                          borderRadius="2xl"
+                          borderRadius={{ base: 'xl', md: '2xl' }}
                           borderWidth="2px"
                           borderColor="gray.200"
                           _hover={{ bg: 'gray.50', borderColor: 'gray.300', transform: 'translateY(-2px)' }}
@@ -1580,10 +1654,10 @@ const ProductDetail: React.FC = () => {
                         <Button
                           variant="outline"
                           colorScheme="gray"
-                          size="lg"
+                          size={{ base: 'md', md: 'lg' }}
                           flex={1}
                           fontWeight="800"
-                          borderRadius="2xl"
+                          borderRadius={{ base: 'xl', md: '2xl' }}
                           borderWidth="2px"
                           borderColor="gray.200"
                           _hover={{ bg: 'gray.50', borderColor: 'gray.300', transform: 'translateY(-2px)' }}
@@ -1594,38 +1668,80 @@ const ProductDetail: React.FC = () => {
                         </Button>
                       </HStack>
 
-                      <HStack spacing={{ base: 2, md: 4 }} w="full">
-                        {!product.premium && (
-                          <Button
-                            colorScheme="purple"
-                            size="lg"
-                            flex={1}
-                            fontWeight="800"
-                            borderRadius="2xl"
-                            leftIcon={<FiStar />}
-                            isLoading={upgradingPremium}
-                            onClick={handleUpgradeToPremium}
-                            _hover={{ bg: 'purple.600', transform: 'translateY(-2px)', shadow: 'md' }}
-                            transition="all 0.2s"
-                          >
-                            Upgrade to Premium
-                          </Button>
+                      <Box
+                        p={{ base: 3, md: 3 }}
+                        bg={detailSurface}
+                        borderWidth="1px"
+                        borderColor={detailBorder}
+                        borderRadius="xl"
+                      >
+                        <Flex justify="space-between" align={{ base: 'stretch', sm: 'center' }} gap={3} direction={{ base: 'column', sm: 'row' }}>
+                          <Box minW={0}>
+                            <HStack spacing={2} mb={1} flexWrap="wrap">
+                              <Text fontSize="sm" fontWeight="800" color={detailText}>Listing Tools</Text>
+                              <Badge colorScheme={planMeta.color} variant="subtle" borderRadius="full">
+                                {subscriptionLoading ? 'Loading plan' : `${planMeta.label} plan`}
+                              </Badge>
+                            </HStack>
+                            <Text fontSize="xs" color={detailMuted}>
+                              {boostSummary}
+                            </Text>
+                          </Box>
+
+                          <HStack spacing={2} w={{ base: 'full', sm: 'auto' }} justify={{ base: 'stretch', sm: 'flex-end' }} flexWrap="wrap">
+                            {hasBoostAccess && (
+                              <Button
+                                colorScheme="blue"
+                                size="sm"
+                                fontWeight="800"
+                                borderRadius="full"
+                                leftIcon={<FiTrendingUp />}
+                                isLoading={boosting}
+                                onClick={handleBoostNow}
+                                isDisabled={!hasBoostsAvailable}
+                                flex={{ base: 1, sm: 'initial' }}
+                                minW={{ base: 0, sm: 'auto' }}
+                              >
+                                {boostButtonLabel}
+                              </Button>
+                            )}
+                            {upgradePlanLabel ? (
+                              <Button
+                                colorScheme={currentTier === 'free' ? 'purple' : 'blue'}
+                                variant={hasBoostAccess ? 'outline' : 'solid'}
+                                size="sm"
+                                fontWeight="800"
+                                borderRadius="full"
+                                leftIcon={<FiStar />}
+                                isLoading={upgradingPremium}
+                                onClick={handleUpgradeToPremium}
+                                flex={{ base: 1, sm: 'initial' }}
+                                minW={{ base: 0, sm: 'auto' }}
+                              >
+                                {upgradePlanLabel}
+                              </Button>
+                            ) : (
+                              <Button
+                                variant="ghost"
+                                colorScheme="purple"
+                                size="sm"
+                                fontWeight="700"
+                                borderRadius="full"
+                                onClick={() => navigate('/premium')}
+                                flex={{ base: 1, sm: 'initial' }}
+                                minW={{ base: 0, sm: 'auto' }}
+                              >
+                                Manage Plan
+                              </Button>
+                            )}
+                          </HStack>
+                        </Flex>
+                        {!hasBoostAccess && currentTier === 'pro' && (
+                          <Text fontSize="xs" color="orange.600" mt={2}>
+                            Boost access is not enabled for your current plan configuration.
+                          </Text>
                         )}
-                        <Button
-                          colorScheme="blue"
-                          size="lg"
-                          fontWeight="800"
-                          flex={!product.premium ? 1 : 2}
-                          borderRadius="2xl"
-                          leftIcon={<FiTrendingUp />}
-                          isLoading={boosting}
-                          onClick={handleBoostNow}
-                          _hover={{ bg: 'blue.600', transform: 'translateY(-2px)', shadow: 'md' }}
-                          transition="all 0.2s"
-                        >
-                          Boost listing
-                        </Button>
-                      </HStack>
+                      </Box>
                     </VStack>
                   )}
 
@@ -1674,29 +1790,29 @@ const ProductDetail: React.FC = () => {
           </Box>
 
           {/* Seller Information */}
-          <Box bg="white" p={{ base: 4, md: 6 }} rounded="lg" shadow="sm">
-            <Heading size="md" mb={4}>
+          <Box bg="white" p={{ base: 3, md: 6 }} rounded={{ base: 'xl', md: 'lg' }} shadow="sm">
+            <Heading size={{ base: 'sm', md: 'md' }} mb={{ base: 3, md: 4 }}>
               About the Trader
             </Heading>
-            <Flex justify="space-between" align="stretch" gap={6} flexDir={{ base: 'column', lg: 'row' }}>
-              <HStack spacing={4} flex={1}>
+            <Flex justify="space-between" align={{ base: 'start', lg: 'stretch' }} gap={{ base: 3, md: 6 }} flexDir={{ base: 'column', lg: 'row' }}>
+              <HStack spacing={3} flex={1} align="center" minW={0}>
                 {((sellerProfile as any)?.slug || product.seller_id) ? (
                   <RouterLink to={`/users/${(sellerProfile as any)?.slug || product.seller_id}`}>
                     <VerifiedAvatar
-                      size="lg"
+                      size={{ base: 'md', md: 'lg' }}
                       src={sellerProfile?.profile_picture}
                       name={product.seller_name}
                       bg="red.500"
                       color="white"
                       cursor="pointer"
-                      _hover={{ opacity: 0.8, transform: 'scale(1.05)' }}
+                      _hover={{ opacity: 0.85 }}
                       transition="all 0.2s"
                       isVerified={sellerProfile?.verification_status === 'verified' || sellerProfile?.verified || false}
                     />
                   </RouterLink>
                 ) : (
                   <VerifiedAvatar
-                    size="lg"
+                    size={{ base: 'md', md: 'lg' }}
                     src={sellerProfile?.profile_picture}
                     name={product.seller_name}
                     bg="red.500"
@@ -1704,7 +1820,7 @@ const ProductDetail: React.FC = () => {
                     isVerified={sellerProfile?.verification_status === 'verified' || sellerProfile?.verified || false}
                   />
                 )}
-                <Box>
+                <Box minW={0}>
                   <HStack spacing={2} align="center" flexWrap="wrap">
                     {((sellerProfile as any)?.slug || product.seller_id) ? (
                       <Button
@@ -1712,12 +1828,15 @@ const ProductDetail: React.FC = () => {
                         to={`/users/${(sellerProfile as any)?.slug || product.seller_id}`}
                         variant="link"
                         color="brand.600"
+                        fontSize={{ base: 'sm', md: 'md' }}
+                        fontWeight="800"
+                        minW={0}
                         _hover={{ textDecoration: 'underline' }}
                       >
-                        {sellerProfile?.name && sellerProfile.name.toLowerCase() !== 'user' ? sellerProfile.name : product.seller_name}
+                        <Text noOfLines={1}>{sellerProfile?.name && sellerProfile.name.toLowerCase() !== 'user' ? sellerProfile.name : product.seller_name}</Text>
                       </Button>
                     ) : (
-                      <Text color="brand.600" fontWeight="medium">{sellerProfile?.name || product.seller_name}</Text>
+                      <Text color="brand.600" fontWeight="800" fontSize={{ base: 'sm', md: 'md' }} noOfLines={1}>{sellerProfile?.name || product.seller_name}</Text>
                     )}
                     {(sellerProfile as any)?.verification_status === 'verified' && (
                       <Badge colorScheme="teal" borderRadius="full" px={2} py={0.5} fontSize="xs">
@@ -1735,76 +1854,81 @@ const ProductDetail: React.FC = () => {
                         py={0.5}
                         fontSize="xs"
                       >
-                        {sellerStats.trust_level === 'trusted' ? '🟢 Trusted Trader' : sellerStats.trust_level === 'new' ? '🟡 New Trader' : '🔴 Risky Trader'}
+                        {trustLevelLabel}
                       </Badge>
                     )}
                     {sellerStats?.has_active_dispute && (
                       <Badge
                         colorScheme="orange"
-                        variant="solid"
+                        variant="subtle"
                         borderRadius="full"
                         px={2}
                         py={0.5}
                         fontSize="xs"
                         fontWeight="bold"
                       >
-                        ⚠️ Active Dispute
+                        Active dispute
                       </Badge>
                     )}
                   </HStack>
-                  <Text color="gray.600" fontSize="sm">
+                  <Text color="gray.600" fontSize="xs">
                     Member since {sellerStats?.member_since_year ?? new Date().getFullYear()}
                   </Text>
-                  <HStack spacing={2} mt={2}>
+                  <HStack spacing={2} mt={1.5} flexWrap="wrap" align="center">
                     {product.seller_id && <ResponseMetricsBadge userId={product.seller_id} />}
-                    {product.seller_id && user && <ProximityBadge type="user" targetId={product.seller_id} />}
+                    {product.seller_id && user && (
+                      <HStack spacing={1} align="center">
+                        <Text fontSize="xs" color="gray.500">Distance from you:</Text>
+                        <ProximityBadge type="user" targetId={product.seller_id} />
+                      </HStack>
+                    )}
                   </HStack>
                 </Box>
               </HStack>
 
               {/* Seller Stats */}
-              <SimpleGrid columns={{ base: 3, md: 5 }} spacing={{ base: 3, md: 4 }} flex={1} alignItems="start" mt={{ base: 0, lg: -6 }}>
-                <VStack spacing={1} align="center">
-                  {sellerStats?.avg_rating ? (
+              <SimpleGrid columns={{ base: 2, md: 4 }} spacing={{ base: 2, md: 4 }} flex={1} alignItems="stretch" w={{ base: 'full', lg: 'auto' }}>
+                <VStack spacing={1} align="center" bg="gray.50" borderWidth="1px" borderColor="gray.100" borderRadius="lg" px={2.5} py={2}>
+                  {hasReviews ? (
                     <HStack spacing={1}>
                       <Icon as={FiStar} color="yellow.400" boxSize={{ base: 4, md: 5 }} />
                       <Text fontSize={{ base: 'lg', md: 'xl', lg: '2xl' }} fontWeight="bold" color="brand.500">
-                        {sellerStats.avg_rating.toFixed(1)}
+                        {averageRating.toFixed(1)}
                       </Text>
                     </HStack>
                   ) : (
                     <HStack spacing={1}>
                       <Icon as={FiStar} color="yellow.400" boxSize={{ base: 4, md: 5 }} />
-                      <Text fontSize={{ base: 'lg', md: 'xl', lg: '2xl' }} fontWeight="bold" color="gray.400">
-                        New
+                      <Text fontSize={{ base: 'sm', md: 'md' }} fontWeight="bold" color="gray.400" textAlign="center" lineHeight="short">
+                        None
                       </Text>
                     </HStack>
                   )}
-                  <Text fontSize={{ base: '2xs', md: 'xs', lg: 'sm' }} color="gray.600" textAlign="center">
-                    Rating
+                  <Text fontSize="2xs" color="gray.600" textAlign="center" fontWeight="700" textTransform="uppercase">
+                    Rating{hasReviews ? ` (${reviewCount})` : ''}
                   </Text>
                 </VStack>
-                <VStack spacing={1} align="center">
-                  <Text fontSize={{ base: 'lg', md: 'xl', lg: '2xl' }} fontWeight="bold" color="green.500">
-                    {sellerStats?.positive_percent != null ? `${sellerStats.positive_percent.toFixed(0)}%` : '100%'}
+                <VStack spacing={1} align="center" bg="gray.50" borderWidth="1px" borderColor="gray.100" borderRadius="lg" px={2.5} py={2}>
+                  <Text fontSize={hasReviews ? { base: 'lg', md: 'xl', lg: '2xl' } : { base: 'sm', md: 'md' }} fontWeight="bold" color={hasReviews ? 'green.500' : 'gray.400'} textAlign="center" lineHeight="short">
+                    {hasReviews ? `${positivePercent.toFixed(0)}%` : 'None'}
                   </Text>
-                  <Text fontSize={{ base: '2xs', md: 'xs', lg: 'sm' }} color="gray.600" textAlign="center">
+                  <Text fontSize="2xs" color="gray.600" textAlign="center" fontWeight="700" textTransform="uppercase">
                     Positive
                   </Text>
                 </VStack>
-                <VStack spacing={1} align="center">
-                  <Text fontSize={{ base: 'lg', md: 'xl', lg: '2xl' }} fontWeight="bold" color="blue.500">
-                    {sellerStats?.total_trades ?? 0}
+                <VStack spacing={1} align="center" bg="gray.50" borderWidth="1px" borderColor="gray.100" borderRadius="lg" px={2.5} py={2}>
+                  <Text fontSize={totalTrades > 0 ? { base: 'lg', md: 'xl', lg: '2xl' } : { base: 'sm', md: 'md' }} fontWeight="bold" color={totalTrades > 0 ? 'blue.500' : 'gray.400'} textAlign="center" lineHeight="short">
+                    {totalTrades > 0 ? totalTrades : 'None'}
                   </Text>
-                  <Text fontSize={{ base: '2xs', md: 'xs', lg: 'sm' }} color="gray.600" textAlign="center">
+                  <Text fontSize="2xs" color="gray.600" textAlign="center" fontWeight="700" textTransform="uppercase">
                     Trades
                   </Text>
                 </VStack>
-                <VStack spacing={1} align="center">
-                  <Text fontSize={{ base: 'lg', md: 'xl', lg: '2xl' }} fontWeight="bold" color="purple.500">
-                    {sellerStats?.avg_response_time ?? '< 1 hr'}
+                <VStack spacing={1} align="center" bg="gray.50" borderWidth="1px" borderColor="gray.100" borderRadius="lg" px={2.5} py={2}>
+                  <Text fontSize={responseLabel === 'Not enough data' ? { base: 'sm', md: 'md' } : { base: 'lg', md: 'xl', lg: '2xl' }} fontWeight="bold" color={responseLabel === 'Not enough data' ? 'gray.400' : 'purple.500'} textAlign="center" lineHeight="short">
+                    {responseLabel}
                   </Text>
-                  <Text fontSize={{ base: '2xs', md: 'xs', lg: 'sm' }} color="gray.600" textAlign="center">
+                  <Text fontSize="2xs" color="gray.600" textAlign="center" fontWeight="700" textTransform="uppercase">
                     Avg Response
                   </Text>
                 </VStack>
@@ -1819,26 +1943,45 @@ const ProductDetail: React.FC = () => {
                   trustLevel={sellerStats.trust_level}
                   factors={sellerStats.trust_factors}
                   conductSummary={sellerStats.conduct_summary}
+                  compact
                   isVerified={sellerProfile?.verification_status === 'verified' || sellerProfile?.verified || false}
                   listingCount={sellerProducts.length}
-                  tradeCount={sellerStats.completed_trades ?? sellerStats.total_trades}
-                  positivePercent={sellerStats.positive_percent}
-                  tradeStats={{
-                    successful: sellerStats.completed_trades ?? 0,
-                    cancelled: sellerStats.cancelled_trades ?? 0,
-                    pending: sellerStats.pending_trades ?? 0,
-                  }}
-                  responseTime={sellerStats?.avg_response_time}
+                  tradeCount={totalTrades}
+                  positivePercent={hasReviews ? positivePercent : undefined}
+                  responseTime={responseLabel}
                 />
               </Box>
             )}
+
+            <Box mt={{ base: 3, md: 4 }} p={{ base: 3, md: 4 }} bg="gray.50" borderRadius="lg" borderWidth="1px" borderColor="gray.100">
+              <Flex justify="space-between" align="center" mb={2}>
+                <Heading size="xs">Trade activity</Heading>
+                <Text fontSize="xs" color="gray.600">
+                  {totalTrades > 0 ? `${totalTrades} total` : 'No completed trades yet'}
+                </Text>
+              </Flex>
+              {totalTrades > 0 ? (
+                <SimpleGrid columns={{ base: 3, sm: 3 }} spacing={2}>
+                  {activityBreakdown.map((item) => (
+                    <Box key={item.label} bg={item.bg} borderRadius="md" px={2} py={2} textAlign="center">
+                      <Text fontSize="sm" fontWeight="900" color={item.color}>{item.value}</Text>
+                      <Text fontSize="2xs" color="gray.600" fontWeight="700">{item.label}</Text>
+                    </Box>
+                  ))}
+                </SimpleGrid>
+              ) : (
+                <Text fontSize="sm" color="gray.500">
+                  This trader has no completed trades yet.
+                </Text>
+              )}
+            </Box>
 
             {/* Report Warning Banner */}
             {sellerStats?.has_reports && sellerStats.report_count > 0 && (
               <Alert status="warning" borderRadius="md" mt={4}>
                 <AlertIcon />
                 <Box>
-                  <Text fontWeight="bold" fontSize="sm">⚠ This trader has received reports</Text>
+                  <Text fontWeight="bold" fontSize="sm">This trader has received reports</Text>
                   <Text fontSize="xs" color="gray.600">Trade with caution</Text>
                 </Box>
               </Alert>

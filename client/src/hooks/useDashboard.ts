@@ -15,7 +15,12 @@ export const DASHBOARD_QUERY_KEYS = {
   tradeHistory: ['dashboard', 'tradeHistory'] as const,
 }
 
-const OFFER_REFETCH_INTERVAL_MS = 5000
+const OFFER_REFETCH_INTERVAL_MS = 30000
+
+type DashboardQueryOptions = {
+  enabled?: boolean
+  refetchInterval?: number | false
+}
 
 const buildReciprocalOngoingKey = (trade: Trade): string | null => {
   if (trade.status !== 'active') return null
@@ -33,7 +38,7 @@ const buildReciprocalOngoingKey = (trade: Trade): string | null => {
 }
 
 // Custom hook for user products with caching
-export const useDashboardProducts = (userId: number | undefined) => {
+export const useDashboardProducts = (userId: number | undefined, options: DashboardQueryOptions = {}) => {
   return useQuery({
     queryKey: [...DASHBOARD_QUERY_KEYS.products, userId],
     queryFn: async (): Promise<Product[]> => {
@@ -60,22 +65,23 @@ export const useDashboardProducts = (userId: number | undefined) => {
         throw error
       }
     },
-    enabled: !!userId,
+    enabled: (!!userId) && (options.enabled ?? true),
     // Products data reduced to 1 minute to avoid stale dashboard
-    staleTime: 1000 * 30, // 30 seconds for dashboard freshness
-    refetchOnMount: 'always',
+    staleTime: 1000 * 60, // 1 minute for dashboard freshness
+    refetchOnMount: false,
     placeholderData: keepPreviousData,
   })
 }
 
 // Custom hook for user orders with caching
-export const useDashboardOrders = () => {
+export const useDashboardOrders = (options: DashboardQueryOptions = {}) => {
   return useQuery({
     queryKey: DASHBOARD_QUERY_KEYS.orders,
     queryFn: async (): Promise<Order[]> => {
       const response = await api.get('/api/orders?type=bought')
       return response.data?.data?.data || []
     },
+    enabled: options.enabled ?? true,
     // Orders change less frequently
     staleTime: 1000 * 60 * 15, // 15 minutes
     placeholderData: keepPreviousData,
@@ -83,7 +89,7 @@ export const useDashboardOrders = () => {
 }
 
 // Custom hook for dashboard counts (notifications, offers) with caching
-export const useDashboardCounts = () => {
+export const useDashboardCounts = (options: DashboardQueryOptions = {}) => {
   return useQuery({
     queryKey: DASHBOARD_QUERY_KEYS.counts,
     queryFn: async () => {
@@ -94,15 +100,16 @@ export const useDashboardCounts = () => {
         pending_offers: data.pending_offers || 0,
       }
     },
+    enabled: options.enabled ?? true,
     // Counts should refresh more frequently
-    staleTime: 1000 * 15,
-    refetchInterval: 1000 * 15,
+    staleTime: 1000 * 30,
+    refetchInterval: options.refetchInterval ?? 1000 * 30,
     placeholderData: keepPreviousData,
   })
 }
 
 // Custom hook for sent offers with caching
-export const useSentOffers = () => {
+export const useSentOffers = (options: DashboardQueryOptions = {}) => {
   return useQuery({
     queryKey: DASHBOARD_QUERY_KEYS.sentOffers,
     queryFn: async (): Promise<Trade[]> => {
@@ -132,16 +139,17 @@ export const useSentOffers = () => {
       })
       return Array.from(unique.values())
     },
-    staleTime: 1000 * 5,
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
-    refetchInterval: OFFER_REFETCH_INTERVAL_MS,
+    enabled: options.enabled ?? true,
+    staleTime: 1000 * 15,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchInterval: options.refetchInterval ?? false,
     placeholderData: keepPreviousData,
   })
 }
 
 // Custom hook for received offers with caching
-export const useReceivedOffers = () => {
+export const useReceivedOffers = (options: DashboardQueryOptions = {}) => {
   return useQuery({
     queryKey: DASHBOARD_QUERY_KEYS.receivedOffers,
     queryFn: async (): Promise<Trade[]> => {
@@ -171,16 +179,17 @@ export const useReceivedOffers = () => {
       })
       return Array.from(unique.values())
     },
-    staleTime: 1000 * 5,
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
-    refetchInterval: OFFER_REFETCH_INTERVAL_MS,
+    enabled: options.enabled ?? true,
+    staleTime: 1000 * 15,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchInterval: options.refetchInterval ?? false,
     placeholderData: keepPreviousData,
   })
 }
 
 // Custom hook for ongoing trades with caching
-export const useOngoingTrades = () => {
+export const useOngoingTrades = (options: DashboardQueryOptions = {}) => {
   return useQuery({
     queryKey: DASHBOARD_QUERY_KEYS.ongoingTrades,
     queryFn: async (): Promise<Trade[]> => {
@@ -210,10 +219,11 @@ export const useOngoingTrades = () => {
 
       return Array.from(uniqueTrades.values())
     },
-    staleTime: 1000 * 5,
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
-    refetchInterval: OFFER_REFETCH_INTERVAL_MS,
+    enabled: options.enabled ?? true,
+    staleTime: 1000 * 15,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchInterval: options.refetchInterval ?? false,
     placeholderData: keepPreviousData,
   })
 }
@@ -221,7 +231,7 @@ export const useOngoingTrades = () => {
 // Custom hook for multiway/trade-loop rows used by Ongoing Trades and Multi-Way tabs.
 // This intentionally loads alongside regular offer data instead of waiting for
 // the user to open a specific dashboard tab.
-export const useMultiWayLoops = (userId: number | undefined) => {
+export const useMultiWayLoops = (userId: number | undefined, options: DashboardQueryOptions = {}) => {
   return useQuery({
     queryKey: [...DASHBOARD_QUERY_KEYS.multiWayLoops, userId],
     queryFn: async (): Promise<any[]> => {
@@ -232,17 +242,17 @@ export const useMultiWayLoops = (userId: number | undefined) => {
         ? response.data.data
         : (Array.isArray(response.data) ? response.data : [])
     },
-    enabled: !!userId,
-    staleTime: 1000 * 5,
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
-    refetchInterval: OFFER_REFETCH_INTERVAL_MS,
+    enabled: (!!userId) && (options.enabled ?? true),
+    staleTime: 1000 * 30,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchInterval: options.refetchInterval ?? false,
     placeholderData: keepPreviousData,
   })
 }
 
 // Custom hook for archived (expired) trades with caching
-export const useArchivedTrades = () => {
+export const useArchivedTrades = (options: DashboardQueryOptions = {}) => {
   return useQuery({
     queryKey: DASHBOARD_QUERY_KEYS.archivedTrades,
     queryFn: async (): Promise<Trade[]> => {
@@ -268,6 +278,7 @@ export const useArchivedTrades = () => {
 
       return Array.from(uniqueTrades.values())
     },
+    enabled: options.enabled ?? true,
     staleTime: 1000 * 60 * 5,
     placeholderData: keepPreviousData,
   })
@@ -276,7 +287,7 @@ export const useArchivedTrades = () => {
 // Custom hook for trade history with caching
 // Merges completed one-to-one trades with completed trade-match / multi-way loops
 // so both show up in the Dashboard history tab.
-export const useTradeHistory = () => {
+export const useTradeHistory = (options: DashboardQueryOptions = {}) => {
   return useQuery({
     queryKey: DASHBOARD_QUERY_KEYS.tradeHistory,
     queryFn: async (): Promise<Trade[]> => {
@@ -284,7 +295,7 @@ export const useTradeHistory = () => {
         api.get('/api/trades', {
           params: { status: 'completed', include: 'products', limit: 100 }
         }),
-        api.get('/api/trades/loops').catch(() => ({ data: { data: [] } })),
+        api.get('/api/trades/loops', { params: { status: 'completed' } }).catch(() => ({ data: { data: [] } })),
       ])
 
       const trades: Trade[] = Array.isArray(tradesRes.data?.data)
@@ -350,6 +361,7 @@ export const useTradeHistory = () => {
       }
       return Array.from(unique.values())
     },
+    enabled: options.enabled ?? true,
     staleTime: 1000 * 60 * 5, // 5 minutes (completed trades don't change)
     placeholderData: keepPreviousData,
   })
@@ -413,6 +425,18 @@ export const useInvalidateDashboard = () => {
     return queryClient.invalidateQueries({ queryKey: ['dashboard', 'offers'] })
   }
 
+  const invalidateMultiWay = () => {
+    return queryClient.invalidateQueries({ queryKey: DASHBOARD_QUERY_KEYS.multiWayLoops })
+  }
+
+  const invalidateHistory = () => {
+    return queryClient.invalidateQueries({ queryKey: DASHBOARD_QUERY_KEYS.tradeHistory })
+  }
+
+  const invalidateArchived = () => {
+    return queryClient.invalidateQueries({ queryKey: DASHBOARD_QUERY_KEYS.archivedTrades })
+  }
+
   const invalidateCounts = () => {
     return queryClient.invalidateQueries({ queryKey: DASHBOARD_QUERY_KEYS.counts })
   }
@@ -421,6 +445,9 @@ export const useInvalidateDashboard = () => {
     invalidateDashboard,
     invalidateProducts,
     invalidateOffers,
+    invalidateMultiWay,
+    invalidateHistory,
+    invalidateArchived,
     invalidateCounts,
   }
 }

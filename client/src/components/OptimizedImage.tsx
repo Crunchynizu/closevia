@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Box, Image as ChakraImage, Skeleton, ImageProps } from '@chakra-ui/react'
-import { generateCloudinarySrcSet, getOptimizedImageWithFallback } from '../utils/imageUtils'
+import { getOptimizedImageWithFallback } from '../utils/imageUtils'
 
 interface OptimizedImageProps extends Omit<ImageProps, 'src' | 'alt' | 'objectFit'> {
   src?: string
@@ -52,94 +52,74 @@ const OptimizedImage: React.FC<OptimizedImageProps> = ({
   ...restProps
 }) => {
   const [isLoaded, setIsLoaded] = useState(false)
-  const [imageSrc, setImageSrc] = useState<string>('')
+  const primarySrc = useMemo(() => {
+    if (!src) return fallbackSrc
 
-  useEffect(() => {
-    if (!src) {
-      setImageSrc(fallbackSrc)
-      setIsLoaded(true)
-      return
-    }
-
-    // For Cloudinary images, use optimized version
     if (src.includes('cloudinary.com')) {
       const { fallback } = getOptimizedImageWithFallback(src, width)
-      setImageSrc(fallback)
-    } else {
-      // For non-Cloudinary images, use as-is
-      setImageSrc(src)
+      return fallback
     }
+
+    return src
   }, [src, width, fallbackSrc])
 
-  const isCloudinary = imageSrc.includes('cloudinary.com')
-  const srcSet = isCloudinary ? generateCloudinarySrcSet(imageSrc, width) : undefined
+  const originalSrc = useMemo(() => src || fallbackSrc, [src, fallbackSrc])
+  const [imageSrc, setImageSrc] = useState<string>(primarySrc)
 
-  // Build sizes string for responsive loading
-  // Covers mobile (100vw - padding), tablet (50vw), desktop (25-33vw)
-  const sizes = isCloudinary
-    ? '(max-width: 480px) calc(100vw - 32px), (max-width: 768px) calc(50vw - 32px), (max-width: 1280px) calc(33vw - 16px), 300px'
-    : undefined
+  useEffect(() => {
+    setIsLoaded(false)
+    setImageSrc(primarySrc)
+    if (!src) {
+      setIsLoaded(true)
+    }
+  }, [src, primarySrc])
 
   return (
-    <Skeleton isLoaded={isLoaded} borderRadius={borderRadius} {...restProps}>
-      {isCloudinary ? (
-        // Use picture element for better format support
-        <Box
-          as="picture"
-          style={{
-            width: displayWidth,
-            height: displayHeight,
-            display: 'block'
-          }}
-        >
-          {/* WebP format for modern browsers */}
-          <source
-            srcSet={generateCloudinarySrcSet(imageSrc.replace(/f_jpg/, 'f_webp'), width)}
-            type="image/webp"
-            sizes={sizes}
-          />
-          {/* AVIF format for best compression (some browser support) */}
-          <source
-            srcSet={generateCloudinarySrcSet(imageSrc.replace(/f_jpg/, 'f_auto'), width)}
-            type="image/webp"
-            sizes={sizes}
-          />
-          {/* JPG fallback */}
-          <ChakraImage
-            src={imageSrc}
-            srcSet={srcSet}
-            sizes={sizes}
-            alt={alt}
-            w={displayWidth}
-            h={displayHeight}
-            objectFit={objectFit}
-            borderRadius={borderRadius}
-            loading={loading}
-            onLoad={() => setIsLoaded(true)}
-            onError={() => setImageSrc(fallbackSrc)}
-            onClick={onClick}
-            cursor={cursor}
-            {...restProps}
-          />
-        </Box>
-      ) : (
-        // For non-Cloudinary images, render directly
-        <ChakraImage
-          src={imageSrc}
-          alt={alt}
-          w={displayWidth}
-          h={displayHeight}
-          objectFit={objectFit}
+    <Box
+      position="relative"
+      w={displayWidth}
+      h={displayHeight}
+      borderRadius={borderRadius}
+      overflow="hidden"
+      {...restProps}
+    >
+      {!isLoaded && (
+        <Skeleton
+          position="absolute"
+          inset={0}
           borderRadius={borderRadius}
-          loading={loading}
-          fallbackSrc={fallbackSrc}
-          onLoad={() => setIsLoaded(true)}
-          onClick={onClick}
-          cursor={cursor}
-          {...restProps}
+          zIndex={0}
         />
       )}
-    </Skeleton>
+      <ChakraImage
+        src={imageSrc}
+        alt={alt}
+        w="100%"
+        h="100%"
+        objectFit={objectFit}
+        borderRadius={borderRadius}
+        loading={loading}
+        onLoad={() => setIsLoaded(true)}
+        onError={() => {
+          if (imageSrc === primarySrc && primarySrc !== originalSrc) {
+            setImageSrc(originalSrc)
+            return
+          }
+
+          if (imageSrc !== fallbackSrc) {
+            setImageSrc(fallbackSrc)
+            return
+          }
+
+          setIsLoaded(true)
+        }}
+        onClick={onClick}
+        cursor={cursor}
+        position="absolute"
+        inset={0}
+        zIndex={1}
+      />
+    </Box>
   )
 }
 

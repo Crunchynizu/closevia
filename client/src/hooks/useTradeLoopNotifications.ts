@@ -53,7 +53,7 @@ export const useTradeLoopNotifications = () => {
             const isTradeMatch = Number(notif.participant_count) === 2
             toast({
               id: `trade-loop-${notif.id}`,
-              title: isTradeMatch ? 'Trade Match Found!' : 'Multi-Way Trade Detected!',
+              title: isTradeMatch ? 'Trade Connect Found!' : 'Multi-Way Trade Detected!',
               description: notif.message,
               status: 'success',
               duration: 8000,

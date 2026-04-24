@@ -297,6 +297,7 @@ func CreateTables() error {
 		"pickup_latitude":      "DECIMAL(10,8) NULL",
 		"pickup_longitude":     "DECIMAL(11,8) NULL",
 		"pickup_address":       "TEXT NULL",
+		"featured_order":       "INT NULL",
 	}
 
 	for col, def := range productCols {
@@ -491,6 +492,7 @@ func CreateTables() error {
 			bidding_type ENUM('none', 'blind', 'open') DEFAULT 'none',
 			view_count INT DEFAULT 0,
 			boosted_at TIMESTAMP NULL,
+			featured_order INT NULL,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 			FOREIGN KEY (seller_id) REFERENCES users(id) ON DELETE CASCADE,

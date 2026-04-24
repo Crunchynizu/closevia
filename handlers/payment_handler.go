@@ -185,6 +185,7 @@ func defaultCapabilitiesForTier(tier string) map[string]interface{} {
 			"listing_limit":                   999999,
 			"active_trade_limit":              999999,
 			"monthly_boost_limit":             10,
+			"boost_duration_hours":            6,
 			"free_boost_enabled":              true,
 			"featured_listing_enabled":        true,
 			"priority_listing_visibility":     true,
@@ -202,6 +203,7 @@ func defaultCapabilitiesForTier(tier string) map[string]interface{} {
 			"listing_limit":                   30,
 			"active_trade_limit":              25,
 			"monthly_boost_limit":             3,
+			"boost_duration_hours":            3,
 			"free_boost_enabled":              true,
 			"featured_listing_enabled":        true,
 			"priority_listing_visibility":     true,
@@ -216,11 +218,12 @@ func defaultCapabilitiesForTier(tier string) map[string]interface{} {
 		}
 	default:
 		return map[string]interface{}{
-			"listing_limit":       10,
-			"active_trade_limit":  5,
-			"monthly_boost_limit": 0,
-			"free_boost_enabled":  false,
-			"discovery_priority":  1,
+			"listing_limit":        10,
+			"active_trade_limit":   5,
+			"monthly_boost_limit":  0,
+			"boost_duration_hours": 0,
+			"free_boost_enabled":   false,
+			"discovery_priority":   1,
 		}
 	}
 }
@@ -274,6 +277,37 @@ func getUserPlanCapabilities(db *sql.DB, userID int) (paymentPremiumPlan, error)
 	plan := paymentPremiumPlan{Tier: "free", Name: "Free", Capabilities: map[string]interface{}{}}
 	applyDefaultCapabilities(&plan)
 	return plan, nil
+}
+
+func getBoostDurationHoursForTier(db *sql.DB, tier string) int {
+	normalizedTier := strings.ToLower(strings.TrimSpace(tier))
+	if normalizedTier == "" {
+		normalizedTier = "free"
+	}
+
+	_, plans, _, err := loadPaymentPremiumConfig(db)
+	if err == nil {
+		var fallback *paymentPremiumPlan
+		for i := range plans {
+			if !plans[i].IsActive || !strings.EqualFold(plans[i].Tier, normalizedTier) {
+				continue
+			}
+			applyDefaultCapabilities(&plans[i])
+			if plans[i].BillingType == "free" || plans[i].BillingType == "monthly" || plans[i].PlanKey == normalizedTier {
+				return getCapInt(plans[i].Capabilities, "boost_duration_hours", 0)
+			}
+			if fallback == nil {
+				fallback = &plans[i]
+			}
+		}
+		if fallback != nil {
+			return getCapInt(fallback.Capabilities, "boost_duration_hours", 0)
+		}
+	}
+
+	defaultPlan := paymentPremiumPlan{Tier: normalizedTier, Capabilities: map[string]interface{}{}}
+	applyDefaultCapabilities(&defaultPlan)
+	return getCapInt(defaultPlan.Capabilities, "boost_duration_hours", 0)
 }
 
 func parseRemittanceExternalID(externalID string) (paymentID int, riderID int, ok bool) {
@@ -1537,10 +1571,28 @@ func (h *PaymentHandler) GetUserSubscription(c *fiber.Ctx) error {
 		endDateStr = &formatted
 	}
 
+	plan, _ := getUserPlanCapabilities(h.db, userID)
+	monthlyBoostLimit := getCapInt(plan.Capabilities, "monthly_boost_limit", 0)
+	boostDurationHours := getCapInt(plan.Capabilities, "boost_duration_hours", 0)
+	if boostDurationHours <= 0 {
+		boostDurationHours = getBoostDurationHoursForTier(h.db, plan.Tier)
+	}
+	usageMonth := time.Now().Format("2006-01")
+	var boostsUsed int
+	_ = h.db.QueryRow("SELECT COALESCE(usage_count, 0) FROM premium_feature_usage WHERE user_id = ? AND feature_key = 'boosted_listings' AND usage_month = ?", userID, usageMonth).Scan(&boostsUsed)
+	boostsRemaining := monthlyBoostLimit - boostsUsed
+	if boostsRemaining < 0 {
+		boostsRemaining = 0
+	}
+
 	return c.JSON(models.APIResponse{Success: true, Data: fiber.Map{
-		"tier":       tier,
-		"is_premium": isPremium,
-		"end_date":   endDateStr,
+		"tier":                   tier,
+		"is_premium":             isPremium,
+		"end_date":               endDateStr,
+		"monthly_boost_limit":    monthlyBoostLimit,
+		"boosts_used_this_month": boostsUsed,
+		"boosts_remaining":       boostsRemaining,
+		"boost_duration_hours":   boostDurationHours,
 	}})
 }
 

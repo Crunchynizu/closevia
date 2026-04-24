@@ -571,7 +571,7 @@ const EditProduct: React.FC = () => {
                 <Box bg="yellow.50" p={3} borderRadius="md" borderWidth="1px" borderColor="yellow.200">
                   <FormControl>
                     <FormLabel fontSize="xs" fontWeight="bold" color="yellow.800" mb={2}>
-                      📦 How would you like buyers to collect this item?
+                      📦 How would you like other users to collect this item?
                     </FormLabel>
                     <VStack align="stretch" spacing={2}>
                       {/* Option 1: Use Current Location */}
@@ -604,7 +604,7 @@ const EditProduct: React.FC = () => {
                             useCurrentLocation()
                           }}>
                             <Text fontWeight="600" fontSize="xs">✓ Use My Current Location</Text>
-                            <Text fontSize="9px" color="gray.600">Buyers pick up from your detected location</Text>
+                            <Text fontSize="9px" color="gray.600">Other users pick up from your detected location</Text>
                           </VStack>
                           {detectingLocation && <Spinner size="sm" />}
                         </HStack>

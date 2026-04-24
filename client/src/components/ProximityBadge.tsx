@@ -10,15 +10,24 @@ interface ProximityBadgeProps {
   type: 'user' | 'product'
   targetId: number
   showIcon?: boolean
+  prefetchedDistanceKm?: number | null
+  prefetchedDistanceLabel?: string | null
 }
 
 const AI_DISABLED = import.meta.env.VITE_DISABLE_AI === 'true'
 
-const ProximityBadge: React.FC<ProximityBadgeProps> = ({ type, targetId, showIcon = true }) => {
-  const { user, token, isAuthenticated } = useAuth()
+const ProximityBadge: React.FC<ProximityBadgeProps> = ({
+  type,
+  targetId,
+  showIcon = true,
+  prefetchedDistanceKm,
+  prefetchedDistanceLabel,
+}) => {
+  const { user, isAuthenticated } = useAuth()
   const badgeBg = useColorModeValue('whiteAlpha.900', 'blackAlpha.800')
   const badgeColor = useColorModeValue('brand.600', 'brand.300')
-  const canFetchProximity = !!targetId && !AI_DISABLED && isAuthenticated && !!token
+  const hasPrefetchedDistance = Number.isFinite(prefetchedDistanceKm) || !!prefetchedDistanceLabel
+  const canFetchProximity = !!targetId && !AI_DISABLED && isAuthenticated && !hasPrefetchedDistance
 
   const { data: distance, isLoading: loading, error } = useQuery<DistanceResult | null>({
     queryKey: ['proximity', user?.id, type, targetId],
@@ -38,6 +47,49 @@ const ProximityBadge: React.FC<ProximityBadgeProps> = ({ type, targetId, showIco
     refetchOnWindowFocus: false,
     refetchOnMount: false,
   })
+
+  const formatPrefetchedDistance = () => {
+    if (prefetchedDistanceLabel && prefetchedDistanceLabel.trim()) {
+      return prefetchedDistanceLabel.replace(/\s+/g, ' ').trim()
+    }
+
+    const km = prefetchedDistanceKm ?? 0
+    if (!Number.isFinite(km)) return ''
+    if (km < 1) {
+      return `${Math.round(km * 1000)}m away`
+    }
+    if (km < 10) {
+      return `${km.toFixed(1)}km away`
+    }
+    return `${Math.round(km)}km away`
+  }
+
+  if (hasPrefetchedDistance) {
+    const displayLabel = formatPrefetchedDistance()
+    if (!displayLabel) return null
+
+    return (
+      <Tooltip label={`Distance: ${Number.isFinite(prefetchedDistanceKm) ? prefetchedDistanceKm!.toFixed(2) : 'N/A'} km`}>
+        <Badge
+          bg={badgeBg}
+          color={badgeColor}
+          variant="solid"
+          fontSize="10px"
+          fontWeight="800"
+          borderRadius="full"
+          px={2.5}
+          py={1}
+          shadow="sm"
+          backdropFilter="blur(8px)"
+        >
+          <HStack spacing={1}>
+            {showIcon && <Icon as={FaMapMarkerAlt} />}
+            <span>{displayLabel.toUpperCase()}</span>
+          </HStack>
+        </Badge>
+      </Tooltip>
+    )
+  }
 
   if (!canFetchProximity) return null
 
@@ -98,5 +150,3 @@ const ProximityBadge: React.FC<ProximityBadgeProps> = ({ type, targetId, showIco
 }
 
 export default ProximityBadge
-
-

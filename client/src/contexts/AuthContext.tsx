@@ -4,7 +4,8 @@ import { User } from '../types'
 import { api, API_BASE_URL } from '../services/api'
 import { normalizeImageUrl } from '../utils/imageUtils'
 import { onAuthInvalid, resetAuthInvalid } from '../utils/authEvents'
-import { clearStoredAuth, getStoredToken, getStoredUser, setStoredToken, setStoredUser } from '../utils/authStorage'
+import { clearStoredAuth, getStoredToken, getStoredUser, setStoredAuthenticatedSession, setStoredToken, setStoredUser } from '../utils/authStorage'
+import { broadcastAuthSync, broadcastSessionActivity, onAuthSync } from '../utils/authSync'
 
 interface AuthContextType {
   user: User | null
@@ -80,9 +81,9 @@ const getPersistableUser = (user: User): Record<string, unknown> => {
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const queryClient = useQueryClient()
-  // Synchronously initialize from localStorage so auth survives refresh
+  // Synchronously initialize from shared browser storage so auth survives refresh/new tabs.
   const [user, setUserState] = useState<User | null>(() => getCachedUser())
-  const [token, setTokenState] = useState<string | null>(() => getStoredToken())
+  const [token, setTokenState] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [authInitialized, setAuthInitialized] = useState(false)
   const initOnceRef = useRef(false)
@@ -107,11 +108,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     })
   }
 
-  // Set auth header immediately if token exists (before any useEffect fires)
-  if (token) {
-    api.defaults.headers.common['Authorization'] = `Bearer ${token}`
-  }
-
   const normalizeProfilePicture = (pic?: string) => {
     if (!pic || typeof pic !== 'string') return pic
     const cleaned = pic.replace(/[?&]t=\d+/g, '')
@@ -132,7 +128,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const isAuthenticated = !!user
 
   const clearAuthState = () => {
-    delete api.defaults.headers.common['Authorization']
     clearStoredAuth()
     setTokenState(null)
     setUserState(null)
@@ -163,13 +158,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           return
         }
 
-        // Check if user is logged in on app start
-        const storedToken = getStoredToken()
-
-        if (storedToken) {
-          api.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`
-        }
-        await fetchUserProfile(storedToken || undefined)
+        await fetchUserProfile()
       } catch {
       } finally {
         setAuthInitialized(true)
@@ -184,10 +173,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return onAuthInvalid(() => {
       void api.post('/api/auth/logout').catch(() => undefined)
       clearAuthState()
+      broadcastAuthSync('logout')
     })
   }, [queryClient])
 
-  const fetchUserProfile = async (currentToken?: string) => {
+  useEffect(() => {
+    return onAuthSync((type) => {
+      if (type === 'logout') {
+        resetAuthInvalid()
+        clearAuthState()
+        return
+      }
+
+      if (type === 'login') {
+        resetAuthInvalid()
+        void fetchUserProfile()
+      }
+    })
+  }, [queryClient])
+
+  const fetchUserProfile = async () => {
     try {
       // Add timeout to prevent infinite loading (generous for mobile connections)
       const controller = new AbortController()
@@ -201,12 +206,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       const rawData = response.data.data
       const userData = normalizeUser(rawData?.user || rawData)
+      resetAuthInvalid()
+      setStoredAuthenticatedSession(true)
       setUser(userData)
-
-      // If token was passed, ensure it's set in state
-      if (currentToken && !token) {
-        setToken(currentToken)
-      }
     } catch (error: any) {
       // Ignore canceled requests (happens during navigation or component unmount)
       if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
@@ -239,26 +241,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Exposed helper to allow components to refresh user data after updates
   const refreshUser = async () => {
     // Don't change loading state - just refresh user data silently
-    await fetchUserProfile(token || undefined)
+    await fetchUserProfile()
   }
 
-  // Helper to check and restore authentication from stored token
+  // Helper to check and restore authentication from the shared session cookie.
   const restoreAuthentication = async () => {
     if (restoringRef.current) return
     restoringRef.current = true
     try {
-      const storedToken = getStoredToken()
-      if (storedToken) {
-        // Ensure axios is using the stored token
-        if (storedToken !== token) {
-          setToken(storedToken)
-        }
-        api.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`
-      }
-
       // If user is missing, fetch profile to populate it
       if (!user) {
-        await fetchUserProfile(storedToken || undefined)
+        await fetchUserProfile()
       }
     } finally {
       restoringRef.current = false
@@ -281,25 +274,23 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const completeLogin = async (newToken: string, userData?: User) => {
     resetAuthInvalid()
-    // 1. Set authorization header for current and future requests
-    api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`
-    
-    // 2. Update token state (triggers localStorage update via wrapper)
-    setToken(newToken)
-    
-    // 3. Update user state if provided, otherwise fetch it
+    setStoredAuthenticatedSession(true)
+    // Keep the fresh token only in memory for this tab; browser-wide auth is cookie-based.
+    setTokenState(newToken)
+    setStoredToken(null)
+
+    // Update user state if provided, otherwise fetch it.
     let finalUser = userData ? normalizeUser(userData) : null
     
     if (finalUser) {
       setUser(finalUser)
     }
     
-    // 4. Always ensure we have the latest profile from server
-    // (This also handles the case where userData wasn't provided)
-    await fetchUserProfile(newToken)
-    
-    // Get the updated user from state or freshly fetched
-    // Note: setUser is async-ish via state update, so we return what we just fetched/normalized
+    // Always refresh from the cookie-backed profile endpoint so every tab can share the same session.
+    await fetchUserProfile()
+    broadcastSessionActivity()
+    broadcastAuthSync('login')
+
     return finalUser
   }
 
@@ -386,7 +377,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const logout = () => {
     void api.post('/api/auth/logout').catch(() => undefined)
     resetAuthInvalid()
+    setStoredAuthenticatedSession(false)
     clearAuthState()
+    broadcastAuthSync('logout')
   }
 
   const value: AuthContextType = {

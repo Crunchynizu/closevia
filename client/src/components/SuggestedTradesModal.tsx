@@ -218,7 +218,7 @@ export const SuggestedTradesModal: React.FC<SuggestedTradesModalProps> = ({ isOp
                                 <Icon as={FaRegLightbulb} color="yellow.500" boxSize={5} />
                             </Center>
                             <Text fontSize="xl" fontWeight="800" color="gray.800" letterSpacing="tight" noOfLines={1}>
-                                Trade Matches for "{product?.title}"
+                                Trade Connects for "{product?.title}"
                             </Text>
                         </HStack>
                         <Box ml="auto">
@@ -285,7 +285,7 @@ export const SuggestedTradesModal: React.FC<SuggestedTradesModalProps> = ({ isOp
                                             <Tooltip
                                                 label={likedIds.has(s.id)
                                                     ? "Undo this invite."
-                                                    : "Invite this item for Trade Match or Multi-Way loops."}
+                                                    : "Invite this item for Trade Connect or Multi-Way loops."}
                                                 hasArrow
                                                 placement="top"
                                             >

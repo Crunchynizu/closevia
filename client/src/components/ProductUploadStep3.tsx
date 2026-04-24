@@ -153,7 +153,7 @@ const ProductUploadStep3: React.FC<ProductUploadStep3Props> = ({
         </VStack>
 
         {/* Market Value Ribbon — uses AI estimate when reliable, otherwise
-            falls back to the user-entered price sFix trade matches card persistence + notify third party on accept/decline
+            falls back to the user-entered price sFix Trade Connect card persistence + notify third party on accept/decline
             
             Fix counter offer routing so it appears in original offerer's received offerso the badge still renders. */}
         {(() => {

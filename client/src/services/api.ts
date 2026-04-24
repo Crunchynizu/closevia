@@ -1,13 +1,14 @@
 import axios, { AxiosError, AxiosRequestConfig } from 'axios'
-import { isAuthInvalid, markAuthInvalid } from '../utils/authEvents'
-import { clearStoredAuth, getStoredToken } from '../utils/authStorage'
+import { isAuthInvalid, markAuthInvalidIfAuthenticated } from '../utils/authEvents'
+import { clearStoredAuth, hasStoredAuthenticatedSession } from '../utils/authStorage'
 
 function normalizeLoopbackBaseUrl(raw: string): string {
   try {
     const u = new URL(raw)
-    // On some Windows setups, `localhost` resolves to IPv6 `::1`,
-    // but the backend may only be listening on IPv4.
-    if (u.hostname === 'localhost' || u.hostname === '::1') {
+    // Keep `localhost` as-is in the browser so dev cookies stay on the same
+    // site (`localhost` <-> `localhost`). Rewriting to `127.0.0.1` breaks
+    // cookie-backed auth because the browser treats them as different hosts.
+    if (u.hostname === '::1') {
       u.hostname = '127.0.0.1'
     }
     return u.toString().replace(/\/$/, '')
@@ -89,15 +90,7 @@ api.interceptors.request.use(
       return Promise.reject(new axios.CanceledError('Authentication is invalid'))
     }
 
-    const token = getStoredToken()
-    // Ensure headers object exists
     config.headers = config.headers || {}
-    if (token) {
-      // Do not override if explicitly set by caller
-      if (!config.headers['Authorization']) {
-        config.headers['Authorization'] = `Bearer ${token}`
-      }
-    }
 
     // Ensure Content-Type is set for JSON payloads, but do not override for FormData
     if (config.data && !(config.data instanceof FormData)) {
@@ -114,8 +107,6 @@ api.interceptors.request.use(
         const authHeader = (config.headers['Authorization'] || config.headers['authorization']) as string | undefined
         // eslint-disable-next-line no-console
         console.groupCollapsed(`[API REQUEST] ${method} ${url}`)
-        // eslint-disable-next-line no-console
-        console.log('Token present:', !!token)
         // eslint-disable-next-line no-console
         console.log('Authorization header set:', !!authHeader)
         // eslint-disable-next-line no-console
@@ -152,6 +143,8 @@ api.interceptors.response.use(
     const cfg = error.config as (AxiosRequestConfig & { _retry?: boolean }) | undefined
     const status = error.response?.status
     const url = cfg?.url || ''
+    const method = String(cfg?.method || 'get').toLowerCase()
+    const isUnsafeApiRequest = !safeMethods.has(method) && String(url).startsWith('/api/')
 
     // Detect review submissions so we don't hard-redirect on 401; the UI can prompt login
     const isReviewEndpoint = typeof url === 'string' && /\/api\/users\/\d+\/reviews/i.test(url)
@@ -167,25 +160,17 @@ api.interceptors.response.use(
       } catch { }
     }
 
-    // Simple one-time retry on 401 if token exists but header was missing/not set
-    if (status === 401 && cfg && !cfg._retry && !isAuthInvalid()) {
-      const token = getStoredToken()
-      const authHeader = cfg.headers?.['Authorization'] || cfg.headers?.['authorization']
-      if (token && !authHeader) {
-        cfg._retry = true
-        cfg.headers = cfg.headers || {}
-        cfg.headers['Authorization'] = `Bearer ${token}`
-        return api(cfg)
-      }
-    }
-
     // On 401 after retry failed, let route guards and component-level handlers decide UX.
     // Do NOT hard-redirect here, because some pages are intentionally browsable by guests.
     if (status === 401) {
-      if (!isReviewEndpoint) {
+      const shouldInvalidateAuthenticatedSession = !isReviewEndpoint
+        && !isAuthRecoveryApiUrl(url)
+        && hasStoredAuthenticatedSession()
+        && (isProtectedApiUrl(url) || isUnsafeApiRequest)
+
+      if (shouldInvalidateAuthenticatedSession) {
         clearStoredAuth()
-        delete api.defaults.headers.common['Authorization']
-        markAuthInvalid(typeof url === 'string' && url.includes('/api/auth/refresh-session') ? 'refresh_failed' : 'unauthorized')
+        markAuthInvalidIfAuthenticated(typeof url === 'string' && url.includes('/api/auth/refresh-session') ? 'refresh_failed' : 'unauthorized')
       }
       if (isReviewEndpoint) {
         return Promise.reject(error)

@@ -7,8 +7,8 @@ import (
 
 // ProfileAnalysisResult represents the analysis of a user profile
 type ProfileAnalysisResult struct {
-	IsOutdated      bool      `json:"is_outdated"`
-	IsInactive      bool      `json:"is_inactive"`
+	IsOutdated      bool       `json:"is_outdated"`
+	IsInactive      bool       `json:"is_inactive"`
 	LastActivityAt  *time.Time `json:"last_activity_at,omitempty"`
 	ProfileAge      int        `json:"profile_age_days"`
 	Recommendations []string   `json:"recommendations"`
@@ -101,7 +101,7 @@ func AnalyzeProfile(db *sql.DB, userID int) (ProfileAnalysisResult, error) {
 
 	if !hasLocation {
 		result.Score -= 0.1
-		result.Recommendations = append(result.Recommendations, "Add your location to help buyers and sellers find you nearby.")
+		result.Recommendations = append(result.Recommendations, "Add your location to help nearby users find you.")
 	}
 
 	// Ensure score doesn't go below 0
@@ -152,4 +152,3 @@ func AnalyzeAllProfiles(db *sql.DB) (map[string]int, error) {
 
 	return summary, nil
 }
-

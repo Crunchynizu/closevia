@@ -89,15 +89,15 @@ const FloatingTab: React.FC<FloatingTabProps> = ({
           />
 
           {/* Dashboard Button */}
-          <Box position="relative">
+          <Box position="relative" h="full" w="56px" flexShrink={0}>
             <IconButton
               as={RouterLink}
               to={dashboardLink}
               aria-label="Dashboard"
               icon={<FiShoppingBag />}
               h="full"
-              w="56px"
-              flexShrink={0}
+              w="full"
+              minW="56px"
               bg="transparent"
               color="brand.500"
               borderRadius="full"

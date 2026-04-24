@@ -2,7 +2,24 @@ import { API_BASE_URL } from '../services/api'
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
 
-const backendUrl = API_BASE_URL.replace(/\/$/, '')
+const getBackendAssetBaseUrl = (): string => {
+  const configured = API_BASE_URL.replace(/\/$/, '')
+  if (configured) return configured
+
+  if (typeof window === 'undefined') {
+    return 'http://localhost:4000'
+  }
+
+  const { protocol, hostname } = window.location
+  const normalizedHost = hostname === '::1' ? '127.0.0.1' : hostname
+  if (LOOPBACK_HOSTS.has(normalizedHost)) {
+    return `${protocol}//${normalizedHost}:4000`
+  }
+
+  return ''
+}
+
+const backendUrl = getBackendAssetBaseUrl()
 const LOCAL_IMAGE_FALLBACK = '/no-image.svg'
 const CLIENT_PUBLIC_IMAGE_PREFIXES = ['/assets/', '/images/', '/icons/']
 const CLIENT_PUBLIC_IMAGE_FILES = new Set(['/placeholder.svg', '/no-image.svg'])
@@ -120,7 +137,9 @@ export const getImageUrl = (imagePath: string | null | undefined, cacheBust: boo
   }
   
   // If it's a relative path, prepend the backend URL
-  const fullUrl = `${backendUrl}${normalizedPath}`
+  const fullUrl = normalizedPath.startsWith('/uploads/') && backendUrl
+    ? `${backendUrl}${normalizedPath}`
+    : `${backendUrl}${normalizedPath}`
   return cacheBust ? addCacheBuster(fullUrl) : fullUrl
 }
 

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react'
-import { Modal, ModalOverlay, ModalContent, ModalHeader, ModalBody, ModalCloseButton, VStack, Grid, Box, Image, Text, FormControl, FormLabel, Input, HStack, Button, useToast, Badge, Card, CardBody, Icon, useColorModeValue, Textarea, Spinner, Flex, Link, Checkbox, Alert, AlertIcon, Switch } from '@chakra-ui/react'
-import { FaMapMarkerAlt, FaTruck, FaLocationArrow, FaBoxOpen, FaHandshake, FaTimes } from 'react-icons/fa'
+import { Modal, ModalOverlay, ModalContent, ModalHeader, ModalBody, ModalCloseButton, VStack, Grid, Box, Image, Text, FormControl, FormLabel, Input, HStack, Button, useToast, Badge, Card, CardBody, Icon, useColorModeValue, Spinner, Flex, Checkbox, Alert, AlertIcon, Switch, RadioGroup, Radio, useBreakpointValue, Accordion, AccordionItem, AccordionButton, AccordionPanel, AccordionIcon, Progress, Divider } from '@chakra-ui/react'
+import { motion, useDragControls, type PanInfo } from 'framer-motion'
+import { FaMapMarkerAlt, FaTruck, FaLocationArrow, FaBoxOpen, FaHandshake, FaTimes, FaCheckCircle, FaExternalLinkAlt } from 'react-icons/fa'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../contexts/AuthContext'
@@ -9,6 +10,7 @@ import { api } from '../services/api'
 import { Product, Trade, TradeCreate, TradeOption } from '../types'
 import { getFirstImage } from '../utils/imageUtils'
 import { reverseGeocodeToAddress, formatCoordinates } from '../utils/locationUtils'
+import { getProductLocationKey, getProductLocationLabel, getProductRawLocation } from '../utils/productLocation'
 import { useInvalidateDashboard, DASHBOARD_QUERY_KEYS } from '../hooks/useDashboard'
 import { updateTrade } from '../services/tradeService'
 
@@ -25,6 +27,7 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
   const toast = useToast()
   const { showNotification } = useNotification()
   const queryClient = useQueryClient()
+  const sheetDragControls = useDragControls()
   const { invalidateOffers, invalidateDashboard } = useInvalidateDashboard()
   const [userProducts, setUserProducts] = useState<Product[]>([])
   const [targetProduct, setTargetProduct] = useState<Product | null>(null)
@@ -40,16 +43,26 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
   const [committedProductIds, setCommittedProductIds] = useState<Set<number>>(new Set())
   const [loadingPendingCheck, setLoadingPendingCheck] = useState(false)
   const [detectingLocation, setDetectingLocation] = useState(false)
-  const [multiTargetMode, setMultiTargetMode] = useState(false)
+  const [multiTargetMode, setMultiTargetMode] = useState(true)
   const [additionalTargetIds, setAdditionalTargetIds] = useState<number[]>([])
   const [sellerProducts, setSellerProducts] = useState<Product[]>([])
   const [targetSearchTerm, setTargetSearchTerm] = useState('')
   const [loadingSellerProducts, setLoadingSellerProducts] = useState(false)
+  const [locationPlan, setLocationPlan] = useState<'product' | 'shared' | 'later'>('product')
+  const [mobileStep, setMobileStep] = useState(0)
+  const [locationPlanAcknowledged, setLocationPlanAcknowledged] = useState(false)
   // Delivery location state
   const [detectedCoords, setDetectedCoords] = useState<{ lat: number; lng: number } | null>(null)
   const [detectedLocationLabel, setDetectedLocationLabel] = useState('')
   const [profileLocationLabel, setProfileLocationLabel] = useState('')
   const [manualAddress, setManualAddress] = useState('')
+  // Meetup location state
+  const [meetupChoice, setMeetupChoice] = useState<'my_product' | 'their_product' | 'midpoint' | 'custom' | null>(null)
+  const [customMeetupAddress, setCustomMeetupAddress] = useState('')
+  const [meetupDate, setMeetupDate] = useState('')
+  const [meetupTime, setMeetupTime] = useState('')
+  const [midpointLabel, setMidpointLabel] = useState('')
+  const [loadingMidpoint, setLoadingMidpoint] = useState(false)
   const isEditMode = !!editTrade
   const cardBg = useColorModeValue('white', 'gray.800')
   const borderColor = useColorModeValue('gray.200', 'gray.700')
@@ -60,6 +73,29 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
   const selectedBorder = '#1D9E75'
   const selectedTextColor = '#1D9E75'
   const mutedTextColor = useColorModeValue('gray.600', 'gray.400')
+  const isMobile = useBreakpointValue({ base: true, md: false }) ?? false
+  const useTwoColumnLayout = useBreakpointValue({ base: false, md: false, lg: true }) ?? false
+
+  const handleSheetDragEnd = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+    if (!isMobile) return
+    if (info.offset.y > 110 || info.velocity.y > 700) {
+      onClose()
+    }
+  }
+
+  const mobileSheetMotionProps = isMobile ? ({
+    as: motion.div,
+    initial: { y: '100%', opacity: 1 },
+    animate: { y: 0, opacity: 1 },
+    exit: { y: '100%', opacity: 1 },
+    transition: { type: 'spring', stiffness: 360, damping: 34 },
+    drag: 'y',
+    dragControls: sheetDragControls,
+    dragListener: false,
+    dragConstraints: { top: 0, bottom: 420 },
+    dragElastic: { top: 0, bottom: 0.22 },
+    onDragEnd: handleSheetDragEnd,
+  } as any) : {}
 
   const selectedProducts = useMemo(() => userProducts.filter(p => selectedOfferIds.includes(p.id)), [userProducts, selectedOfferIds])
   const visibleProducts = useMemo(() => {
@@ -84,13 +120,78 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
       })
   }, [sellerProducts, targetSearchTerm])
 
+  const selectedTargetProducts = useMemo(() => {
+    if (!targetProduct) return []
+    return [
+      targetProduct,
+      ...sellerProducts.filter(p => additionalTargetIds.includes(p.id)),
+    ]
+  }, [additionalTargetIds, sellerProducts, targetProduct])
+
+  const selectedTargetLocationKeys = useMemo(
+    () => new Set(selectedTargetProducts.map(getProductLocationKey)),
+    [selectedTargetProducts]
+  )
+
+  const selectedTargetsHaveDifferentLocations = selectedTargetLocationKeys.size > 1
+  const selectedTargetsNeedLocationPlan = selectedTargetProducts.length > 1 && selectedTargetsHaveDifferentLocations
+
+  // For meetup: pick the first offered product that has location data
+  const myProductForMeetup = useMemo(
+    () => selectedProducts.find(p => getProductRawLocation(p)) ?? null,
+    [selectedProducts]
+  )
+
+  // Extract coords from a product (prefers pickup coords, falls back to general coords)
+  const getProductCoords = (p: Partial<Product> | null): { lat: number; lng: number } | null => {
+    if (!p) return null
+    const lat = (p as any).pickup_latitude ?? (p as any).latitude
+    const lng = (p as any).pickup_longitude ?? (p as any).longitude
+    return lat != null && lng != null ? { lat: Number(lat), lng: Number(lng) } : null
+  }
+
+  // Midpoint between offered product and target product (only when both have coords)
+  const meetupMidpointCoords = useMemo(() => {
+    const mine = getProductCoords(myProductForMeetup)
+    const theirs = getProductCoords(targetProduct)
+    if (!mine || !theirs) return null
+    return { lat: (mine.lat + theirs.lat) / 2, lng: (mine.lng + theirs.lng) / 2 }
+  }, [myProductForMeetup, targetProduct])
+
+  // Resolved human-readable meetup address for the selected choice
+  const resolvedMeetupAddress = useMemo(() => {
+    if (meetupChoice === 'my_product') return getProductRawLocation(myProductForMeetup)
+    if (meetupChoice === 'their_product') return getProductRawLocation(targetProduct)
+    if (meetupChoice === 'midpoint') return midpointLabel || null
+    if (meetupChoice === 'custom') return customMeetupAddress.trim() || null
+    return null
+  }, [meetupChoice, myProductForMeetup, targetProduct, midpointLabel, customMeetupAddress])
+
+  // OSM map link for selected meetup point
+  const meetupMapUrl = useMemo(() => {
+    if (meetupChoice === 'my_product') {
+      const c = getProductCoords(myProductForMeetup)
+      return c ? `https://www.openstreetmap.org/?mlat=${c.lat}&mlon=${c.lng}&zoom=15` : null
+    }
+    if (meetupChoice === 'their_product') {
+      const c = getProductCoords(targetProduct)
+      return c ? `https://www.openstreetmap.org/?mlat=${c.lat}&mlon=${c.lng}&zoom=15` : null
+    }
+    if (meetupChoice === 'midpoint' && meetupMidpointCoords) {
+      return `https://www.openstreetmap.org/?mlat=${meetupMidpointCoords.lat}&mlon=${meetupMidpointCoords.lng}&zoom=14`
+    }
+    return null
+  }, [meetupChoice, myProductForMeetup, targetProduct, meetupMidpointCoords])
+
   const hasFixedLocation = useMemo(() => {
-    const locationType = targetProduct?.location_type
-    if (locationType === 'current_location' || locationType === 'pickup_location') return true
-    if ((targetProduct as any)?.pickup_address && (targetProduct as any).pickup_address.trim()) return true
-    if (targetProduct?.location && targetProduct.location.trim()) return true
-    return false
-  }, [targetProduct])
+    return selectedTargetProducts.some((product) => {
+      const locationType = product.location_type
+      if (locationType === 'current_location' || locationType === 'pickup_location') return true
+      if ((product as any)?.pickup_address && (product as any).pickup_address.trim()) return true
+      if (product.location && product.location.trim()) return true
+      return false
+    })
+  }, [selectedTargetProducts])
 
   const isTargetLoading = !!targetProductId && !targetProduct
 
@@ -131,10 +232,13 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
     setManualAddress('')
     setDetectingLocation(false)
     setCommittedProductIds(new Set())
-    setMultiTargetMode(false)
+    setMultiTargetMode(!editTrade)
     setAdditionalTargetIds([])
     setSellerProducts([])
     setTargetSearchTerm('')
+    setLocationPlan('product')
+    setLocationPlanAcknowledged(false)
+    setMobileStep(0)
     if (user && targetProductId) {
       ; (async () => {
         try {
@@ -182,6 +286,13 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
   }, [isOpen, user, targetProductId, editTrade])
 
   useEffect(() => {
+    if (!selectedTargetsNeedLocationPlan) {
+      setLocationPlan('product')
+      setLocationPlanAcknowledged(false)
+    }
+  }, [selectedTargetsNeedLocationPlan])
+
+  useEffect(() => {
     if (!isOpen || !user?.latitude || !user?.longitude) return
 
     let cancelled = false
@@ -201,9 +312,26 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
   // so they re-confirm the commitment if they come back to it.
   useEffect(() => {
     if (tradeOption !== 'pickup') setPickupAcknowledged(false)
+    if (tradeOption !== 'meetup') {
+      setMeetupChoice(null)
+      setCustomMeetupAddress('')
+      setMeetupDate('')
+      setMeetupTime('')
+      setMidpointLabel('')
+    }
   }, [tradeOption])
 
-  // Fetch seller's other products when multi-target mode is enabled
+  // Reverse-geocode the midpoint when the user selects that option
+  useEffect(() => {
+    if (meetupChoice === 'midpoint' && meetupMidpointCoords && !midpointLabel) {
+      setLoadingMidpoint(true)
+      reverseGeocodeToAddress(meetupMidpointCoords.lat, meetupMidpointCoords.lng)
+        .then(label => { setMidpointLabel(label); setLoadingMidpoint(false) })
+        .catch(() => setLoadingMidpoint(false))
+    }
+  }, [meetupChoice, meetupMidpointCoords, midpointLabel])
+
+  // Fetch the other trader's products when multi-target mode is enabled
   useEffect(() => {
     if (!multiTargetMode || !targetProduct?.seller_id || !isOpen) {
       setSellerProducts([])
@@ -377,7 +505,18 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
       toast({
         id: "trademodal-pickup-ack",
         title: 'Confirm pickup commitment',
-        description: "Please confirm you're willing to travel to the seller's pickup location.",
+        description: "Please confirm you're willing to travel to the other trader's pickup location.",
+        status: 'warning',
+        duration: 3500,
+      })
+      return
+    }
+
+    if (selectedTargetsNeedLocationPlan && !locationPlanAcknowledged) {
+      toast({
+        id: "trademodal-location-plan-ack",
+        title: 'Confirm pickup location details',
+        description: 'Selected products have different pickup locations. Please review and confirm the meetup plan.',
         status: 'warning',
         duration: 3500,
       })
@@ -411,26 +550,63 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
 
     try {
       setSubmittingTrade(true)
+
+      const proposedMeetupLocation = tradeOption === 'meetup' ? (resolvedMeetupAddress || '').trim() : ''
+      const proposedMeetupDate = tradeOption === 'meetup' ? meetupDate.trim() : ''
+      const proposedMeetupTime = tradeOption === 'meetup' ? meetupTime.trim() : ''
+
+      // Append meetup preference and proposed time to message so the other trader can see it
+      let finalMessage = tradeMessage
+      if (tradeOption === 'meetup' && (resolvedMeetupAddress || (meetupDate && meetupTime))) {
+        const parts: string[] = []
+        if (resolvedMeetupAddress) {
+          const choiceLabel =
+            meetupChoice === 'my_product' ? 'Near my item' :
+            meetupChoice === 'their_product' ? 'Near their item' :
+            meetupChoice === 'midpoint' ? 'Suggested midpoint' : 'Custom location'
+          parts.push(`📍 Preferred meetup: ${choiceLabel} — ${resolvedMeetupAddress}`)
+        }
+        if (meetupDate && meetupTime) {
+          try {
+            const dateLabel = new Date(`${meetupDate}T${meetupTime}`).toLocaleString('en-PH', {
+              weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+            })
+            parts.push(`🗓️ Proposed time: ${dateLabel}`)
+          } catch (_) {
+            parts.push(`🗓️ Proposed time: ${meetupDate} at ${meetupTime}`)
+          }
+        }
+        if (parts.length > 0) {
+          finalMessage = [tradeMessage, ...parts].filter(Boolean).join('\n')
+        }
+      }
+
       const payload: TradeCreate = {
         target_product_id: targetProductId,
         offered_product_ids: selectedOfferIds,
-        message: tradeMessage,
+        message: finalMessage,
         offered_cash_amount: offeredCashAmount || undefined,
         trade_option: 'meetup',
         meeting_type: tradeOption === 'pickup' ? 'pickup' : 'meetup',
         ...(multiTargetMode && additionalTargetIds.length > 0 && {
           additional_target_product_ids: additionalTargetIds,
         }),
+        ...(proposedMeetupLocation && { meetup_location: proposedMeetupLocation }),
+        ...(proposedMeetupDate && { meetup_date: proposedMeetupDate }),
+        ...(proposedMeetupTime && { meetup_time: proposedMeetupTime }),
       }
       if (isEditMode && editTrade?.id) {
         await updateTrade(editTrade.id, {
           action: 'edit_offer',
           offered_product_ids: selectedOfferIds,
-          message: tradeMessage,
+          message: finalMessage,
           offered_cash_amount: offeredCashAmount || undefined,
           trade_option: 'meetup',
           meeting_type: tradeOption === 'pickup' ? 'pickup' : 'meetup',
           payment_method: editTrade.payment_method,
+          ...(proposedMeetupLocation && { meetup_location: proposedMeetupLocation }),
+          ...(proposedMeetupDate && { meetup_date: proposedMeetupDate }),
+          ...(proposedMeetupTime && { meetup_time: proposedMeetupTime }),
         })
       } else {
         await api.post('/api/trades', payload)
@@ -449,10 +625,12 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
       setPickupAcknowledged(false)
       setDetectedCoords(null)
       setManualAddress('')
-      setMultiTargetMode(false)
+      setMultiTargetMode(true)
       setAdditionalTargetIds([])
       setSellerProducts([])
       setTargetSearchTerm('')
+      setLocationPlan('product')
+      setLocationPlanAcknowledged(false)
       onClose()
     } catch (e: any) {
       const errorMessage = e?.response?.data?.error || (isEditMode ? 'Failed to update trade' : 'Failed to send trade')
@@ -463,481 +641,512 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
     }
   }
 
-  return (
-    <Modal isOpen={isOpen} onClose={onClose} isCentered size="sm">
-      <ModalOverlay />
-      <ModalContent maxW="400px">
-        <ModalHeader fontSize="lg" fontWeight="semibold">{user ? (isEditMode ? 'Edit Your Offer' : 'Propose a Trade') : 'Sign in to Continue'}</ModalHeader>
-        <ModalCloseButton />
-        <ModalBody pb={6}>
-          {user ? (
-            <VStack spacing={3} align="stretch">
-              {/* Target Product Display */}
-              {isTargetLoading ? (
-                <Card variant="outline" borderColor={borderColor}>
-                  <CardBody p={3}>
-                    <HStack spacing={2} align="center">
-                      <Spinner size="sm" />
-                      <Text fontSize="11px" color={mutedTextColor}>Loading trade details...</Text>
-                    </HStack>
-                  </CardBody>
-                </Card>
-              ) : targetProduct ? (
-                <Card variant="outline" bg={targetCardBg} borderColor={targetCardBorderColor}>
-                  <CardBody p={3}>
-                    <VStack spacing={2} align="stretch">
-                      {/* Header row: label + toggle */}
-                      <HStack justify="space-between" align="center">
-                        <Text fontSize="10px" fontWeight="bold" color={targetLabelColor} textTransform="uppercase" letterSpacing="0.5px">
-                          Trading For: {multiTargetMode ? `${additionalTargetIds.length + 1} Item${additionalTargetIds.length > 0 ? 's' : ''}` : '1 Item'}
-                        </Text>
-                        {!isEditMode && (
-                          <HStack spacing={1} align="center">
-                            <Text fontSize="9px" color={mutedTextColor} fontWeight="500">Multiple</Text>
-                            <Switch
-                              size="sm"
-                              colorScheme="blue"
-                              isChecked={multiTargetMode}
-                              onChange={() => {
-                                if (multiTargetMode) {
-                                  setAdditionalTargetIds([])
-                                  setTargetSearchTerm('')
-                                }
-                                setMultiTargetMode(prev => !prev)
-                              }}
-                            />
-                          </HStack>
-                        )}
-                      </HStack>
+  const canConfirm = selectedOfferIds.length > 0 && !!tradeOption && (!selectedTargetsNeedLocationPlan || locationPlanAcknowledged)
+  const mobileSteps = ['Trading For', 'My Offered Items', 'Trade Details', 'Review']
 
-                      {/* Primary target product — always shown */}
-                      <HStack spacing={2} align="start">
-                        <Image src={getFirstImage(targetProduct.image_urls)} alt={targetProduct.title} w="60px" h="60px" objectFit="cover" rounded="md" loading="lazy" />
-                        <VStack spacing={1} align="start" flex={1}>
-                          <Text fontWeight="600" fontSize="12px" wordBreak="break-word">{targetProduct.title}</Text>
-                          <Text fontSize="10px" color="gray.500" noOfLines={2} wordBreak="break-word">{targetProduct.description}</Text>
-                          {targetProduct.bidding_type && targetProduct.bidding_type !== 'none' && (
-                            <HStack spacing={1}>
-                              {targetProduct.bidding_type === 'blind' && (
-                                <Badge colorScheme="orange" fontSize="9px">Blind Bidding</Badge>
-                              )}
-                              {targetProduct.bidding_type === 'open' && (
-                                <Badge colorScheme="green" fontSize="9px">Open Bidding</Badge>
-                              )}
-                            </HStack>
-                          )}
-                        </VStack>
-                      </HStack>
+  const selectedSummary = selectedProducts.length > 0 ? (
+    <Box bg={selectedBg} borderWidth="1px" borderColor="green.200" borderRadius="md" p={2}>
+      <HStack justify="space-between" mb={selectedProducts.length > 1 ? 2 : 0}>
+        <Text fontSize="11px" fontWeight="700" color={selectedTextColor}>
+          Selected: {selectedOfferIds.length} item{selectedOfferIds.length === 1 ? '' : 's'}
+          {targetProduct?.max_items_per_offer ? ` / ${targetProduct.max_items_per_offer}` : ''}
+        </Text>
+        {selectedOfferIds.length > 1 && <Badge colorScheme="green" variant="subtle">Bundle</Badge>}
+      </HStack>
+      {selectedProducts.length > 0 && (
+        <HStack spacing={1.5} overflowX="auto" pb={1} sx={{ scrollbarWidth: 'thin' }}>
+          {selectedProducts.map((product) => (
+            <HStack key={product.id} flex="0 0 auto" maxW="170px" bg="white" borderRadius="md" borderWidth="1px" borderColor="green.100" px={2} py={1.5} spacing={2}>
+              <Image src={getFirstImage(product.image_urls)} alt={product.title} w="28px" h="28px" objectFit="cover" rounded="md" loading="lazy" />
+              <Text fontSize="10px" fontWeight="600" color="gray.700" noOfLines={1}>{product.title}</Text>
+              <Icon as={FaTimes} boxSize={2.5} color="green.600" cursor="pointer" onClick={() => toggleOfferSelection(product)} />
+            </HStack>
+          ))}
+        </HStack>
+      )}
+    </Box>
+  ) : null
 
-                      {/* Multi-target section */}
-                      {multiTargetMode && (
-                        <VStack spacing={2} align="stretch">
-                          {additionalTargetIds.length > 0 && (
-                            <VStack align="start" spacing={1}>
-                              <Text fontSize="9px" color="blue.600" fontWeight="600">
-                                +{additionalTargetIds.length} more item{additionalTargetIds.length > 1 ? 's' : ''} selected
-                              </Text>
-                              <HStack wrap="wrap" spacing={1}>
-                                {sellerProducts
-                                  .filter(p => additionalTargetIds.includes(p.id))
-                                  .map(p => (
-                                    <HStack key={p.id} bg="blue.100" borderRadius="sm" px={1.5} py={0.5} spacing={1}>
-                                      <Image src={getFirstImage(p.image_urls)} w="14px" h="14px" objectFit="cover" rounded="sm" />
-                                      <Text fontSize="9px" fontWeight="500" maxW="60px" noOfLines={1}>{p.title}</Text>
-                                      <Icon as={FaTimes} boxSize={2} cursor="pointer" color="blue.500" onClick={() => toggleAdditionalTarget(p.id)} />
-                                    </HStack>
-                                  ))
-                                }
-                              </HStack>
-                            </VStack>
-                          )}
-
-                          <Text fontSize="9px" color="blue.600">
-                            Select more products from this seller to bundle into one trade.
-                          </Text>
-
-                          <Input
-                            placeholder="Search seller's items..."
-                            value={targetSearchTerm}
-                            onChange={(e) => setTargetSearchTerm(e.target.value.toLowerCase())}
-                            size="sm"
-                            fontSize="11px"
-                            _placeholder={{ color: 'gray.400' }}
-                            bg="white"
-                          />
-
-                          {loadingSellerProducts ? (
-                            <HStack justify="center" py={2}><Spinner size="sm" /></HStack>
-                          ) : visibleSellerProducts.length === 0 ? (
-                            <Text fontSize="9px" color={mutedTextColor} textAlign="center" py={2}>
-                              No other available items from this seller.
-                            </Text>
-                          ) : (
-                            <Box maxH="100px" overflowY="auto" pr={1}>
-                              <Grid templateColumns="repeat(4, 1fr)" gap={1.5} gridAutoRows="70px">
-                                {visibleSellerProducts.map(p => {
-                                  const isSelected = additionalTargetIds.includes(p.id)
-                                  const unavailReason = getTargetUnavailableReason(p)
-                                  const isDisabled = Boolean(unavailReason)
-                                  return (
-                                    <Box
-                                      key={p.id}
-                                      minH="70px"
-                                      borderWidth={isSelected ? '2px' : '0.5px'}
-                                      borderColor={isSelected ? 'blue.500' : borderColor}
-                                      rounded="md"
-                                      overflow="hidden"
-                                      onClick={() => !isDisabled && toggleAdditionalTarget(p.id)}
-                                      cursor={isDisabled ? 'not-allowed' : 'pointer'}
-                                      bg={isSelected ? 'blue.50' : 'white'}
-                                      opacity={isDisabled ? 0.48 : 1}
-                                      position="relative"
-                                    >
-                                      <Image src={getFirstImage(p.image_urls)} alt={p.title} w="full" h="35px" objectFit="cover" loading="lazy" filter={isDisabled ? 'grayscale(1)' : undefined} />
-                                      <Box p="0.5">
-                                        <Text fontSize="9px" noOfLines={1} fontWeight={isSelected ? '600' : '500'} color={isSelected ? 'blue.600' : 'inherit'}>{p.title}</Text>
-                                        {isDisabled && <Text fontSize="8px" color="gray.700" fontWeight="700">{unavailReason}</Text>}
-                                      </Box>
-                                    </Box>
-                                  )
-                                })}
-                              </Grid>
-                            </Box>
-                          )}
-                        </VStack>
-                      )}
-                    </VStack>
-                  </CardBody>
-                </Card>
-              ) : null}
-
-              {/* Item Selection */}
-              <VStack align="start" spacing={1} w="full">
-                <Text fontWeight="600" fontSize="11px" textTransform="uppercase" color={mutedTextColor} letterSpacing="0.5px">
-                  Offering: 1 or more of my items
-                  {targetProduct?.max_items_per_offer ? (
-                    <Badge ml={2} colorScheme="brand" variant="subtle" fontSize="9px">
-                      Max {targetProduct.max_items_per_offer}
-                    </Badge>
-                  ) : null}
+  const targetSection = (
+    <VStack spacing={3} align="stretch" h="full" minH={0}>
+      {isTargetLoading ? (
+        <Card variant="outline" borderColor={borderColor}>
+          <CardBody p={3}>
+            <HStack spacing={2} align="center">
+              <Spinner size="sm" />
+              <Text fontSize="11px" color={mutedTextColor}>Loading trade details...</Text>
+            </HStack>
+          </CardBody>
+        </Card>
+      ) : targetProduct ? (
+        <Card variant="outline" bg={targetCardBg} borderColor={targetCardBorderColor} flexShrink={0}>
+          <CardBody p={3}>
+            <VStack spacing={2.5} align="stretch">
+              <HStack justify="space-between" align="center">
+                <Text fontSize="10px" fontWeight="bold" color={targetLabelColor} textTransform="uppercase" letterSpacing="0.5px">
+                  Trading For: {multiTargetMode ? `${additionalTargetIds.length + 1} Item${additionalTargetIds.length > 0 ? 's' : ''}` : '1 Item'}
                 </Text>
-                {selectedOfferIds.length > 0 && (
-                  <Text fontSize="9px" color={selectedTextColor} fontWeight="bold">
-                    You are offering {selectedOfferIds.length} {selectedOfferIds.length === 1 ? 'item' : 'items'}
-                    {targetProduct?.max_items_per_offer ? ` / ${targetProduct.max_items_per_offer}` : ''}
-                  </Text>
+                {!isEditMode && (
+                  <HStack spacing={2} align="center">
+                    <Text fontSize="10px" color={mutedTextColor} fontWeight="600">Multiple</Text>
+                    <Switch size="md" colorScheme="blue" isChecked={multiTargetMode} onChange={() => { if (multiTargetMode) { setAdditionalTargetIds([]); setTargetSearchTerm('') } setMultiTargetMode(prev => !prev) }} />
+                  </HStack>
                 )}
-                {selectedOfferIds.length > 1 && (
-                  <Text fontSize="9px" color={mutedTextColor}>
-                    These items will be sent as one bundled offer. The seller accepts or declines the whole bundle.
-                  </Text>
+              </HStack>
+              <HStack spacing={3} align="start">
+                <Image src={getFirstImage(targetProduct.image_urls)} alt={targetProduct.title} w={{ base: '56px', md: '64px' }} h={{ base: '56px', md: '64px' }} objectFit="cover" rounded="md" loading="lazy" flexShrink={0} />
+                <VStack spacing={1} align="start" flex={1} minW={0}>
+                  <Text fontWeight="700" fontSize="13px" wordBreak="break-word" noOfLines={2}>{targetProduct.title}</Text>
+                  <Text fontSize="10px" color="gray.500" noOfLines={2} wordBreak="break-word">{targetProduct.description}</Text>
+                  <HStack spacing={1} color="blue.700" align="start">
+                    <Icon as={FaMapMarkerAlt} boxSize={3} mt="1px" flexShrink={0} />
+                    <Text fontSize="10px" fontWeight="600" noOfLines={2}>{getProductLocationLabel(targetProduct)}</Text>
+                  </HStack>
+                  {targetProduct.bidding_type && targetProduct.bidding_type !== 'none' && <Badge colorScheme={targetProduct.bidding_type === 'blind' ? 'orange' : 'green'} fontSize="9px">{targetProduct.bidding_type === 'blind' ? 'Blind Bidding' : 'Open Bidding'}</Badge>}
+                </VStack>
+              </HStack>
+            </VStack>
+          </CardBody>
+        </Card>
+      ) : null}
+
+      {multiTargetMode && (
+        <VStack spacing={2} align="stretch" minH={0}>
+          <HStack justify="space-between" align="center">
+            <Text fontSize="11px" color="blue.600" fontWeight="700">Selected: {additionalTargetIds.length + 1} item{additionalTargetIds.length > 0 ? 's' : ''}</Text>
+            <Badge colorScheme="blue" variant="subtle">Bundle request</Badge>
+          </HStack>
+          {additionalTargetIds.length > 0 && (
+            <HStack spacing={1.5} overflowX="auto" pb={1} sx={{ scrollbarWidth: 'thin' }}>
+              {sellerProducts.filter(p => additionalTargetIds.includes(p.id)).map(p => (
+                <HStack key={p.id} flex="0 0 auto" bg="blue.100" borderRadius="md" px={2} py={1.5} spacing={2} maxW="180px">
+                  <Image src={getFirstImage(p.image_urls)} alt={p.title} w="28px" h="28px" objectFit="cover" rounded="md" loading="lazy" />
+                  <VStack spacing={0} align="start" minW={0}>
+                    <Text fontSize="10px" fontWeight="700" noOfLines={1}>{p.title}</Text>
+                    <Text fontSize="9px" color="blue.700" noOfLines={1}>{getProductLocationLabel(p)}</Text>
+                  </VStack>
+                  <Icon as={FaTimes} boxSize={2.5} cursor="pointer" color="blue.600" onClick={() => toggleAdditionalTarget(p.id)} />
+                </HStack>
+              ))}
+            </HStack>
+          )}
+          {selectedTargetsNeedLocationPlan && (
+            <Alert status="warning" borderRadius="md" py={2} px={2.5}>
+              <AlertIcon boxSize="14px" />
+              <Box minW={0}>
+                <Text fontSize="10px" fontWeight="700" color="orange.900">Selected items are in different locations</Text>
+                <Text fontSize="9px" color="orange.800" noOfLines={1}>You will pick up each item at its respective location.</Text>
+              </Box>
+            </Alert>
+          )}
+          <Input placeholder="Search trader's items..." value={targetSearchTerm} onChange={(e) => setTargetSearchTerm(e.target.value.toLowerCase())} size="sm" fontSize="12px" bg="white" />
+          {loadingSellerProducts ? (
+            <HStack justify="center" py={3}><Spinner size="sm" /></HStack>
+          ) : visibleSellerProducts.length === 0 ? (
+            <Text fontSize="10px" color={mutedTextColor} textAlign="center" py={3}>No other available items from this trader.</Text>
+          ) : (
+            <Box maxH={{ base: '38vh', md: '240px', lg: '28vh' }} overflowY="auto" pr={1} minH={0}>
+              <Grid templateColumns={{ base: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(2, 1fr)' }} gap={2}>
+                {visibleSellerProducts.map(p => {
+                  const isSelected = additionalTargetIds.includes(p.id)
+                  const unavailReason = getTargetUnavailableReason(p)
+                  const isDisabled = Boolean(unavailReason)
+                  return (
+                    <HStack key={p.id} minH="52px" borderWidth={isSelected ? '2px' : '1px'} borderColor={isSelected ? 'blue.500' : borderColor} rounded="md" onClick={() => !isDisabled && toggleAdditionalTarget(p.id)} cursor={isDisabled ? 'not-allowed' : 'pointer'} bg={isSelected ? 'blue.50' : 'white'} opacity={isDisabled ? 0.48 : 1} spacing={2} p={1.5}>
+                      <Image src={getFirstImage(p.image_urls)} alt={p.title} w="40px" h="40px" objectFit="cover" rounded="md" loading="lazy" filter={isDisabled ? 'grayscale(1)' : undefined} />
+                      <Box minW={0} flex={1}>
+                        <Text fontSize="11px" noOfLines={1} fontWeight={isSelected ? '700' : '600'} color={isSelected ? 'blue.600' : 'inherit'}>{p.title}</Text>
+                        <Text fontSize="9px" noOfLines={1} color="gray.500">{isDisabled ? unavailReason : getProductLocationLabel(p)}</Text>
+                      </Box>
+                    </HStack>
+                  )
+                })}
+              </Grid>
+            </Box>
+          )}
+        </VStack>
+      )}
+    </VStack>
+  )
+
+  const offerSection = (
+    <VStack spacing={3} align="stretch" minH={0} h="full">
+      <VStack align="start" spacing={1} w="full" flexShrink={0}>
+        <HStack justify="space-between" w="full" align="center">
+          <Text fontWeight="700" fontSize="11px" textTransform="uppercase" color={mutedTextColor} letterSpacing="0.5px">My Offered Items</Text>
+          {targetProduct?.max_items_per_offer ? <Badge colorScheme="brand" variant="subtle" fontSize="10px">Max {targetProduct.max_items_per_offer}</Badge> : null}
+        </HStack>
+        {selectedSummary}
+        {selectedOfferIds.length > 1 && <Text fontSize="10px" color={mutedTextColor}>The other trader accepts or declines the whole bundle.</Text>}
+      </VStack>
+      <Input placeholder="Search your items..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value.toLowerCase())} size="sm" fontSize="12px" />
+      <Box maxH={{ base: '44vh', md: '34vh', lg: '32vh' }} minH={{ base: '160px', md: '180px' }} overflowY="auto" pr={1}>
+        {visibleProducts.length === 0 ? (
+          <Flex direction="column" align="center" justify="center" minH="160px" gap={2} p={4} bg="gray.50" borderRadius="md" borderWidth="1px" borderColor={borderColor}>
+            <Icon as={FaBoxOpen} boxSize={8} color="gray.400" />
+            <Text fontWeight="600" fontSize="12px" color="gray.700">No items available to trade</Text>
+            <Button size="sm" colorScheme="brand" minH="40px" onClick={() => { onClose(); navigate('/dashboard?tab=my-items') }}>Add Item</Button>
+          </Flex>
+        ) : (
+          <Grid templateColumns={{ base: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(2, 1fr)' }} gap={2}>
+            {visibleProducts.map((p) => {
+              const isSelected = selectedOfferIds.includes(p.id)
+              const unavailableReason = getUnavailableReason(p)
+              const isDisabled = Boolean(unavailableReason)
+              return (
+                <HStack key={p.id} minH="58px" borderWidth={isSelected ? '2px' : '1px'} borderColor={isSelected ? selectedBorder : borderColor} rounded="md" onClick={() => toggleOfferSelection(p)} cursor={isDisabled ? 'not-allowed' : 'pointer'} bg={isSelected ? selectedBg : 'white'} opacity={isDisabled ? 0.48 : 1} spacing={2} p={1.5}>
+                  <Image src={getFirstImage(p.image_urls)} alt={p.title} w="44px" h="44px" objectFit="cover" rounded="md" loading="lazy" filter={isDisabled ? 'grayscale(1)' : undefined} />
+                  <Box minW={0} flex={1}>
+                    <Text fontSize="12px" noOfLines={1} wordBreak="break-word" fontWeight={isSelected ? '700' : '600'} color={isSelected ? selectedTextColor : 'inherit'}>{p.title}</Text>
+                    <Text fontSize="10px" noOfLines={1} color={isDisabled ? 'gray.700' : 'gray.500'} fontWeight={isDisabled ? '700' : '500'}>{isDisabled ? unavailableReason : p.status}</Text>
+                  </Box>
+                </HStack>
+              )
+            })}
+          </Grid>
+        )}
+      </Box>
+    </VStack>
+  )
+
+  const messageAndMoney = (
+    <VStack spacing={3} align="stretch">
+      <FormControl><FormLabel fontSize="11px" fontWeight="bold" textTransform="uppercase" color={mutedTextColor} letterSpacing="0.5px" mb={1}>Message (optional)</FormLabel><Input placeholder="Add a note for the trader" value={tradeMessage} onChange={(e) => setTradeMessage(e.target.value)} fontSize="12px" minH="40px" /></FormControl>
+      <FormControl><FormLabel fontSize="11px" fontWeight="bold" textTransform="uppercase" color={mutedTextColor} letterSpacing="0.5px" mb={1}>Offer Money (optional, PHP)</FormLabel><Input type="text" inputMode="numeric" placeholder="e.g. 500" value={cashAmount} onChange={(e) => handleCashAmountChange(e.target.value)} fontSize="12px" minH="40px" isInvalid={Boolean(cashError)} />{cashError && <Text fontSize="10px" color="red.500" mt={1}>{cashError}</Text>}</FormControl>
+    </VStack>
+  )
+
+  const tradeMethodSection = (
+    <FormControl isRequired>
+      <FormLabel fontSize="11px" fontWeight="bold" textTransform="uppercase" color={mutedTextColor} letterSpacing="0.5px" mb={2}>Trade Method</FormLabel>
+      {isTargetLoading ? <Box p={2.5} bg="gray.50" borderWidth="1px" borderColor={borderColor} borderRadius="md" mb={3}><HStack spacing={2}><Spinner size="sm" /><Text fontSize="10px" color={mutedTextColor}>Loading trade methods...</Text></HStack></Box> : (
+        <>
+          <HStack spacing={2} mb={3} align="stretch">
+            <Button flex={1} size="sm" minH="44px" variant={tradeOption === 'pickup' ? 'solid' : 'outline'} bg={tradeOption === 'pickup' ? '#E67E22' : 'transparent'} color={tradeOption === 'pickup' ? 'white' : 'inherit'} borderColor={tradeOption === 'pickup' ? '#E67E22' : borderColor} _hover={{ bg: tradeOption === 'pickup' ? '#D35400' : undefined }} onClick={() => setTradeOption('pickup')} leftIcon={<Icon as={FaMapMarkerAlt} boxSize={4} />} fontSize="12px" fontWeight="700" isDisabled={!hasFixedLocation} title={!hasFixedLocation ? 'Pickup unavailable - trader has no fixed location' : undefined}>Pickup</Button>
+            <Button flex={1} size="sm" minH="44px" variant={tradeOption === 'meetup' ? 'solid' : 'outline'} bg={tradeOption === 'meetup' ? selectedBorder : 'transparent'} color={tradeOption === 'meetup' ? 'white' : 'inherit'} borderColor={tradeOption === 'meetup' ? selectedBorder : borderColor} _hover={{ bg: tradeOption === 'meetup' ? '#158A63' : undefined }} onClick={() => setTradeOption('meetup')} leftIcon={<Icon as={FaHandshake} boxSize={4} />} fontSize="12px" fontWeight="700">Meetup</Button>
+          </HStack>
+          {tradeOption === 'meetup' && (
+            <VStack spacing={2.5} align="stretch" mb={3}>
+              {/* Header */}
+              <Box p={2.5} bg="blue.50" borderWidth="1px" borderColor="blue.200" borderRadius="md">
+                <HStack spacing={2} mb={0.5}>
+                  <Icon as={FaHandshake} color="blue.600" boxSize={3} />
+                  <Text fontSize="11px" fontWeight="700" color="blue.900">Meetup Location</Text>
+                </HStack>
+                <Text fontSize="10px" color="blue.700">Choose a suggested spot or enter a custom location. The other trader agrees after acceptance.</Text>
+              </Box>
+
+              {/* Location option cards */}
+              <VStack spacing={1.5} align="stretch">
+                {/* Near my item */}
+                {getProductRawLocation(myProductForMeetup) && (
+                  <HStack
+                    p={2.5} bg={meetupChoice === 'my_product' ? 'green.50' : 'white'}
+                    borderWidth={meetupChoice === 'my_product' ? '2px' : '1px'}
+                    borderColor={meetupChoice === 'my_product' ? 'green.400' : borderColor}
+                    borderRadius="md" spacing={2} align="center" cursor="pointer" w="full"
+                    onClick={() => setMeetupChoice('my_product')} role="button"
+                  >
+                    <Icon as={FaBoxOpen} color="green.500" boxSize={3} flexShrink={0} />
+                    <VStack spacing={0} align="start" flex={1} minW={0}>
+                      <Text fontSize="10px" fontWeight="700" color="gray.800">Near my item</Text>
+                      <Text fontSize="9px" color="gray.500" noOfLines={1}>{getProductRawLocation(myProductForMeetup)}</Text>
+                    </VStack>
+                    {meetupChoice === 'my_product' && <Icon as={FaCheckCircle} color="green.500" boxSize={3} flexShrink={0} />}
+                  </HStack>
                 )}
+
+                {/* Near their item */}
+                {getProductRawLocation(targetProduct) && (
+                  <HStack
+                    p={2.5} bg={meetupChoice === 'their_product' ? 'blue.50' : 'white'}
+                    borderWidth={meetupChoice === 'their_product' ? '2px' : '1px'}
+                    borderColor={meetupChoice === 'their_product' ? 'blue.400' : borderColor}
+                    borderRadius="md" spacing={2} align="center" cursor="pointer" w="full"
+                    onClick={() => setMeetupChoice('their_product')} role="button"
+                  >
+                    <Icon as={FaMapMarkerAlt} color="blue.500" boxSize={3} flexShrink={0} />
+                    <VStack spacing={0} align="start" flex={1} minW={0}>
+                      <Text fontSize="10px" fontWeight="700" color="gray.800">Near their item</Text>
+                      <Text fontSize="9px" color="gray.500" noOfLines={1}>{getProductRawLocation(targetProduct)}</Text>
+                    </VStack>
+                    {meetupChoice === 'their_product' && <Icon as={FaCheckCircle} color="blue.500" boxSize={3} flexShrink={0} />}
+                  </HStack>
+                )}
+
+                {/* Suggested midpoint */}
+                {meetupMidpointCoords && (
+                  <HStack
+                    p={2.5} bg={meetupChoice === 'midpoint' ? 'purple.50' : 'white'}
+                    borderWidth={meetupChoice === 'midpoint' ? '2px' : '1px'}
+                    borderColor={meetupChoice === 'midpoint' ? 'purple.400' : borderColor}
+                    borderRadius="md" spacing={2} align="center" cursor="pointer" w="full"
+                    onClick={() => setMeetupChoice('midpoint')} role="button"
+                  >
+                    <Icon as={FaLocationArrow} color="purple.500" boxSize={3} flexShrink={0} />
+                    <VStack spacing={0} align="start" flex={1} minW={0}>
+                      <Text fontSize="10px" fontWeight="700" color="gray.800">Suggested midpoint</Text>
+                      <Text fontSize="9px" color="gray.500" noOfLines={1}>
+                        {loadingMidpoint ? 'Calculating…' : midpointLabel || 'Between both product locations'}
+                      </Text>
+                    </VStack>
+                    {meetupChoice === 'midpoint' && <Icon as={FaCheckCircle} color="purple.500" boxSize={3} flexShrink={0} />}
+                  </HStack>
+                )}
+
+                {/* Custom location */}
+                <HStack
+                  p={2.5} bg={meetupChoice === 'custom' ? 'orange.50' : 'white'}
+                  borderWidth={meetupChoice === 'custom' ? '2px' : '1px'}
+                  borderColor={meetupChoice === 'custom' ? 'orange.400' : borderColor}
+                  borderRadius="md" spacing={2} align="center" cursor="pointer" w="full"
+                  onClick={() => setMeetupChoice('custom')} role="button"
+                >
+                  <Icon as={FaTruck} color="orange.500" boxSize={3} flexShrink={0} />
+                  <VStack spacing={0} align="start" flex={1} minW={0}>
+                    <Text fontSize="10px" fontWeight="700" color="gray.800">Choose custom location</Text>
+                    <Text fontSize="9px" color="gray.500">Mall, school, terminal, or landmark</Text>
+                  </VStack>
+                  {meetupChoice === 'custom' && <Icon as={FaCheckCircle} color="orange.500" boxSize={3} flexShrink={0} />}
+                </HStack>
               </VStack>
 
-              {/* Search Bar */}
-              <Input
-                placeholder="Search your items..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value.toLowerCase())}
-                size="sm"
-                fontSize="11px"
-                _placeholder={{ color: 'gray.400' }}
-              />
+              {/* Custom address input */}
+              {meetupChoice === 'custom' && (
+                <Input
+                  placeholder="e.g. SM City Zamboanga, Jollibee near the plaza…"
+                  value={customMeetupAddress}
+                  onChange={(e) => setCustomMeetupAddress(e.target.value)}
+                  fontSize="11px" size="sm" bg="white"
+                />
+              )}
 
-              {/* Scrollable grid: 4 items per row, minimized boxes */}
-              <Box maxH="90px" overflowY="auto" pr={2}>
-                {visibleProducts.length === 0 ? (
-                  <Flex direction="column" align="center" justify="center" h="140px" gap={2} p={4} bg="gray.50" borderRadius="md" borderWidth="1px" borderColor={borderColor}>
-                    <Icon as={FaBoxOpen} boxSize={8} color="gray.400" />
-                    <VStack spacing={1} textAlign="center">
-                      <Text fontWeight="600" fontSize="11px" color="gray.700">
-                        No items available to trade
+              {/* View on map link (when coords are available for the selected choice) */}
+              {meetupMapUrl && (
+                <HStack>
+                  <Button
+                    as="a" href={meetupMapUrl} target="_blank" rel="noopener noreferrer"
+                    size="xs" variant="outline" colorScheme="blue"
+                    leftIcon={<Icon as={FaExternalLinkAlt} boxSize={2.5} />}
+                    fontSize="10px"
+                  >
+                    View on map
+                  </Button>
+                </HStack>
+              )}
+
+              <Divider />
+
+              {/* Date and time proposal */}
+              <Text fontSize="11px" fontWeight="700" color={mutedTextColor} textTransform="uppercase" letterSpacing="0.5px">
+                Propose Date &amp; Time
+              </Text>
+              <HStack spacing={2}>
+                <Input
+                  type="date" value={meetupDate}
+                  onChange={(e) => setMeetupDate(e.target.value)}
+                  fontSize="11px" size="sm" flex={1}
+                  min={new Date().toISOString().split('T')[0]}
+                />
+                <Input
+                  type="time" value={meetupTime}
+                  onChange={(e) => setMeetupTime(e.target.value)}
+                  fontSize="11px" size="sm" flex={1}
+                />
+              </HStack>
+              <Text fontSize="9px" color="gray.500">
+                Date and time are optional. The other trader can accept or suggest changes after the offer is accepted.
+              </Text>
+            </VStack>
+          )}
+          {tradeOption === 'pickup' && (
+            <VStack spacing={2} align="stretch" mb={3}>
+              <Alert status="info" variant="left-accent" borderRadius="md" py={2} px={2.5} fontSize="11px">
+                <AlertIcon boxSize="14px" />
+                <Box>
+                  <Text fontSize="11px" fontWeight="700" color="blue.900" mb={0.5}>
+                    {selectedTargetsHaveDifferentLocations ? 'Multiple pickup locations' : 'Pickup at product location'}
+                  </Text>
+                  <Text fontSize="10px" color="blue.800">
+                    {selectedTargetsHaveDifferentLocations
+                      ? 'You will pick up each item at its respective listed location.'
+                      : 'You will pick up this item at the product\'s listed location.'
+                    }{' You can propose the pickup date and time after sending the offer.'}
+                  </Text>
+                </Box>
+              </Alert>
+              <Checkbox size="md" colorScheme="orange" isChecked={pickupAcknowledged} onChange={(e) => setPickupAcknowledged(e.target.checked)}>
+                <Text fontSize="11px" color="gray.700">I understand and I'm willing to go to the pickup location.</Text>
+              </Checkbox>
+            </VStack>
+          )}
+          {!hasFixedLocation && <Box p={2.5} bg="yellow.50" borderWidth="1px" borderColor="yellow.200" borderRadius="md" mb={3}><Text fontSize="10px" color="yellow.800">The other trader has no fixed pickup location. Use meetup and agree on a place together.</Text></Box>}
+        </>
+      )}
+    </FormControl>
+  )
+
+  const locationSection = selectedTargetProducts.length > 0 ? (
+    <Box p={3} bg="gray.50" borderWidth="1px" borderColor={selectedTargetsNeedLocationPlan ? 'orange.200' : borderColor} borderRadius="md">
+      <VStack spacing={2.5} align="stretch">
+        <HStack spacing={2}>
+          <Icon as={FaMapMarkerAlt} color={selectedTargetsNeedLocationPlan ? 'orange.500' : 'gray.500'} />
+          <Text fontSize="11px" fontWeight="bold" textTransform="uppercase" color={mutedTextColor} letterSpacing="0.5px">Location Details</Text>
+          {selectedTargetsNeedLocationPlan && (
+            <Badge colorScheme="orange" variant="subtle" fontSize="9px" ml="auto">Different locations</Badge>
+          )}
+        </HStack>
+        <VStack spacing={1.5} align="stretch">
+          {selectedTargetProducts.map((product) => {
+            const rawLoc = getProductRawLocation(product)
+            return (
+              <HStack key={product.id} spacing={2} align="center" minH="32px">
+                <Text fontSize="10px" fontWeight="700" color="gray.700" noOfLines={1} flex={1}>{product.title}</Text>
+                <Badge colorScheme={rawLoc ? 'blue' : 'gray'} variant="subtle" maxW="200px">
+                  <Text as="span" fontSize="9px" noOfLines={1}>{rawLoc || 'Location to be decided'}</Text>
+                </Badge>
+              </HStack>
+            )
+          })}
+        </VStack>
+        {selectedTargetsNeedLocationPlan && (
+          <VStack spacing={2} align="stretch">
+            <RadioGroup value={locationPlan} onChange={(value) => setLocationPlan(value as 'product' | 'shared' | 'later')}>
+              <VStack align="stretch" spacing={2}>
+                <Radio size="md" value="product" colorScheme="orange"><Text fontSize="11px">Pick up each item at its listed location</Text></Radio>
+                <Radio size="md" value="shared" colorScheme="orange"><Text fontSize="11px">Agree on one shared meetup spot instead</Text></Radio>
+                <Radio size="md" value="later" colorScheme="orange"><Text fontSize="11px">Decide the final arrangement later</Text></Radio>
+              </VStack>
+            </RadioGroup>
+            <Checkbox size="md" colorScheme="orange" isChecked={locationPlanAcknowledged} onChange={(event) => setLocationPlanAcknowledged(event.target.checked)}>
+              <Text fontSize="11px" color="gray.700">I reviewed the different pickup locations and will confirm the plan before meetup.</Text>
+            </Checkbox>
+          </VStack>
+        )}
+        {!selectedTargetsNeedLocationPlan && (
+          <Text fontSize="9px" color="gray.500">Pickup date and time can be proposed after the offer is accepted.</Text>
+        )}
+      </VStack>
+    </Box>
+  ) : null
+
+  const detailsSection = (
+    <VStack spacing={3} align="stretch">
+      {tradeMethodSection}
+      {isMobile ? <><Accordion allowMultiple defaultIndex={[]}><AccordionItem borderColor={borderColor}><AccordionButton px={0} minH="44px"><Box flex="1" textAlign="left" fontSize="12px" fontWeight="700">Message</Box><AccordionIcon /></AccordionButton><AccordionPanel px={0} pb={3}><FormControl><Input placeholder="Add a note for the trader" value={tradeMessage} onChange={(e) => setTradeMessage(e.target.value)} fontSize="12px" minH="40px" /></FormControl></AccordionPanel></AccordionItem><AccordionItem borderColor={borderColor}><AccordionButton px={0} minH="44px"><Box flex="1" textAlign="left" fontSize="12px" fontWeight="700">Offer Money</Box><AccordionIcon /></AccordionButton><AccordionPanel px={0} pb={3}><FormControl><Input type="text" inputMode="numeric" placeholder="e.g. 500" value={cashAmount} onChange={(e) => handleCashAmountChange(e.target.value)} fontSize="12px" minH="40px" isInvalid={Boolean(cashError)} />{cashError && <Text fontSize="10px" color="red.500" mt={1}>{cashError}</Text>}</FormControl></AccordionPanel></AccordionItem></Accordion>{locationSection}</> : <>{messageAndMoney}{locationSection}</>}
+    </VStack>
+  )
+
+  const actionButtons = (
+    <HStack justify="flex-end" spacing={3} pt={isMobile ? 0 : 1}>
+      {isMobile && mobileStep > 0 && <Button variant="outline" onClick={() => setMobileStep(step => Math.max(0, step - 1))} fontSize="12px" minH="42px" flex={1}>Back</Button>}
+      {!isMobile && <Button variant="ghost" onClick={onClose} fontSize="12px" minH="42px">Cancel</Button>}
+      {isMobile && mobileStep < mobileSteps.length - 1 ? <Button bg={selectedBorder} color="white" onClick={() => setMobileStep(step => Math.min(mobileSteps.length - 1, step + 1))} fontSize="12px" fontWeight="700" minH="42px" flex={1.4} _hover={{ bg: '#158A63' }}>Next</Button> : <Button bg={selectedBorder} color="white" isLoading={submittingTrade} onClick={submitTrade} isDisabled={!canConfirm} fontSize="12px" fontWeight="700" minH="42px" flex={isMobile ? 1.4 : 1} _hover={{ bg: '#158A63' }} _active={{ bg: '#0F5A42' }}>{isEditMode ? 'Save Changes' : 'Confirm'}</Button>}
+    </HStack>
+  )
+
+  const reviewSection = (
+    <VStack spacing={3} align="stretch">
+      {targetProduct && <Box p={3} borderWidth="1px" borderColor={targetCardBorderColor} bg={targetCardBg} borderRadius="md"><Text fontSize="10px" fontWeight="700" color={targetLabelColor} textTransform="uppercase" mb={2}>Trading For</Text><Text fontSize="13px" fontWeight="700" noOfLines={2}>{targetProduct.title}</Text>{additionalTargetIds.length > 0 && <Text fontSize="10px" color="blue.700" mt={1}>+ {additionalTargetIds.length} more requested item{additionalTargetIds.length > 1 ? 's' : ''}</Text>}</Box>}
+      {selectedSummary || <Text fontSize="12px" color={mutedTextColor}>No offered items selected yet.</Text>}
+      <Box p={3} borderWidth="1px" borderColor={borderColor} borderRadius="md"><VStack spacing={1.5} align="stretch"><HStack justify="space-between"><Text fontSize="11px" color={mutedTextColor}>Method</Text><Text fontSize="11px" fontWeight="700" textTransform="capitalize">{tradeOption || 'Not selected'}</Text></HStack><HStack justify="space-between"><Text fontSize="11px" color={mutedTextColor}>Money</Text><Text fontSize="11px" fontWeight="700">{cashAmount ? `PHP ${cashAmount}` : 'None'}</Text></HStack><HStack justify="space-between" align="start"><Text fontSize="11px" color={mutedTextColor}>Message</Text><Text fontSize="11px" fontWeight="600" maxW="65%" textAlign="right" noOfLines={2}>{tradeMessage || 'None'}</Text></HStack></VStack></Box>
+      {locationSection}
+    </VStack>
+  )
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} isCentered={!isMobile} size={isMobile ? 'full' : '6xl'} scrollBehavior="inside" motionPreset={isMobile ? 'slideInBottom' : 'scale'}>
+      <ModalOverlay />
+      <ModalContent
+        {...mobileSheetMotionProps}
+        display="flex"
+        flexDirection="column"
+        w={{ base: '100vw', md: 'calc(100vw - 32px)' }}
+        maxW={{ base: '100vw', md: '900px', lg: '980px' }}
+        h={{ base: '90vh', md: 'min(90vh, 760px)' }}
+        maxH="90vh"
+        my={{ base: 0, md: 4 }}
+        mt={{ base: 'auto', md: 4 }}
+        mb={{ base: 0, md: 4 }}
+        borderTopRadius={{ base: '18px', md: 'md' }}
+        borderBottomRadius={{ base: 0, md: 'md' }}
+        overflow="hidden"
+      >
+        {isMobile && (
+          <Box
+            display="flex"
+            justifyContent="center"
+            pt={3}
+            pb={1}
+            flexShrink={0}
+            cursor="grab"
+            style={{ touchAction: 'none' }}
+            onPointerDown={(event) => sheetDragControls.start(event)}
+          >
+            <Box w="44px" h="5px" bg="gray.300" borderRadius="full" />
+          </Box>
+        )}
+        <ModalHeader flexShrink={0} fontSize="lg" fontWeight="semibold" pb={isMobile ? 2 : 3}>
+          {user ? (isEditMode ? 'Edit Your Offer' : 'Propose a Trade') : 'Sign in to Continue'}
+        </ModalHeader>
+        <ModalCloseButton />
+        <ModalBody p={0} flex="1" minH={0} overflow="hidden">
+          {user ? (
+            <VStack spacing={0} align="stretch" h="full" minH={0}>
+              {isMobile && (
+                <Box px={4} pb={2} flexShrink={0}>
+                  <HStack justify="space-between" mb={2}>
+                    {mobileSteps.map((label, index) => (
+                      <Text key={label} fontSize="9px" fontWeight={mobileStep === index ? '800' : '600'} color={mobileStep === index ? selectedTextColor : mutedTextColor} noOfLines={1}>
+                        {index + 1}. {label}
                       </Text>
-                      <Button
-                        size="xs"
-                        colorScheme="brand"
-                        onClick={() => {
-                          onClose()
-                          navigate('/dashboard?tab=my-items')
-                        }}
-                      >
-                        Add Item
-                      </Button>
-                    </VStack>
-                  </Flex>
+                    ))}
+                  </HStack>
+                  <Progress value={((mobileStep + 1) / mobileSteps.length) * 100} size="xs" colorScheme="green" borderRadius="full" />
+                </Box>
+              )}
+
+              <Box flex="1" minH={0} overflowY="auto" px={{ base: 4, md: 5 }} pt={2} pb={4}>
+                {isMobile ? (
+                  <>
+                    {mobileStep === 0 && targetSection}
+                    {mobileStep === 1 && offerSection}
+                    {mobileStep === 2 && detailsSection}
+                    {mobileStep === 3 && reviewSection}
+                  </>
                 ) : (
-                  <Grid templateColumns="repeat(4, 1fr)" gap={1.5} gridAutoRows="70px" justifyContent="start">
-                    {visibleProducts.map((p) => {
-                      const isSelected = selectedOfferIds.includes(p.id)
-                      const unavailableReason = getUnavailableReason(p)
-                      const isDisabled = Boolean(unavailableReason)
-                      return (
-                      <Box
-                        key={p.id}
-                        minH="70px"
-                        borderWidth={isSelected ? '2px' : '0.5px'}
-                        borderColor={isSelected ? selectedBorder : borderColor}
-                        rounded="md"
-                        overflow="hidden"
-                        onClick={() => toggleOfferSelection(p)}
-                        cursor={isDisabled ? 'not-allowed' : 'pointer'}
-                        bg={isSelected ? selectedBg : 'white'}
-                        opacity={isDisabled ? 0.48 : 1}
-                        position="relative"
-                      >
-                        <Image src={getFirstImage(p.image_urls)} alt={p.title} w="full" h="35px" objectFit="cover" loading="lazy" filter={isDisabled ? 'grayscale(1)' : undefined} />
-                        <Box p="0.5">
-                          <Text fontSize="9px" noOfLines={1} wordBreak="break-word" fontWeight={isSelected ? '600' : '500'} color={isSelected ? selectedTextColor : 'inherit'}>{p.title}</Text>
-                          {isDisabled && (
-                            <Text fontSize="8px" noOfLines={1} color="gray.700" fontWeight="700">{unavailableReason}</Text>
-                          )}
-                        </Box>
-                      </Box>
-                    )})}
+                  <Grid
+                    templateColumns={useTwoColumnLayout ? 'minmax(0, 1fr) minmax(300px, 380px)' : '1fr'}
+                    gap={4}
+                    alignItems="start"
+                    w="full"
+                    minW={0}
+                  >
+                    <VStack spacing={3} align="stretch" minW={0}>
+                      {targetSection}
+                      {offerSection}
+                    </VStack>
+                    <Box minW={0}>{detailsSection}</Box>
                   </Grid>
                 )}
               </Box>
-
-              {/* Message Input */}
-              <FormControl>
-                <FormLabel fontSize="11px" fontWeight="bold" textTransform="uppercase" color={mutedTextColor} letterSpacing="0.5px" mb={1}>
-                  Message (optional)
-                </FormLabel>
-                <Input 
-                  placeholder="Add a note for the trader" 
-                  value={tradeMessage} 
-                  onChange={(e) => setTradeMessage(e.target.value)} 
-                  fontSize="11px"
-                  py={2}
-                />
-              </FormControl>
-
-              {/* Cash Amount Input */}
-              <FormControl>
-                <FormLabel fontSize="11px" fontWeight="bold" textTransform="uppercase" color={mutedTextColor} letterSpacing="0.5px" mb={1}>
-                  Offer money (optional, PHP)
-                </FormLabel>
-                <Input
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="e.g. 500"
-                  value={cashAmount}
-                  onChange={(e) => handleCashAmountChange(e.target.value)}
-                  fontSize="11px"
-                  py={2}
-                  isInvalid={Boolean(cashError)}
-                />
-                {cashError && (
-                  <Text fontSize="9px" color="red.500" mt={1}>{cashError}</Text>
-                )}
-              </FormControl>
-
-              {/* Trade Method - Meetup and Pickup Options based on Product Location Type */}
-              <FormControl isRequired>
-                <FormLabel fontSize="11px" fontWeight="bold" textTransform="uppercase" color={mutedTextColor} letterSpacing="0.5px" mb={2}>
-                  Trade Method
-                </FormLabel>
-                {isTargetLoading ? (
-                  <Box p={2.5} bg="gray.50" borderWidth="1px" borderColor={borderColor} borderRadius="md" mb={3}>
-                    <HStack spacing={2}>
-                      <Spinner size="sm" />
-                      <Text fontSize="10px" color={mutedTextColor}>Loading trade methods...</Text>
-                    </HStack>
-                  </Box>
-                ) : (
-                  <>
-                    {hasFixedLocation ? (
-                      // Product has fixed location: Pickup primary, Meetup optional
-                      <HStack spacing={2} mb={3}>
-                        {/* Pickup Option - Primary */}
-                        <Button
-                          flex={1}
-                          size="sm"
-                          height="36px"
-                          variant={tradeOption === 'pickup' ? 'solid' : 'outline'}
-                          bg={tradeOption === 'pickup' ? '#E67E22' : 'transparent'}
-                          color={tradeOption === 'pickup' ? 'white' : 'inherit'}
-                          borderColor={tradeOption === 'pickup' ? '#E67E22' : borderColor}
-                          _hover={{ bg: tradeOption === 'pickup' ? '#D35400' : undefined }}
-                          onClick={() => setTradeOption('pickup')}
-                          leftIcon={<Icon as={FaMapMarkerAlt} boxSize={4} />}
-                          fontSize="11px"
-                          fontWeight="600"
-                        >
-                          Pickup
-                        </Button>
-                        {/* Meetup Option - Secondary */}
-                        <Button
-                          flex={1}
-                          size="sm"
-                          height="36px"
-                          variant={tradeOption === 'meetup' ? 'solid' : 'outline'}
-                          bg={tradeOption === 'meetup' ? selectedBorder : 'transparent'}
-                          color={tradeOption === 'meetup' ? 'white' : 'inherit'}
-                          borderColor={tradeOption === 'meetup' ? selectedBorder : borderColor}
-                          _hover={{ bg: tradeOption === 'meetup' ? '#158A63' : undefined }}
-                          onClick={() => setTradeOption('meetup')}
-                          leftIcon={<Icon as={FaHandshake} boxSize={4} />}
-                          fontSize="11px"
-                          fontWeight="600"
-                        >
-                          Meetup
-                        </Button>
-                      </HStack>
-                    ) : (
-                      // Product has no fixed location: Only Meetup available
-                      <HStack spacing={2} mb={3}>
-                        {/* Pickup Disabled - No fixed location */}
-                        <Button
-                          flex={1}
-                          size="sm"
-                          height="36px"
-                          variant="outline"
-                          isDisabled
-                          opacity={0.5}
-                          leftIcon={<Icon as={FaMapMarkerAlt} boxSize={4} />}
-                          fontSize="11px"
-                          fontWeight="600"
-                          title="Pickup unavailable - seller has no fixed location"
-                        >
-                          Pickup
-                        </Button>
-                        {/* Meetup Option - Only */}
-                        <Button
-                          flex={1}
-                          size="sm"
-                          height="36px"
-                          variant={tradeOption === 'meetup' ? 'solid' : 'outline'}
-                          bg={tradeOption === 'meetup' ? selectedBorder : 'transparent'}
-                          color={tradeOption === 'meetup' ? 'white' : 'inherit'}
-                          borderColor={tradeOption === 'meetup' ? selectedBorder : borderColor}
-                          _hover={{ bg: tradeOption === 'meetup' ? '#158A63' : undefined }}
-                          onClick={() => setTradeOption('meetup')}
-                          leftIcon={<Icon as={FaHandshake} boxSize={4} />}
-                          fontSize="11px"
-                          fontWeight="600"
-                        >
-                          Meetup (Agree on Location)
-                        </Button>
-                      </HStack>
-                    )}
-
-                    {/* Info Box for Selected Option */}
-                    {tradeOption === 'meetup' && (
-                      <Box p={2.5} bg="blue.50" borderWidth="1px" borderColor="blue.200" borderRadius="md" mb={3}>
-                        <Text fontSize="10px" color="blue.800" fontWeight="600" mb={1}>Agree on a Meeting Place</Text>
-                        <Text fontSize="10px" color="blue.800">
-                          ✓ Both parties agree on a mutual location, date, and time
-                        </Text>
-                        <Text fontSize="10px" color="blue.800">
-                          ✓ Either user can propose or suggest changes
-                        </Text>
-                      </Box>
-                    )}
-
-                    {tradeOption === 'pickup' && (
-                      <VStack spacing={2} align="stretch" mb={3}>
-                        <Box p={2.5} bg="orange.50" borderWidth="1px" borderColor="orange.200" borderRadius="md">
-                          <Text fontSize="10px" color="orange.800" fontWeight="600" mb={1}>Pick Up from Seller's Location</Text>
-                          <Text fontSize="10px" color="orange.800">
-                            ✓ You travel to the seller — the location is set by them and can't be changed
-                          </Text>
-                          <Text fontSize="10px" color="orange.800">
-                            ✓ You pick the date and time; the seller can accept or propose a reschedule
-                          </Text>
-                        </Box>
-                        <Alert status="warning" variant="left-accent" borderRadius="md" py={2} px={2.5} fontSize="11px">
-                          <AlertIcon boxSize="14px" />
-                          <Box>
-                            <Text fontSize="11px" fontWeight="600" color="orange.900" mb={0.5}>
-                              Heads-up: you're the one traveling
-                            </Text>
-                            <Text fontSize="10px" color="orange.800">
-                              The seller stays at their pickup spot. Make sure you're willing and able to go there before sending this offer.
-                            </Text>
-                          </Box>
-                        </Alert>
-                        <Checkbox
-                          size="sm"
-                          colorScheme="orange"
-                          isChecked={pickupAcknowledged}
-                          onChange={(e) => setPickupAcknowledged(e.target.checked)}
-                        >
-                          <Text fontSize="11px" color="gray.700">
-                            I understand and I'm willing to go to the seller's pickup location.
-                          </Text>
-                        </Checkbox>
-                      </VStack>
-                    )}
-
-                    {!hasFixedLocation && (
-                      <Box p={2.5} bg="yellow.50" borderWidth="1px" borderColor="yellow.200" borderRadius="md" mb={3}>
-                        <Text fontSize="9px" color="yellow.800">
-                          ℹ️ Seller has no fixed location. You must agree on a meeting place together.
-                        </Text>
-                      </Box>
-                    )}
-                  </>
-                )}
-              </FormControl>
-
-              {/* Action Buttons */}
-              <HStack justify="flex-end" spacing={3} pt={1}>
-                <Button 
-                  variant="ghost" 
-                  onClick={onClose}
-                  fontSize="11px"
-                  height="36px"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  bg={selectedBorder}
-                  color="white"
-                  isLoading={submittingTrade}
-                  onClick={submitTrade}
-                  isDisabled={selectedOfferIds.length === 0 || !tradeOption}
-                  fontSize="11px"
-                  fontWeight="600"
-                  height="36px"
-                  flex="2"
-                  _hover={{ bg: '#158A63' }}
-                  _active={{ bg: '#0F5A42' }}
-                >
-                  {isEditMode ? 'Save Changes' : 'Confirm'}
-                </Button>
-              </HStack>
             </VStack>
           ) : (
-            <VStack spacing={4}>
-              <Text color="gray.600" fontSize="12px">
-                You need to be signed in to trade or purchase items.
-              </Text>
+            <VStack spacing={4} p={5}>
+              <Text color="gray.600" fontSize="12px">You need to be signed in to trade or purchase items.</Text>
               <HStack spacing={3} w="full">
-                <Button
-                  onClick={onClose}
-                  as={'a'}
-                  href="/login"
-                  colorScheme="brand"
-                  flex={1}
-                  size="sm"
-                >
-                  Sign In
-                </Button>
-                <Button
-                  onClick={onClose}
-                  as={'a'}
-                  href="/register"
-                  variant="outline"
-                  flex={1}
-                  size="sm"
-                >
-                  Sign Up
-                </Button>
+                <Button onClick={onClose} as="a" href="/login" colorScheme="brand" flex={1} size="sm">Sign In</Button>
+                <Button onClick={onClose} as="a" href="/register" variant="outline" flex={1} size="sm">Sign Up</Button>
               </HStack>
             </VStack>
           )}
         </ModalBody>
+
+        {user && (
+          <Box flexShrink={0} bg={cardBg} borderTopWidth="1px" borderColor={borderColor} px={{ base: 3, md: 5 }} py={3} boxShadow={{ base: '0 -8px 20px rgba(0,0,0,0.08)', md: 'none' }}>
+            {actionButtons}
+          </Box>
+        )}
       </ModalContent>
     </Modal>
   )

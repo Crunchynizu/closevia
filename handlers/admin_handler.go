@@ -1096,7 +1096,7 @@ func (h *AdminHandler) buildExplorerTrades(filters adminExplorerFilters) (adminE
 	rows, err := h.db.Query(`
 		SELECT
 			t.id,
-			'trade match' AS trade_type,
+			'Trade Connect' AS trade_type,
 			CONCAT(COALESCE(ub.name, CONCAT('User #', t.buyer_id)), ' / ', COALESCE(us.name, CONCAT('User #', t.seller_id))) AS participants,
 			COALESCE(t.status, '') AS status,
 			COALESCE(p.title, '') AS target_product,
@@ -1114,7 +1114,7 @@ func (h *AdminHandler) buildExplorerTrades(filters adminExplorerFilters) (adminE
 	}
 	defer rows.Close()
 	mapped, err := rowsToAdminExplorerMaps(rows)
-	return adminExplorerSection{Key: "trades", Label: "Trade Matches", Total: total, Rows: mapped}, err
+	return adminExplorerSection{Key: "trades", Label: "Trade Connects", Total: total, Rows: mapped}, err
 }
 
 func (h *AdminHandler) buildExplorerMultiway(filters adminExplorerFilters) (adminExplorerSection, error) {

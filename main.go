@@ -148,6 +148,9 @@ func main() {
 			"http://localhost:5173",
 			"http://localhost:5174",
 			"http://localhost:3000",
+			"http://127.0.0.1:5173",
+			"http://127.0.0.1:5174",
+			"http://127.0.0.1:3000",
 			"https://cloviaph.netlify.app",
 			"https://cloviaph.site",
 			"https://closevia.onrender.com",
@@ -545,13 +548,15 @@ func main() {
 	products.Post("/check-image-quality", aiLimiter, productHandler.CheckImageQuality)                // Fast image quality check
 	products.Post("/report", middleware.AuthMiddleware(), productHandler.ReportListing)               // Report a listing
 	products.Get("/boost-candidates", middleware.AuthMiddleware(), productHandler.GetBoostCandidates) // Listings eligible for boost
+	products.Put("/featured/reorder", middleware.AuthMiddleware(), productHandler.ReorderFeaturedProducts)
 	products.Get("/:id/wishlist/status", middleware.AuthMiddleware(), productHandler.GetUserWishlistStatus)
 	products.Get("/:id/comments", commentHandler.GetComments)
 	products.Post("/:id/comments", middleware.AuthMiddleware(), commentHandler.CreateComment)
 	// Voting endpoint (must be before generic :id route)
 	products.Post("/:id/vote", middleware.AuthMiddleware(), productHandler.VoteProduct)
-	products.Post("/:id/view", productHandler.IncrementViewCount)                              // Track view count (public)
-	products.Post("/boost/:id", middleware.AuthMiddleware(), productHandler.BoostProduct)      // Boost a listing
+	products.Post("/:id/view", productHandler.IncrementViewCount)                         // Track view count (public)
+	products.Post("/boost/:id", middleware.AuthMiddleware(), productHandler.BoostProduct) // Boost a listing
+	products.Put("/:id/featured", middleware.AuthMiddleware(), productHandler.SetFeaturedProduct)
 	products.Post("/:id/relist", middleware.AuthMiddleware(), productHandler.DuplicateProduct) // Relist (Plus/Pro)
 	products.Put("/:id/reorder-images", middleware.AuthMiddleware(), productHandler.ReorderImages)
 	products.Get("/:id/suggested-trades", middleware.AuthMiddleware(), productHandler.GetSuggestedTrades)

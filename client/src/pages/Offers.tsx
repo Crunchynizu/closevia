@@ -262,8 +262,8 @@ const Offers: React.FC = () => {
       if (result?.multiway?.match_found) {
         toast({
           id: 'success-convert-multiway-match',
-          title: 'Match Found!',
-          description: 'A 3-way trade match was found immediately! Redirecting to your multi-way dashboard...',
+          title: 'Connection Found!',
+          description: 'A 3-way Trade Connect was found immediately! Redirecting to your multi-way dashboard...',
           status: 'success',
           duration: 5000
         })
@@ -773,7 +773,7 @@ const Offers: React.FC = () => {
                 <HStack spacing={1}>
                   {type === 'received' && <Text>From: <strong>{(trade.buyer_name || 'User').substring(0, 15)}</strong></Text>}
                   {type === 'sent' && <Text>To: <strong>{(trade.seller_name || 'User').substring(0, 15)}</strong></Text>}
-                  {type === 'progress' && <Text><strong>{(trade.buyer_name || 'Buyer').substring(0, 12)}</strong> ↔ <strong>{(trade.seller_name || 'Seller').substring(0, 12)}</strong></Text>}
+                  {type === 'progress' && <Text><strong>{(trade.buyer_name || 'Trader').substring(0, 12)}</strong> ↔ <strong>{(trade.seller_name || 'Trader').substring(0, 12)}</strong></Text>}
                 </HStack>
                 <Text fontSize="10px" color="gray.500" mt={1}>{new Date(trade.created_at).toLocaleDateString()}</Text>
               </Box>
@@ -1551,7 +1551,7 @@ const Offers: React.FC = () => {
                             Pickup: {pickupInfo.label}
                           </Badge>
                         )}
-                        <Text fontSize="10px" color="gray.600" noOfLines={1}><Text as="span" fontWeight="medium">{(t.buyer_name || 'Buyer').substring(0, 12)}</Text> ↔ <Text as="span" fontWeight="medium">{(t.seller_name || 'Seller').substring(0, 12)}</Text></Text>
+                        <Text fontSize="10px" color="gray.600" noOfLines={1}><Text as="span" fontWeight="medium">{(t.buyer_name || 'Trader').substring(0, 12)}</Text> ↔ <Text as="span" fontWeight="medium">{(t.seller_name || 'Trader').substring(0, 12)}</Text></Text>
                       </VStack>
 
                       {/* Actions positioned at bottom */}
@@ -1617,7 +1617,7 @@ const Offers: React.FC = () => {
                             {getRequestedBundleCount(t)} requested items
                           </Badge>
                         )}
-                        <Text fontSize="10px" color="gray.600" noOfLines={1}>Buyer: {(t.buyer_name || 'User').substring(0, 15)} • Trader: {(t.seller_name || 'User').substring(0, 15)}</Text>
+                        <Text fontSize="10px" color="gray.600" noOfLines={1}>Trader: {(t.buyer_name || 'User').substring(0, 15)} • Trader: {(t.seller_name || 'User').substring(0, 15)}</Text>
                         <Text fontSize="9px" color="gray.400">Source: {t.source}</Text>
                       </VStack>
                       {getStatusBadge(t.status)}
@@ -1658,7 +1658,7 @@ const Offers: React.FC = () => {
                             {getRequestedBundleCount(t)} requested items
                           </Badge>
                         )}
-                        <Text fontSize="10px" color="gray.600" noOfLines={1}>Buyer: {(t.buyer_name || 'User').substring(0, 15)} • Trader: {(t.seller_name || 'User').substring(0, 15)}</Text>
+                        <Text fontSize="10px" color="gray.600" noOfLines={1}>Trader: {(t.buyer_name || 'User').substring(0, 15)} • Trader: {(t.seller_name || 'User').substring(0, 15)}</Text>
                         <Text fontSize="9px" color="red.400">Expired due to 7 days of inactivity</Text>
                       </VStack>
                       {getStatusBadge(t.status)}

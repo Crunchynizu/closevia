@@ -172,6 +172,14 @@ func (h *TradeHandler) ensureTradeRuntimeColumns() {
 		{"buyer_accepted", "BOOLEAN DEFAULT FALSE"},
 		{"seller_accepted", "BOOLEAN DEFAULT FALSE"},
 		{"parent_trade_id", "INT NULL"},
+		{"meetup_location", "VARCHAR(500) NULL"},
+		{"meetup_time", "VARCHAR(100) NULL"},
+		{"buyer_meetup_confirmed", "BOOLEAN DEFAULT FALSE"},
+		{"seller_meetup_confirmed", "BOOLEAN DEFAULT FALSE"},
+		{"buyer_meetup_location", "VARCHAR(500) NULL"},
+		{"buyer_meetup_time", "VARCHAR(100) NULL"},
+		{"seller_meetup_location", "VARCHAR(500) NULL"},
+		{"seller_meetup_time", "VARCHAR(100) NULL"},
 	}
 
 	for _, col := range columns {
@@ -490,7 +498,7 @@ func (h *TradeHandler) cancelPendingLikeLoopsForInvite(userID, offeredProductID,
 				if affectedUserID == userID {
 					continue
 				}
-				msg := fmt.Sprintf("%s undid their invite, so the trade match was cancelled.", undoerName)
+				msg := fmt.Sprintf("%s undid their invite, so the Trade Connect was cancelled.", undoerName)
 				_, _ = h.db.Exec(
 					"INSERT INTO notifications (user_id, type, message, is_read) VALUES (?, 'trade_loop', ?, FALSE)",
 					affectedUserID, msg,
@@ -1060,6 +1068,13 @@ func (h *TradeHandler) CreateTrade(c *fiber.Ctx) error {
 	if payload.TargetProductID <= 0 {
 		return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Invalid target product ID"})
 	}
+	meetupLocation := strings.TrimSpace(payload.MeetupLocation)
+	meetupDate := strings.TrimSpace(payload.MeetupDate)
+	meetupTime := strings.TrimSpace(payload.MeetupTime)
+	meetupDateTime := meetupTime
+	if meetupDate != "" && meetupTime != "" {
+		meetupDateTime = meetupDate + " " + meetupTime
+	}
 	hasItems := len(payload.OfferedProductIDs) > 0
 	hasCash := payload.OfferedCashAmount != nil && *payload.OfferedCashAmount > 0
 	if !hasItems && !hasCash {
@@ -1205,9 +1220,9 @@ func (h *TradeHandler) CreateTrade(c *fiber.Ctx) error {
 	log.Printf("Executing single-step trade insert for trade from %d to %d (seller)", userID, sellerID)
 	res, err := tx.Exec(`
 		INSERT INTO trades 
-		(buyer_id, seller_id, target_product_id, status, buyer_accepted, trade_option, meeting_type, delivery_address, delivery_type, delivery_instructions, message, offered_cash_amount, payment_method) 
-		VALUES (?, ?, ?, 'pending', TRUE, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		userID, sellerID, payload.TargetProductID, payload.TradeOption, payload.MeetingType, payload.DeliveryAddress, payload.DeliveryType, payload.DeliveryInstructions, payload.Message, payload.OfferedCashAmount, payload.PaymentMethod)
+		(buyer_id, seller_id, target_product_id, status, buyer_accepted, trade_option, meeting_type, delivery_address, delivery_type, delivery_instructions, message, offered_cash_amount, payment_method, buyer_meetup_confirmed, buyer_meetup_location, buyer_meetup_time) 
+		VALUES (?, ?, ?, 'pending', TRUE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		userID, sellerID, payload.TargetProductID, payload.TradeOption, payload.MeetingType, payload.DeliveryAddress, payload.DeliveryType, payload.DeliveryInstructions, payload.Message, payload.OfferedCashAmount, payload.PaymentMethod, meetupLocation != "" && meetupDateTime != "", sql.NullString{String: meetupLocation, Valid: meetupLocation != ""}, sql.NullString{String: meetupDateTime, Valid: meetupDateTime != ""})
 
 	if err != nil {
 		log.Printf("Trade creation failed: %v", err)
@@ -1248,7 +1263,7 @@ func (h *TradeHandler) CreateTrade(c *fiber.Ctx) error {
 		}
 		if addSellerID != sellerID {
 			_ = tx.Rollback()
-			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "All target products must belong to the same seller"})
+			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "All target products must belong to the same trader"})
 		}
 		if addStatus != "available" {
 			_ = tx.Rollback()
@@ -1272,7 +1287,7 @@ func (h *TradeHandler) CreateTrade(c *fiber.Ctx) error {
 		reverseTradeID, autoConfirmed, err = h.findExactReciprocalTradeTx(tx, tradeID, userID, sellerID, payload.TargetProductID, payload.OfferedProductIDs, payload.OfferedCashAmount, meetingType)
 		if err != nil {
 			_ = tx.Rollback()
-			return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to verify reciprocal trade match"})
+			return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to verify reciprocal Trade Connect"})
 		}
 		if autoConfirmed {
 			combinedProductIDs, err := h.getTradeProductIDsTx(tx, tradeID)
@@ -1605,7 +1620,7 @@ func (h *TradeHandler) fetchUserNamesByIDs(ids []int) map[int]string {
 
 // tradeTargetInfo holds the target product ID and title for a given trade ID.
 // buildLoopSuggestionsForUser intentionally returns no inferred loops.
-// Multiway/Trade Match rows are created only from explicit product likes.
+// Multiway/Trade Connect rows are created only from explicit product likes.
 func (h *TradeHandler) buildLoopSuggestionsForUser(_ int) ([]map[string]interface{}, error) {
 	// Suggestions from pending trades or product preferences are intentionally
 	// not surfaced as Multiway loops. The Multiway tab is backed by persisted
@@ -2497,6 +2512,13 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 			}
 		}
 
+		meetupLocation := strings.TrimSpace(payload.MeetupLocation)
+		meetupDate := strings.TrimSpace(payload.MeetupDate)
+		meetupTime := strings.TrimSpace(payload.MeetupTime)
+		meetupDateTime := meetupTime
+		if meetupDate != "" && meetupTime != "" {
+			meetupDateTime = meetupDate + " " + meetupTime
+		}
 		updateMessage := strings.TrimSpace(payload.Message)
 		tradeOption := "meetup"
 		if strings.TrimSpace(payload.TradeOption) != "" {
@@ -2517,9 +2539,23 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 
 		if _, err := tx.Exec(`
 			UPDATE trades
-			SET message = ?, offered_cash_amount = ?, trade_option = ?, meeting_type = ?, delivery_address = ?, payment_method = ?, updated_at = CURRENT_TIMESTAMP
+			SET message = ?, offered_cash_amount = ?, trade_option = ?, meeting_type = ?, delivery_address = ?, payment_method = ?,
+			    buyer_meetup_confirmed = ?,
+			    buyer_meetup_location = ?,
+			    buyer_meetup_time = ?,
+			    seller_meetup_confirmed = CASE WHEN ? THEN FALSE ELSE seller_meetup_confirmed END,
+			    seller_meetup_location = CASE WHEN ? THEN NULL ELSE seller_meetup_location END,
+			    seller_meetup_time = CASE WHEN ? THEN NULL ELSE seller_meetup_time END,
+			    updated_at = CURRENT_TIMESTAMP
 			WHERE id = ?
-		`, updateMessage, payload.OfferedCashAmount, tradeOption, meetingType, strings.TrimSpace(payload.DeliveryAddress), paymentMethod, tradeID); err != nil {
+		`, updateMessage, payload.OfferedCashAmount, tradeOption, meetingType, strings.TrimSpace(payload.DeliveryAddress), paymentMethod,
+			meetupLocation != "" && meetupDateTime != "",
+			sql.NullString{String: meetupLocation, Valid: meetupLocation != ""},
+			sql.NullString{String: meetupDateTime, Valid: meetupDateTime != ""},
+			meetupLocation != "" && meetupDateTime != "",
+			meetupLocation != "" && meetupDateTime != "",
+			meetupLocation != "" && meetupDateTime != "",
+			tradeID); err != nil {
 			_ = tx.Rollback()
 			return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to update trade offer"})
 		}
@@ -2529,7 +2565,7 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 			reverseTradeID, reciprocalMatch, err := h.findExactReciprocalTradeTx(tx, tradeID, buyerID, sellerID, targetProductID, payload.OfferedProductIDs, payload.OfferedCashAmount, meetingType)
 			if err != nil {
 				_ = tx.Rollback()
-				return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to verify reciprocal trade match"})
+				return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to verify reciprocal Trade Connect"})
 			}
 			if reciprocalMatch {
 				confirmedPIDs := uniquePositiveInts([]int{targetProductID, payload.OfferedProductIDs[0]})
@@ -2992,9 +3028,23 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 				// Selections match! Update trade status to active and set the final meetup details
 				_, activateErr := h.db.Exec(`
 					UPDATE trades
-					SET status='active', meetup_location=?, meetup_time=?, updated_at=CURRENT_TIMESTAMP
+					SET status='active',
+					    buyer_accepted=TRUE,
+					    seller_accepted=TRUE,
+					    meetup_location=?,
+					    meetup_time=?,
+					    updated_at=CURRENT_TIMESTAMP
 					WHERE id = ?`, buyerLocation.String, buyerTime.String, tradeID)
 				if activateErr == nil {
+					_, _ = h.db.Exec(`
+						UPDATE products
+						SET status = 'in_trade'
+						WHERE id IN (
+							SELECT target_product_id FROM trades WHERE id = ?
+							UNION
+							SELECT product_id FROM trade_items WHERE trade_id = ?
+						)
+					`, tradeID, tradeID)
 					log.Printf("Both parties agreed on meetup for trade %d (location: %s, time: %s), status updated to active",
 						tradeID, buyerLocation.String, buyerTime.String)
 					publishToUser(buyerID, sseEvent{Type: "trade_updated", Data: fiber.Map{"trade_id": tradeID, "status": "active", "meetup_agreed": true}})
@@ -3961,7 +4011,7 @@ func (h *TradeHandler) GetTrade(c *fiber.Ctx) error {
 	return c.JSON(models.APIResponse{Success: true, Data: tr})
 }
 
-// GetUserTradeHistory returns completed trades for a specific user (public endpoint)
+// GetUserTradeHistory returns public trade activity for a specific user.
 func (h *TradeHandler) GetUserTradeHistory(c *fiber.Ctx) error {
 	identifier := c.Params("id")
 	if identifier == "" {
@@ -3987,6 +4037,7 @@ func (h *TradeHandler) GetUserTradeHistory(c *fiber.Ctx) error {
 			t.id, t.buyer_id, t.seller_id, t.target_product_id, t.status,
 			COALESCE(t.message, '') as message,
 			t.created_at, t.completed_at,
+			COALESCE(t.trade_option, '') as trade_option,
 			ub.name AS buyer_name, us.name AS seller_name,
 			COALESCE(p.title, 'Deleted product') AS product_title,
 			p.image_url AS product_image_url,
@@ -4010,9 +4061,10 @@ func (h *TradeHandler) GetUserTradeHistory(c *fiber.Ctx) error {
 		JOIN users ub ON ub.id = t.buyer_id
 		JOIN users us ON us.id = t.seller_id
 		LEFT JOIN products p ON p.id = t.target_product_id
-		WHERE (t.buyer_id = ? OR t.seller_id = ?) AND t.status = 'completed'
-		ORDER BY COALESCE(t.completed_at, t.updated_at) DESC
-		LIMIT 50
+		WHERE (t.buyer_id = ? OR t.seller_id = ?)
+		  AND t.status IN ('pending', 'pending_multiway', 'accepted', 'accepted_by_one', 'accepted_by_both', 'countered', 'active', 'ongoing', 'awaiting_confirmation', 'multiway_active', 'completed', 'auto_completed', 'cancelled', 'cancelled_due_to_conflict', 'declined', 'rejected', 'expired', 'broken')
+		ORDER BY COALESCE(t.completed_at, t.updated_at, t.created_at) DESC
+		LIMIT 100
 	`
 
 	rows, err := h.db.Query(query, targetUserID, targetUserID)
@@ -4031,6 +4083,8 @@ func (h *TradeHandler) GetUserTradeHistory(c *fiber.Ctx) error {
 		Message        string      `json:"message,omitempty"`
 		CreatedAt      time.Time   `json:"created_at"`
 		CompletedAt    *time.Time  `json:"completed_at,omitempty"`
+		TradeOption    string      `json:"trade_option,omitempty"`
+		TradeType      string      `json:"trade_type"`
 		BuyerName      string      `json:"buyer_name"`
 		SellerName     string      `json:"seller_name"`
 		ProductTitle   string      `json:"product_title"`
@@ -4055,7 +4109,7 @@ func (h *TradeHandler) GetUserTradeHistory(c *fiber.Ctx) error {
 
 		if err := rows.Scan(
 			&t.ID, &t.BuyerID, &t.SellerID, &t.ProductID, &t.Status, &t.Message,
-			&t.CreatedAt, &completedAt,
+			&t.CreatedAt, &completedAt, &t.TradeOption,
 			&t.BuyerName, &t.SellerName, &t.ProductTitle,
 			&pimg, &pimgs,
 			&t.BuyerRating, &t.SellerRating,
@@ -4075,6 +4129,11 @@ func (h *TradeHandler) GetUserTradeHistory(c *fiber.Ctx) error {
 
 		if completedAt.Valid {
 			t.CompletedAt = &completedAt.Time
+		}
+		if t.Status == "pending_multiway" || t.Status == "multiway_active" {
+			t.TradeType = "Multiway"
+		} else {
+			t.TradeType = "Trade Connect"
 		}
 
 		// Resolve product image
@@ -5415,7 +5474,7 @@ func (h *TradeHandler) cancelConflictingLifecycleTx(tx *sql.Tx, winningTradeID i
 	if _, err := tx.Exec(fmt.Sprintf(`
 		INSERT INTO notifications (user_id, type, message, is_read)
 		SELECT DISTINCT p.user_id, 'trade_loop',
-		       'A trade match or multiway loop was cancelled because one of its products was committed to another trade.',
+		       'A Trade Connect or multiway loop was cancelled because one of its products was committed to another trade.',
 		       FALSE
 		FROM trade_like_loop_participants p
 		JOIN trade_like_loops l ON l.id = p.loop_id
@@ -6313,7 +6372,9 @@ func (h *TradeHandler) GetTradeLoops(c *fiber.Ctx) error {
 	}
 
 	statusFilter := c.Query("status", "")
-	if statusFilter == "" {
+	refreshLoops := strings.EqualFold(strings.TrimSpace(c.Query("refresh", "")), "true") ||
+		strings.TrimSpace(c.Query("refresh", "")) == "1"
+	if statusFilter == "" && refreshLoops {
 		h.cleanupAutomaticMultiwayArtifacts(userID)
 		h.reprocessEligibleLoopsForUser(userID)
 	}
@@ -6752,13 +6813,13 @@ func (h *TradeHandler) GetTradeLoop(c *fiber.Ctx) error {
 
 	// Product-based loop: product_loop_{prodA}_{prodB}_..._{prodN}, N=3..5
 	if strings.HasPrefix(loopID, "product_loop_") {
-		return c.Status(404).JSON(models.APIResponse{Success: false, Error: "Product preference loops are no longer valid. Like products from Find Match to create Trade Match or Multiway loops."})
+		return c.Status(404).JSON(models.APIResponse{Success: false, Error: "Product preference loops are no longer valid. Like products from Find Match to create Trade Connect or Multiway loops."})
 	}
 
 	// Backward-compatible support for cached auto suggestions: auto_{tradeID}_{user3ID}
 	// This allows clients to view loop details before the chain row is materialized.
 	if strings.HasPrefix(loopID, "auto_") {
-		return c.Status(404).JSON(models.APIResponse{Success: false, Error: "Automatic multiway suggestions are no longer valid. Like products from Find Match to create Trade Match or Multiway loops."})
+		return c.Status(404).JSON(models.APIResponse{Success: false, Error: "Automatic multiway suggestions are no longer valid. Like products from Find Match to create Trade Connect or Multiway loops."})
 	}
 
 	// Verify loop exists and user is part of it. For simplicity in this implementation,
@@ -7114,7 +7175,7 @@ func (h *TradeHandler) DeclineTradeLoop(c *fiber.Ctx) error {
 	if declinerName == "" {
 		declinerName = fmt.Sprintf("User #%d", userID)
 	}
-	msg := fmt.Sprintf("%s declined the trade match.", declinerName)
+	msg := fmt.Sprintf("%s declined the Trade Connect.", declinerName)
 	_, _ = h.db.Exec("INSERT INTO notifications (user_id, type, message, is_read) SELECT user_id, 'trade_loop', ?, FALSE FROM trade_like_loop_participants WHERE loop_id = ? AND user_id <> ?", msg, loopNumericID, userID)
 
 	otherUserIDs := []int{}

@@ -1,3 +1,5 @@
+import { hasStoredAuthenticatedSession } from './authStorage'
+
 const AUTH_INVALID_EVENT = 'clovia:auth-invalid'
 
 let authInvalid = false
@@ -13,6 +15,11 @@ export const markAuthInvalid = (reason = 'expired'): boolean => {
   authInvalid = true
   window.dispatchEvent(new CustomEvent(AUTH_INVALID_EVENT, { detail: { reason } }))
   return true
+}
+
+export const markAuthInvalidIfAuthenticated = (reason = 'expired'): boolean => {
+  if (!hasStoredAuthenticatedSession()) return false
+  return markAuthInvalid(reason)
 }
 
 export const onAuthInvalid = (handler: (reason?: string) => void): (() => void) => {

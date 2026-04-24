@@ -1244,6 +1244,80 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
   const isMeetupActive = meetupAgreed && trade?.status === 'active'
   const bothMetConfirmed = buyerMetConfirmed && sellerMetConfirmed
   const userMetConfirmed = (isUserBuyer && buyerMetConfirmed) || (isUserSeller && sellerMetConfirmed)
+  const currentUserMeetupConfirmed = (isUserBuyer && buyerMeetupConfirmed) || (isUserSeller && sellerMeetupConfirmed)
+  const incomingMeetupProposal = useMemo(() => {
+    if (meetupAgreed) return null
+    // Seller always sees buyer's proposal (from trade creation or separate confirm_meetup action)
+    if (isUserSeller) {
+      const location = buyerMeetupLocation || trade?.meetup_location || null
+      if (location) {
+        const date = buyerMeetupLocation ? buyerMeetupDate : splitMeetupDateTime(trade?.meetup_time ?? null).date
+        const time = buyerMeetupLocation ? buyerMeetupTime : splitMeetupDateTime(trade?.meetup_time ?? null).time
+        return {
+          location,
+          date,
+          time,
+          proposer: trade?.buyer_name || 'Trader',
+        }
+      }
+    }
+    // Buyer sees seller's counter-proposal (when seller has confirmed a different location)
+    if (isUserBuyer && sellerMeetupConfirmed && sellerMeetupLocation) {
+      return {
+        location: sellerMeetupLocation,
+        date: sellerMeetupDate,
+        time: sellerMeetupTime,
+        proposer: trade?.seller_name || 'Trader',
+      }
+    }
+    return null
+  }, [
+    meetupAgreed,
+    isUserSeller,
+    buyerMeetupLocation,
+    buyerMeetupDate,
+    buyerMeetupTime,
+    trade?.meetup_location,
+    trade?.meetup_time,
+    trade?.buyer_name,
+    isUserBuyer,
+    sellerMeetupConfirmed,
+    sellerMeetupLocation,
+    sellerMeetupDate,
+    sellerMeetupTime,
+    trade?.seller_name,
+  ])
+  const hasMeetupProposal = !!incomingMeetupProposal
+  const showMeetupEditor = !currentUserMeetupConfirmed && (!hasMeetupProposal || showSuggestionsPanel)
+
+  // The current user's own proposal (for showing "You proposed this meetup")
+  const myMeetupProposal = useMemo(() => {
+    if (meetupAgreed) return null
+    if (isUserBuyer && (buyerMeetupConfirmed || trade?.meetup_location) && (buyerMeetupLocation || trade?.meetup_location)) {
+      const location = buyerMeetupLocation || trade?.meetup_location!
+      const date = buyerMeetupLocation ? buyerMeetupDate : splitMeetupDateTime(trade?.meetup_time ?? null).date
+      const time = buyerMeetupLocation ? buyerMeetupTime : splitMeetupDateTime(trade?.meetup_time ?? null).time
+      return { location, date, time }
+    }
+    if (isUserSeller && sellerMeetupConfirmed && sellerMeetupLocation) {
+      return { location: sellerMeetupLocation, date: sellerMeetupDate, time: sellerMeetupTime }
+    }
+    return null
+  }, [
+    meetupAgreed,
+    isUserBuyer,
+    buyerMeetupConfirmed,
+    buyerMeetupLocation,
+    buyerMeetupDate,
+    buyerMeetupTime,
+    trade?.meetup_location,
+    trade?.meetup_time,
+    isUserSeller,
+    sellerMeetupConfirmed,
+    sellerMeetupLocation,
+    sellerMeetupDate,
+    sellerMeetupTime,
+  ])
 
   // Pickup trade: location is locked to the seller's pickup_address.
   // The target product's pickup address is surfaced at the trade level
@@ -1258,7 +1332,7 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
   const maskToNeighborhood = (addr: string): string => {
     if (!addr) return ''
     const parts = addr.split(',').map((s) => s.trim()).filter(Boolean)
-    if (parts.length <= 1) return "Seller's neighborhood"
+    if (parts.length <= 1) return "Pickup neighborhood"
     return parts.slice(1).join(', ')
   }
   const pickupDisplayAddress = pickupAddressRevealed ? pickupAddress : maskToNeighborhood(pickupAddress)
@@ -1268,7 +1342,7 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
   // If the seller hasn't set a pickup_address and has no home_address,
   // use a descriptive placeholder so the Confirm button can still enable —
   // the parties will coordinate the exact spot via chat.
-  const effectivePickupLocation = pickupAddress || "Seller's pickup location (coordinate via chat)"
+  const effectivePickupLocation = pickupAddress || "Pickup location (coordinate via chat)"
   useEffect(() => {
     if (isPickupTrade && selectedLocation !== effectivePickupLocation) {
       setSelectedLocation(effectivePickupLocation)
@@ -2179,26 +2253,27 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
   const handleAgreeToSchedule = async () => {
     if (!trade) return
 
-    let agreeLocation: string | null = null
-    let agreeDate: string | null = null
-    let agreeTime: string | null = null
+    // Use incomingMeetupProposal data (which includes the trade.meetup_location fallback)
+    const agreeLocation = incomingMeetupProposal?.location ?? null
+    const agreeDate = incomingMeetupProposal?.date ?? null
+    const agreeTime = incomingMeetupProposal?.time ?? null
 
-    if (isUserBuyer) {
-      agreeLocation = sellerMeetupLocation
-      agreeDate = sellerMeetupDate
-      agreeTime = sellerMeetupTime
-    } else {
-      agreeLocation = buyerMeetupLocation
-      agreeDate = buyerMeetupDate
-      agreeTime = buyerMeetupTime
-    }
-
-    if (!agreeLocation || !agreeTime) {
+    if (!agreeLocation) {
       toast({
-        title: 'Missing Selection',
-        description: 'Cannot accept - missing location or time.',
+        title: 'Missing Location',
+        description: 'No meetup location found to accept.',
         status: 'warning',
         duration: 3000,
+      })
+      return
+    }
+
+    if (!agreeTime) {
+      toast({
+        title: 'No Time Set',
+        description: 'This proposal has no time. Use "Suggest Changes" to add a date and time.',
+        status: 'info',
+        duration: 4000,
       })
       return
     }
@@ -2810,7 +2885,7 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
                                 {trade.trade_option === 'meetup' ? (
                                   trade?.meeting_type === 'pickup' ? (
                                     <Text fontSize="sm" color="gray.600">
-                                      Pickup at seller's set location
+                                      Pickup at the other trader's set location
                                     </Text>
                                   ) : (
                                     <Text fontSize="sm" color="gray.600">
@@ -3011,7 +3086,7 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
                                     ? (additionalRequestedProducts.length > 0 ? "Your Items" : "Your Item")
                                     : (isUserBuyer
                                       ? (additionalRequestedProducts.length > 0 ? tradingPartner + "'s Items" : tradingPartner + "'s Item")
-                                      : (additionalRequestedProducts.length > 0 ? "Seller's Items" : "Seller's Item"))})
+                                      : (additionalRequestedProducts.length > 0 ? "Trader's Items" : "Trader's Item"))})
                                 </Text>
                               </HStack>
                               {requestedProduct ? (
@@ -3067,7 +3142,7 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
                                         : 'Offered'}
                                 </Badge>
                                 <Text fontSize="sm" color="gray.600">
-                                  ({isUserBuyer ? "Your Item" : (isUserSeller ? tradingPartner + "'s Items" : "Buyer's Items")})
+                                  ({isUserBuyer ? "Your Item" : (isUserSeller ? tradingPartner + "'s Items" : "Trader's Items")})
                                 </Text>
                               </HStack>
                               {offeredProducts.length > 0 ? (
@@ -3421,65 +3496,207 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
                   ) : (
                     <VStack spacing={6} align="stretch">
 
-                      {!meetupAgreed && (
-                        <Box
-                          p={3}
-                          bg={meetupInfoBg}
-                          borderLeft="4px"
-                          borderColor="brand.500"
-                          borderRadius="md"
-                        >
-                          <Text fontSize="sm" color={meetupInfoTextColor} fontWeight="medium">
-                            {trade?.meeting_type === 'pickup'
-                              ? 'Current Stage: Waiting for both parties to confirm pickup schedule'
-                              : 'Current Stage: Waiting for both parties to confirm location'}
-                          </Text>
-                        </Box>
+                      {/* ── 1. MY PROPOSAL CARD (proposer's waiting view) ── */}
+                      {!meetupAgreed && myMeetupProposal && !incomingMeetupProposal && (
+                        <Card variant="outline" borderColor="blue.200" bg={useColorModeValue('blue.50', 'blue.900')}>
+                          <CardBody p={[3, 4]}>
+                            <VStack spacing={3} align="stretch">
+                              <HStack spacing={2} align="center">
+                                <Icon as={FaHandshake} color="blue.500" boxSize={4} />
+                                <Text fontWeight="700" color={useColorModeValue('blue.800', 'blue.200')}>
+                                  Your Proposed Meetup
+                                </Text>
+                                <Badge colorScheme="blue" variant="subtle" borderRadius="full" ml="auto">
+                                  Waiting for response
+                                </Badge>
+                              </HStack>
+                              <Box p={2.5} bg={useColorModeValue('blue.100', 'blue.800')} borderRadius="md" borderLeft="3px solid" borderColor="blue.400">
+                                <Text fontSize="sm" color={useColorModeValue('blue.800', 'blue.200')}>
+                                  You proposed this meetup. Waiting for {tradingPartner} to confirm.
+                                </Text>
+                              </Box>
+                              <SimpleGrid columns={[1, 3]} spacing={2}>
+                                <HStack align="start" spacing={2}>
+                                  <Icon as={FaMapMarkerAlt} color="blue.500" boxSize={4} mt={0.5} />
+                                  <Box minW={0}>
+                                    <Text fontSize="xs" fontWeight="700" color="gray.500" textTransform="uppercase">Location</Text>
+                                    <Text fontSize="sm" fontWeight="600" color={useColorModeValue('gray.800', 'gray.100')} noOfLines={2}>
+                                      {myMeetupProposal.location}
+                                    </Text>
+                                  </Box>
+                                </HStack>
+                                <HStack align="start" spacing={2}>
+                                  <Icon as={FaCalendarAlt} color="blue.500" boxSize={4} mt={0.5} />
+                                  <Box>
+                                    <Text fontSize="xs" fontWeight="700" color="gray.500" textTransform="uppercase">Date</Text>
+                                    <Text fontSize="sm" fontWeight="600" color={useColorModeValue('gray.800', 'gray.100')}>
+                                      {myMeetupProposal.date ? formatDateLabel(myMeetupProposal.date) : 'Date not set'}
+                                    </Text>
+                                  </Box>
+                                </HStack>
+                                <HStack align="start" spacing={2}>
+                                  <Icon as={FaClock} color="blue.500" boxSize={4} mt={0.5} />
+                                  <Box>
+                                    <Text fontSize="xs" fontWeight="700" color="gray.500" textTransform="uppercase">Time</Text>
+                                    <Text fontSize="sm" fontWeight="600" color={useColorModeValue('gray.800', 'gray.100')}>
+                                      {myMeetupProposal.time ? formatTimePH(myMeetupProposal.time) : 'Time not set'}
+                                    </Text>
+                                  </Box>
+                                </HStack>
+                              </SimpleGrid>
+                            </VStack>
+                          </CardBody>
+                        </Card>
                       )}
 
-                      {meetupAgreed && meetupSelectionMatches && (
-                        <Card bg="green.50" borderWidth="2px" borderColor="green.200">
-                          <CardBody>
+                      {/* ── 2. INCOMING PROPOSAL CARD (receiver's action view) ── */}
+                      {!meetupAgreed && incomingMeetupProposal && (
+                        <Card variant="outline" borderColor="brand.200" bg={useColorModeValue('brand.50', 'gray.800')}>
+                          <CardBody p={[3, 4]}>
                             <VStack spacing={3} align="stretch">
-                              <HStack>
-                                <Icon as={FaCheckCircle} color="green.500" boxSize={5} />
-                                <Text fontWeight="semibold" fontSize="md" color="green.700">
-                                  {trade?.meeting_type === 'pickup' ? 'Pickup Confirmed' : 'Meetup Confirmed'}
-                                </Text>
+                              <HStack justify="space-between" align="start" spacing={3}>
+                                <HStack spacing={2}>
+                                  <Icon as={FaHandshake} color="brand.500" boxSize={4} />
+                                  <Text fontWeight="700" color={useColorModeValue('gray.800', 'white')}>
+                                    Proposed Meetup
+                                  </Text>
+                                </HStack>
+                                <Badge colorScheme="purple" variant="subtle" borderRadius="full">
+                                  {incomingMeetupProposal.proposer}
+                                </Badge>
                               </HStack>
 
-                              <VStack spacing={2} align="start" fontSize="sm">
-                                <HStack spacing={2} w="full">
-                                  <Icon as={FaMapMarkerAlt} boxSize={4} color="green.600" />
-                                  <VStack align="start" spacing={0} flex={1}>
-                                    <Text fontWeight="semibold" color="green.900">Location</Text>
-                                    <Text color="green.800">{buyerMeetupLocation}</Text>
-                                  </VStack>
+                              {/* User-specific context message */}
+                              {!currentUserMeetupConfirmed ? (
+                                <Box p={2.5} bg={useColorModeValue('orange.50', 'orange.900')} borderRadius="md" borderLeft="3px solid" borderColor="orange.400">
+                                  <Text fontSize="sm" color={useColorModeValue('orange.800', 'orange.200')}>
+                                    {incomingMeetupProposal.proposer} proposed this meetup. You can accept it or suggest changes.
+                                  </Text>
+                                </Box>
+                              ) : (
+                                <Box p={2.5} bg={useColorModeValue('blue.50', 'blue.900')} borderRadius="md" borderLeft="3px solid" borderColor="blue.400">
+                                  <Text fontSize="sm" color={useColorModeValue('blue.700', 'blue.300')}>
+                                    You already confirmed this meetup. Waiting for {tradingPartner} to respond.
+                                  </Text>
+                                </Box>
+                              )}
+
+                              <SimpleGrid columns={[1, 3]} spacing={2}>
+                                <HStack align="start" spacing={2}>
+                                  <Icon as={FaMapMarkerAlt} color="brand.500" boxSize={4} mt={0.5} />
+                                  <Box minW={0}>
+                                    <Text fontSize="xs" fontWeight="700" color="gray.500" textTransform="uppercase">Location</Text>
+                                    <Text fontSize="sm" fontWeight="600" color={useColorModeValue('gray.800', 'gray.100')} noOfLines={2}>
+                                      {incomingMeetupProposal.location}
+                                    </Text>
+                                  </Box>
                                 </HStack>
+                                <HStack align="start" spacing={2}>
+                                  <Icon as={FaCalendarAlt} color="brand.500" boxSize={4} mt={0.5} />
+                                  <Box>
+                                    <Text fontSize="xs" fontWeight="700" color="gray.500" textTransform="uppercase">Date</Text>
+                                    <Text fontSize="sm" fontWeight="600" color={useColorModeValue('gray.800', 'gray.100')}>
+                                      {incomingMeetupProposal.date ? formatDateLabel(incomingMeetupProposal.date) : 'Date not set'}
+                                    </Text>
+                                  </Box>
+                                </HStack>
+                                <HStack align="start" spacing={2}>
+                                  <Icon as={FaClock} color="brand.500" boxSize={4} mt={0.5} />
+                                  <Box>
+                                    <Text fontSize="xs" fontWeight="700" color="gray.500" textTransform="uppercase">Time</Text>
+                                    <Text fontSize="sm" fontWeight="600" color={useColorModeValue('gray.800', 'gray.100')}>
+                                      {incomingMeetupProposal.time ? formatTimePH(incomingMeetupProposal.time) : 'Time not set'}
+                                    </Text>
+                                  </Box>
+                                </HStack>
+                              </SimpleGrid>
 
+                              {!currentUserMeetupConfirmed && (
+                                <HStack spacing={2} align="stretch" flexDirection={["column", "row"]}>
+                                  <Button
+                                    colorScheme="green"
+                                    leftIcon={<FaCheckCircle />}
+                                    onClick={handleAgreeToSchedule}
+                                    isLoading={agreeingToSchedule}
+                                    isDisabled={!incomingMeetupProposal.time || agreeingToSchedule}
+                                    title={!incomingMeetupProposal.time ? 'No time set — use Suggest Changes to add a time' : ''}
+                                    flex={1}
+                                  >
+                                    Accept Meetup
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    leftIcon={<FaLightbulb />}
+                                    onClick={() => {
+                                      const opening = !showSuggestionsPanel
+                                      setShowSuggestionsPanel(opening)
+                                      setValidationError(null)
+                                      if (opening) {
+                                        if (incomingMeetupProposal.location && !selectedLocation) setSelectedLocation(incomingMeetupProposal.location)
+                                        if (incomingMeetupProposal.date && !selectedDate) setSelectedDate(incomingMeetupProposal.date)
+                                        if (incomingMeetupProposal.time && !selectedTime) setSelectedTime(incomingMeetupProposal.time)
+                                      }
+                                    }}
+                                    flex={1}
+                                  >
+                                    {showSuggestionsPanel ? 'Hide Changes' : 'Suggest Changes'}
+                                  </Button>
+                                </HStack>
+                              )}
+                            </VStack>
+                          </CardBody>
+                        </Card>
+                      )}
+
+                      {/* ── 3. CONFIRMED MEETUP CARD ── */}
+                      {meetupAgreed && meetupSelectionMatches && (
+                        <Card bg={useColorModeValue('green.50', 'green.900')} borderWidth="2px" borderColor={useColorModeValue('green.300', 'green.600')}>
+                          <CardBody p={[3, 4]}>
+                            <VStack spacing={3} align="stretch">
+                              <HStack spacing={2}>
+                                <Icon as={FaCheckCircle} color="green.500" boxSize={5} />
+                                <Text fontWeight="bold" fontSize="md" color={useColorModeValue('green.700', 'green.300')}>
+                                  {trade?.meeting_type === 'pickup' ? 'Pickup Confirmed!' : 'Meetup Confirmed!'}
+                                </Text>
+                              </HStack>
+                              <Text fontSize="sm" color={useColorModeValue('green.700', 'green.300')}>
+                                Both traders agreed. See you there!
+                              </Text>
+                              <SimpleGrid columns={[1, 3]} spacing={2}>
+                                <HStack align="start" spacing={2}>
+                                  <Icon as={FaMapMarkerAlt} color="green.600" boxSize={4} mt={0.5} />
+                                  <Box minW={0}>
+                                    <Text fontSize="xs" fontWeight="700" color={useColorModeValue('green.600', 'green.400')} textTransform="uppercase">Location</Text>
+                                    <Text fontSize="sm" fontWeight="600" color={useColorModeValue('green.900', 'green.100')} noOfLines={2}>
+                                      {buyerMeetupLocation}
+                                    </Text>
+                                  </Box>
+                                </HStack>
                                 {buyerMeetupDate && (
-                                  <HStack spacing={2} w="full">
-                                    <Icon as={FaCalendarAlt} boxSize={4} color="green.600" />
-                                    <VStack align="start" spacing={0} flex={1}>
-                                      <Text fontWeight="semibold" color="green.900">Date</Text>
-                                      <Text color="green.800">{new Date(buyerMeetupDate).toLocaleDateString()}</Text>
-                                    </VStack>
+                                  <HStack align="start" spacing={2}>
+                                    <Icon as={FaCalendarAlt} color="green.600" boxSize={4} mt={0.5} />
+                                    <Box>
+                                      <Text fontSize="xs" fontWeight="700" color={useColorModeValue('green.600', 'green.400')} textTransform="uppercase">Date</Text>
+                                      <Text fontSize="sm" fontWeight="600" color={useColorModeValue('green.900', 'green.100')}>
+                                        {formatDateLabel(buyerMeetupDate)}
+                                      </Text>
+                                    </Box>
                                   </HStack>
                                 )}
-
                                 {buyerMeetupTime && (
-                                  <HStack spacing={2} w="full">
-                                    <Icon as={FaClock} boxSize={4} color="green.600" />
-                                    <VStack align="start" spacing={0} flex={1}>
-                                      <Text fontWeight="semibold" color="green.900">Time</Text>
-                                      <Text color="green.800">{formatTimePH(buyerMeetupTime)}</Text>
-                                    </VStack>
+                                  <HStack align="start" spacing={2}>
+                                    <Icon as={FaClock} color="green.600" boxSize={4} mt={0.5} />
+                                    <Box>
+                                      <Text fontSize="xs" fontWeight="700" color={useColorModeValue('green.600', 'green.400')} textTransform="uppercase">Time</Text>
+                                      <Text fontSize="sm" fontWeight="600" color={useColorModeValue('green.900', 'green.100')}>
+                                        {formatTimePH(buyerMeetupTime)}
+                                      </Text>
+                                    </Box>
                                   </HStack>
                                 )}
-                              </VStack>
-
-                              <Text fontSize="xs" color="green.700" fontStyle="italic">
-                                Please arrive on time. Review the Meetup Policy for important information about no-shows and strikes.
+                              </SimpleGrid>
+                              <Text fontSize="xs" color={useColorModeValue('green.700', 'green.400')} fontStyle="italic">
+                                Please arrive on time. Review the Meetup Policy for no-shows and strikes.
                               </Text>
                             </VStack>
                           </CardBody>
@@ -3487,7 +3704,7 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
                       )}
 
                       {/* Meetup Location Selection */}
-                      {isPickupTrade ? (
+                      {showMeetupEditor && (isPickupTrade ? (
                         // Pickup trade: location is locked to the seller's pickup_address.
                         // Before the trade is accepted we mask to the neighborhood only; the
                         // full address reveals once the trade moves to active.
@@ -3506,16 +3723,16 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
                                   </Text>
                                   {!pickupAddressRevealed && (
                                     <Text fontSize="xs" color="orange.700" fontStyle="italic">
-                                      🔒 Exact address is revealed to the buyer once the seller accepts the offer.
+                                      🔒 Exact address is revealed once the offer is accepted.
                                     </Text>
                                   )}
                                   <Text fontSize="xs" color="gray.600">
-                                    This is the seller's set pickup location. The buyer comes to the seller — the location can't be changed. Pick a date and time below to continue.
+                                    This is the other trader's set pickup location. You will coordinate around this pickup spot, and the location can't be changed. Pick a date and time below to continue.
                                   </Text>
                                 </>
                               ) : (
                                 <Text fontSize="sm" color="red.600">
-                                  The seller hasn't set a pickup address on this product. Please message them to coordinate.
+                                  The other trader hasn't set a pickup address on this product. Please message them to coordinate.
                                 </Text>
                               )}
                             </VStack>
@@ -3756,10 +3973,10 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
                             })}
                           </SimpleGrid>
                         </Box>
-                      )}
+                      ))}
 
                       {/* 1. SMART SUGGESTIONS PANEL - AT TOP */}
-                      {showSuggestionsPanel && (
+                      {showMeetupEditor && showSuggestionsPanel && (
                         <Box
                           p={3}
                           bg="blue.50"
@@ -3809,20 +4026,41 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
                       )}
 
                       {/* 2. LOCATION + TIME SELECTION */}
+                      {showMeetupEditor && (
                       <Box>
+                        {/* Product location context — shown when suggesting changes and multiple locations exist */}
+                        {hasMeetupProposal && (trade?.items || []).filter(it => it.product_pickup_address).length >= 2 && (
+                          <Box mb={3} p={2.5} bg={useColorModeValue('gray.50', 'gray.700')} borderRadius="md" borderWidth="1px" borderColor={borderColor}>
+                            <Text fontSize="xs" fontWeight="700" color="gray.500" textTransform="uppercase" mb={1.5}>
+                              Product Locations Involved
+                            </Text>
+                            <VStack align="stretch" spacing={1}>
+                              {(trade?.items || []).filter(it => it.product_pickup_address).map((it) => (
+                                <HStack key={it.id} spacing={2}>
+                                  <Icon as={FaMapMarkerAlt} color="gray.400" boxSize={3} flexShrink={0} />
+                                  <Text fontSize="xs" color="gray.600" noOfLines={1}>
+                                    {it.product_title || `Product #${it.product_id}`} — {it.product_pickup_address}
+                                  </Text>
+                                </HStack>
+                              ))}
+                            </VStack>
+                          </Box>
+                        )}
                         <HStack justify="space-between" mb={2}>
                           <VStack align="start" spacing={0}>
                             <Text fontWeight="semibold" fontSize="md">
                               {isPickupTrade
-                                ? (isUserBuyer ? 'Propose Pickup Time' : "Review Buyer's Pickup Proposal")
-                                : 'Schedule a Meetup'}
+                                ? (isUserBuyer ? 'Propose Pickup Time' : "Review Pickup Proposal")
+                                : hasMeetupProposal ? 'Suggest a Different Meetup' : 'Schedule a Meetup'}
                             </Text>
                             <Text fontSize="sm" color="gray.600">
                               {isPickupTrade
                                 ? (isUserBuyer
-                                  ? 'You set the pickup date and time. The seller can accept or propose a reschedule.'
-                                  : 'The buyer picks a date and time. You can accept it or propose a reschedule.')
-                                : 'Pick a date within the next 7 days and a time that works for both of you.'}
+                                  ? 'You set the pickup date and time. The other trader can accept or propose a reschedule.'
+                                  : 'The other trader picks a date and time. You can accept it or propose a reschedule.')
+                                : hasMeetupProposal
+                                  ? 'Adjust the location, date, or time and submit as a counter-proposal.'
+                                  : 'Pick a date within the next 7 days and a time that works for both of you.'}
                             </Text>
                           </VStack>
                           {(selectedDate || selectedTime) && (
@@ -3842,7 +4080,7 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
                         </HStack>
 
                         {isPickupTrade && isUserSeller && !buyerMeetupConfirmed && !sellerMeetupConfirmed ? (
-                          // Pickup trade: seller must wait for the buyer to propose a
+                          // Pickup trade: one trader must wait for the other to propose a
                           // date/time before they can respond.
                           <Box
                             p={4}
@@ -3853,10 +4091,10 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
                           >
                             <VStack spacing={1} align="start">
                               <Text fontWeight="semibold" color="blue.800">
-                                ⏳ Waiting for the buyer to propose a pickup time
+                                ⏳ Waiting for the other trader to propose a pickup time
                               </Text>
                               <Text fontSize="sm" color="blue.700">
-                                The buyer chooses when to come by. You'll be able to accept their proposal or suggest a different time once it's submitted.
+                                The other trader chooses when to come by. You'll be able to accept their proposal or suggest a different time once it's submitted.
                               </Text>
                             </VStack>
                           </Box>
@@ -3982,22 +4220,24 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
                               onClick={confirmMeetup}
                               isLoading={confirmingMeetup}
                               isDisabled={!selectedLocation || !selectedDate || !selectedTime}
+                              leftIcon={<FaCheckCircle />}
                               w="full"
                               fontWeight="semibold"
                               mt={3}
                               _hover={{ transform: 'translateY(-2px)', shadow: 'lg' }}
                               transition="all 0.2s"
                             >
-                              G�� Confirm Meetup
+                              Confirm Meetup
                             </Button>
                           </VStack>
                         )}
                       </Box>
+                      )}
 
                       <>
                         <Box mt={4}>
                           {/* Smart Suggestions Panel */}
-                          {showSuggestionsPanel && (
+                          {showMeetupEditor && showSuggestionsPanel && (
                             <Box
                               p={3}
                               bg="blue.50"
@@ -4285,121 +4525,8 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
                                 </VStack>
                               )
                             ) : (
-                              // One submitted, waiting for the other
-                              <VStack spacing={[2, 2.5]} align="stretch">
-                                <Box
-                                  p={[2, 2.5]}
-                                  bg="blue.100"
-                                  borderRadius="md"
-                                  borderWidth="2px"
-                                  borderColor="blue.400"
-                                  textAlign="center"
-                                >
-                                  <Text fontWeight="medium" color="blue.700" fontSize={["xs", "sm"]}>
-                                    ⏳ Waiting for Agreement
-                                  </Text>
-                                  <Text fontSize="xs" color="blue.600" mt={0.5}>
-                                    {buyerMeetupConfirmed && !sellerMeetupConfirmed
-                                      ? `${trade.buyer_name} proposed:`
-                                      : `${trade.seller_name} proposed:`}
-                                  </Text>
-                                </Box>
-
-                                {/* Show proposed schedule */}
-                                {buyerMeetupConfirmed && !sellerMeetupConfirmed && isUserSeller && (
-                                  <Box p={[2, 2.5]} bg="white" borderRadius="md" borderWidth="1px" borderColor="gray.200">
-                                    <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={1}>
-                                      Proposed Schedule:
-                                    </Text>
-                                    <Text fontSize={["xs", "sm"]} fontWeight="medium" color="gray.700">
-                                      =��� {buyerMeetupLocation}
-                                    </Text>
-                                    <Text fontSize={["xs", "sm"]} color="gray.600">
-                                      =��� {formatTimePH(buyerMeetupTime)}
-                                    </Text>
-                                  </Box>
-                                )}
-
-                                {sellerMeetupConfirmed && !buyerMeetupConfirmed && isUserBuyer && (
-                                  <Box p={[2, 2.5]} bg="white" borderRadius="md" borderWidth="1px" borderColor="gray.200">
-                                    <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={1}>
-                                      Proposed Schedule:
-                                    </Text>
-                                    <Text fontSize={["xs", "sm"]} fontWeight="medium" color="gray.700">
-                                      =��� {sellerMeetupLocation}
-                                    </Text>
-                                    <Text fontSize={["xs", "sm"]} color="gray.600">
-                                      =��� {formatTimePH(sellerMeetupTime)}
-                                    </Text>
-                                  </Box>
-                                )}
-
-                                {/* Action buttons */}
-                                {(buyerMeetupConfirmed && !sellerMeetupConfirmed && isUserSeller) ||
-                                  (sellerMeetupConfirmed && !buyerMeetupConfirmed && isUserBuyer) ? (
-                                  <VStack spacing={2} w="full" align="stretch">
-                                    <HStack spacing={2} w="full" align="stretch">
-                                      <Button
-                                        colorScheme="green"
-                                        size={["sm", "md"]}
-                                        onClick={handleAgreeToSchedule}
-                                        isLoading={agreeingToSchedule}
-                                        flex={1}
-                                      >
-                                        Accept This Time
-                                      </Button>
-                                      <Button
-                                        variant="outline"
-                                        colorScheme="gray"
-                                        size={["sm", "md"]}
-                                        onClick={() => {
-                                          setShowSuggestionsPanel(true)
-                                        }}
-                                        leftIcon={<FaLightbulb />}
-                                        flex={0.8}
-                                      >
-                                        Suggest Different
-                                      </Button>
-                                    </HStack>
-                                    {/* Review and complete once both parties agree */}
-                                    <Button
-                                      colorScheme={meetupAgreed ? "green" : "gray"}
-                                      variant={meetupAgreed ? "solid" : "outline"}
-                                      size={["sm", "md"]}
-                                      onClick={handleInstantComplete}
-                                      leftIcon={<FaStar />}
-                                      w="full"
-                                      isDisabled={!meetupAgreed || completingTrade}
-                                      isLoading={completingTrade}
-                                      loadingText="Completing..."
-                                      _disabled={{ opacity: 0.5, cursor: 'not-allowed' }}
-                                    >
-                                      {meetupAgreed ? 'Leave a Review and Complete Trade' : 'Review after agreement'}
-                                    </Button>
-                                  </VStack>
-                                ) : (
-                                  <VStack spacing={2} w="full">
-                                    <Text fontSize="xs" color="gray.600" textAlign="center">
-                                      Waiting for {isUserBuyer ? trade.seller_name : trade.buyer_name} to respond.
-                                    </Text>
-                                    {/* Review and complete once both parties agree */}
-                                    <Button
-                                      colorScheme={meetupAgreed ? "green" : "gray"}
-                                      variant={meetupAgreed ? "solid" : "outline"}
-                                      size={["sm", "md"]}
-                                      onClick={handleInstantComplete}
-                                      leftIcon={<FaStar />}
-                                      w="full"
-                                      isDisabled={!meetupAgreed || completingTrade}
-                                      isLoading={completingTrade}
-                                      loadingText="Completing..."
-                                      _disabled={{ opacity: 0.5, cursor: 'not-allowed' }}
-                                    >
-                                      {meetupAgreed ? 'Leave a Review and Complete Trade' : 'Review after agreement'}
-                                    </Button>
-                                  </VStack>
-                                )}
-                              </VStack>
+                              // One submitted — the proposal card above already shows this; nothing extra needed here
+                              null
                             )}
                           </VStack>
                         </Box>

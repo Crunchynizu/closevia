@@ -68,6 +68,7 @@ import {
   FaStar,
   FaSearch,
   FaTimesCircle,
+  FaLightbulb,
 } from 'react-icons/fa'
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -537,6 +538,12 @@ const MultiWayTradeModal: React.FC<MultiWayTradeModalProps> = ({
       : undefined
     return otherFirst || list.find((p) => p.meetup_confirmed) || null
   }, [meetupStatus, viewerUserId])
+  const incomingLoopMeetupProposal = useMemo(() => {
+    if (!proposedMeetup || meetupAgreed) return null
+    if (viewerUserId && proposedMeetup.user_id === viewerUserId) return null
+    return proposedMeetup
+  }, [meetupAgreed, proposedMeetup, viewerUserId])
+  const showLoopMeetupEditor = !myMeetupConfirmed && (!incomingLoopMeetupProposal || showSuggestionsPanel)
 
   const agreedMeetup = useMemo(() => {
     if (!meetupAgreed) return null
@@ -2104,7 +2111,85 @@ const MultiWayTradeModal: React.FC<MultiWayTradeModalProps> = ({
                     </Text>
                   </Box>
 
+                  {incomingLoopMeetupProposal && (
+                    <Card variant="outline" borderColor="brand.200" bg={useColorModeValue('brand.50', 'gray.800')}>
+                      <CardBody p={[3, 4]}>
+                        <VStack spacing={3} align="stretch">
+                          <HStack justify="space-between" align="start" spacing={3}>
+                            <VStack align="start" spacing={1}>
+                              <HStack spacing={2}>
+                                <Icon as={FaHandshake} color="brand.500" boxSize={4} />
+                                <Text fontWeight="700" color={useColorModeValue('gray.800', 'white')}>
+                                  Proposed Meetup
+                                </Text>
+                              </HStack>
+                              <Badge colorScheme="blue" variant="subtle" borderRadius="full">
+                                Proposed by trader
+                              </Badge>
+                            </VStack>
+                            <Badge colorScheme="purple" variant="subtle" borderRadius="full">
+                              {sortedParticipants.find((p) => p.user_id === incomingLoopMeetupProposal.user_id)?.user_name || 'Trader'}
+                            </Badge>
+                          </HStack>
 
+                          <SimpleGrid columns={[1, 3]} spacing={2}>
+                            <HStack align="start" spacing={2}>
+                              <Icon as={FaMapMarkerAlt} color="brand.500" boxSize={4} mt={0.5} />
+                              <Box minW={0}>
+                                <Text fontSize="xs" fontWeight="700" color="gray.500" textTransform="uppercase">Location</Text>
+                                <Text fontSize="sm" fontWeight="600" color={useColorModeValue('gray.800', 'gray.100')} noOfLines={2}>
+                                  {incomingLoopMeetupProposal.meetup_location}
+                                </Text>
+                              </Box>
+                            </HStack>
+                            <HStack align="start" spacing={2}>
+                              <Icon as={FaCalendarAlt} color="brand.500" boxSize={4} mt={0.5} />
+                              <Box>
+                                <Text fontSize="xs" fontWeight="700" color="gray.500" textTransform="uppercase">Date</Text>
+                                <Text fontSize="sm" fontWeight="600" color={useColorModeValue('gray.800', 'gray.100')}>
+                                  {incomingLoopMeetupProposal.meetup_date ? formatDateLabel(incomingLoopMeetupProposal.meetup_date) : 'Date not set'}
+                                </Text>
+                              </Box>
+                            </HStack>
+                            <HStack align="start" spacing={2}>
+                              <Icon as={FaClock} color="brand.500" boxSize={4} mt={0.5} />
+                              <Box>
+                                <Text fontSize="xs" fontWeight="700" color="gray.500" textTransform="uppercase">Time</Text>
+                                <Text fontSize="sm" fontWeight="600" color={useColorModeValue('gray.800', 'gray.100')}>
+                                  {formatTimePH(incomingLoopMeetupProposal.meetup_time)}
+                                </Text>
+                              </Box>
+                            </HStack>
+                          </SimpleGrid>
+
+                          <HStack spacing={2} align="stretch" flexDirection={["column", "row"]}>
+                            <Button
+                              colorScheme="green"
+                              leftIcon={<FaCheckCircle />}
+                              onClick={acceptSchedule}
+                              isLoading={agreeingToSchedule}
+                              flex={1}
+                            >
+                              Accept Meetup
+                            </Button>
+                            <Button
+                              variant="outline"
+                              leftIcon={<FaLightbulb />}
+                              onClick={() => {
+                                setShowSuggestionsPanel((prev) => !prev)
+                                setValidationError(null)
+                              }}
+                              flex={1}
+                            >
+                              {showSuggestionsPanel ? 'Hide changes' : 'Suggest changes'}
+                            </Button>
+                          </HStack>
+                        </VStack>
+                      </CardBody>
+                    </Card>
+                  )}
+
+                  {showLoopMeetupEditor && (
                   <Box>
                     <Text fontWeight="semibold" mb={1} fontSize="md">
                       Suggested Meetup Locations
@@ -2342,8 +2427,9 @@ const MultiWayTradeModal: React.FC<MultiWayTradeModalProps> = ({
                       )}
                     </Box>
                   </Box>
+                  )}
 
-                  {showSuggestionsPanel && (
+                  {showLoopMeetupEditor && showSuggestionsPanel && (
                     <Box p={3} bg="blue.50" borderRadius="md" borderLeft="4px" borderColor="blue.400">
                       <HStack justify="space-between" mb={2}>
                         <Text fontSize="sm" fontWeight="medium" color="blue.700">
@@ -2375,6 +2461,7 @@ const MultiWayTradeModal: React.FC<MultiWayTradeModalProps> = ({
                     </Box>
                   )}
 
+                  {showLoopMeetupEditor && (
                   <Box>
                     <HStack justify="space-between" mb={2}>
                       <VStack align="start" spacing={0}>
@@ -2520,6 +2607,7 @@ const MultiWayTradeModal: React.FC<MultiWayTradeModalProps> = ({
                     </VStack>
                     )}
                   </Box>
+                  )}
 
                   <Box pt={4}>
                     <Divider />
@@ -2549,7 +2637,7 @@ const MultiWayTradeModal: React.FC<MultiWayTradeModalProps> = ({
                           </Box>
                         )}
 
-                        {getMeetupState() === 'proposed' && proposedMeetup && (
+                        {getMeetupState() === 'proposed' && proposedMeetup && !incomingLoopMeetupProposal && (
                           <VStack spacing={3} align="stretch">
                             <Box p={3} bg={useColorModeValue('white', 'gray.800')} borderRadius="md" borderWidth="1px" borderColor={borderColor}>
                               <Text fontWeight="semibold" mb={1}>

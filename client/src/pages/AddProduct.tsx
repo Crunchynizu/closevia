@@ -1770,7 +1770,7 @@ const AddProduct: React.FC = () => {
                     Use My Current Location
                   </Text>
                   <Text fontSize="10px" color="gray.600">
-                    Buyers pick up from your detected location
+                    Other users pick up from your detected location
                   </Text>
                 </VStack>
                 {formData.location_type === 'current_location' && isGettingLocation && <Spinner size="xs" />}
@@ -2383,7 +2383,7 @@ const AddProduct: React.FC = () => {
                 Estimated Value (Market Range)
               </Text>
               <Text fontSize="10px" color="gray.500">
-                Choose if buyers can see this estimate.
+                Choose if other users can see this estimate.
               </Text>
             </Box>
             <HStack spacing={0} borderWidth="1px" borderColor="gray.200" borderRadius="md" overflow="hidden" flexShrink={0}>

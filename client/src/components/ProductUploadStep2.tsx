@@ -322,7 +322,7 @@ const ProductUploadStep2: React.FC<ProductUploadStep2Props> = ({
                 onChange={(e) => handleChange('location', e.target.value)}
                 size="lg"
               />
-              <FormHelperText>Used to calculate distance for nearby buyers</FormHelperText>
+              <FormHelperText>Used to calculate distance for nearby users</FormHelperText>
             </VStack>
             <Button
               size="lg"
@@ -469,7 +469,7 @@ const ProductUploadStep2: React.FC<ProductUploadStep2Props> = ({
             💡 AI Suggestions
           </Text>
           <VStack align="start" spacing={1} fontSize="sm" color="blue.800">
-            <Text>✓ Great description - buyers will appreciate the detail</Text>
+            <Text>✓ Great description - other users will appreciate the detail</Text>
             <Text>✓ Consider adding condition details for higher trustworthiness</Text>
             <Text>✓ Pricing looks competitive for this category</Text>
           </VStack>

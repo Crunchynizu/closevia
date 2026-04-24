@@ -52,14 +52,14 @@ const Sidebar: React.FC = () => {
   const mobileUserCardBg = useColorModeValue('brand.50', 'gray.700')
   const { isOpen, onOpen, onClose } = useMobileNav()
   const { notificationCount } = useRealtime()
-  const { user, token, logout } = useAuth()
+  const { user, logout } = useAuth()
   const [riderStatus, setRiderStatus] = useState<{ is_rider: boolean; status?: string } | null>(null)
   const [touchStart, setTouchStart] = useState<number | null>(null)
   const [isStandalone, setIsStandalone] = useState(false)
-  // Vertical swipe-to-dismiss for the bottom sheet drawer
   const dragStartYRef = useRef<number | null>(null)
-  const dragDeltaRef = useRef<number>(0)
+  const dragDeltaRef = useRef(0)
   const [dragOffset, setDragOffset] = useState(0)
+  const [isDraggingSheet, setIsDraggingSheet] = useState(false)
 
   useEffect(() => {
     setIsStandalone(isRunningStandalone())
@@ -69,7 +69,7 @@ const Sidebar: React.FC = () => {
     let mounted = true
 
     const fetchRiderStatus = async () => {
-      if (!user || !token) {
+      if (!user) {
         setRiderStatus(null)
         return
       }
@@ -89,7 +89,7 @@ const Sidebar: React.FC = () => {
     return () => {
       mounted = false
     }
-  }, [user, token])
+  }, [user])
 
   // Handle swipe to open menu
   const handleTouchStart = useCallback((e: TouchEvent) => {
@@ -145,32 +145,30 @@ const Sidebar: React.FC = () => {
     }
   }, [isOpen, onClose])
 
-  // Vertical swipe-to-dismiss on the bottom sheet
-  const handleSheetTouchStart = useCallback((e: React.TouchEvent) => {
-    dragStartYRef.current = e.touches[0].clientY
-    dragDeltaRef.current = 0
-  }, [])
-
-  const handleSheetTouchMove = useCallback((e: React.TouchEvent) => {
-    if (dragStartYRef.current === null) return
-    const delta = e.touches[0].clientY - dragStartYRef.current
-    // Only react to downward drags; clamp so the sheet doesn't jump up
-    if (delta > 0) {
-      dragDeltaRef.current = delta
-      setDragOffset(delta)
-    }
-  }, [])
-
-  const handleSheetTouchEnd = useCallback(() => {
-    if (dragStartYRef.current === null) return
+  const finishSheetDrag = useCallback(() => {
     const delta = dragDeltaRef.current
     dragStartYRef.current = null
     dragDeltaRef.current = 0
+    setIsDraggingSheet(false)
     setDragOffset(0)
-    if (delta > 100) {
+    if (delta > 110) {
       onClose()
     }
   }, [onClose])
+
+  const handleSheetPointerDown = useCallback((event: React.PointerEvent) => {
+    dragStartYRef.current = event.clientY
+    dragDeltaRef.current = 0
+    setIsDraggingSheet(true)
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }, [])
+
+  const handleSheetPointerMove = useCallback((event: React.PointerEvent) => {
+    if (dragStartYRef.current === null) return
+    const delta = Math.max(0, event.clientY - dragStartYRef.current)
+    dragDeltaRef.current = delta
+    setDragOffset(delta)
+  }, [])
 
   // Memoize callback handlers to prevent unnecessary re-renders
   const handleLogoClick = useCallback(() => {
@@ -219,6 +217,7 @@ const Sidebar: React.FC = () => {
         items.push({ icon: FaStar, label: 'Admin', path: '/admin' })
       }
       items.push(
+        { icon: FiHeart, label: 'Saved Products', path: '/saved-products' },
         { icon: FiGrid, label: 'Organizations', path: '/organizations' },
         {
           icon: FaMotorcycle,
@@ -254,16 +253,20 @@ const Sidebar: React.FC = () => {
           bg="#FAFAFA"
           boxShadow="0 -10px 40px rgba(0,0,0,0.1)"
           sx={{ '& [data-testid="chakra-modal.close-button"]': { display: 'none' } }}
-          style={{ transform: dragOffset ? `translateY(${dragOffset}px)` : undefined, transition: dragOffset ? 'none' : 'transform 0.2s' }}
+          style={{
+            transform: dragOffset ? `translateY(${dragOffset}px)` : undefined,
+            transition: isDraggingSheet ? 'none' : 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)',
+          }}
         >
           {/* Swipe Indicator Handle — also the swipe-down grab area */}
           <Center
             pt={3}
             pb={1}
             w="full"
-            onTouchStart={handleSheetTouchStart}
-            onTouchMove={handleSheetTouchMove}
-            onTouchEnd={handleSheetTouchEnd}
+            onPointerDown={handleSheetPointerDown}
+            onPointerMove={handleSheetPointerMove}
+            onPointerUp={finishSheetDrag}
+            onPointerCancel={finishSheetDrag}
             style={{ touchAction: 'none', cursor: 'grab' }}
           >
             <Box w="40px" h="5px" bg="gray.300" borderRadius="full" />

@@ -960,12 +960,23 @@ func (h *ProductHandler) GetProducts(c *fiber.Ctx) error {
 		haversineExpr = "NULL"
 	}
 
+	plusBoostHours := getBoostDurationHoursForTier(h.db, "plus")
+	if plusBoostHours <= 0 {
+		plusBoostHours = 3
+	}
+	proBoostHours := getBoostDurationHoursForTier(h.db, "pro")
+	if proBoostHours <= 0 {
+		proBoostHours = 6
+	}
+	boostWindowHours := fmt.Sprintf("(CASE WHEN u.premium_tier = 'pro' THEN %d WHEN u.premium_tier IN ('plus', 'promo') THEN %d ELSE 0 END)", proBoostHours, plusBoostHours)
+
 	// Use the full query with proper WHERE clause handling
 	query := `
 		SELECT p.id, COALESCE(p.slug, '') as slug, p.title, COALESCE(p.description, '') as description, p.price, COALESCE(p.image_urls, '[]') as image_urls, p.seller_id,
 		       p.premium, p.status, p.allow_buying, p.barter_only, COALESCE(p.location, '') as location, COALESCE(p.` + "`condition`" + `, '') as ` + "`condition`" + `,
 		       p.suggested_value, COALESCE(p.category, 'General') as category, p.estimated_value_min, p.estimated_value_max, COALESCE(p.show_estimated_value, TRUE), p.` + "`value`" + `, p.wants, p.wanted_categories, p.location_type, p.pickup_latitude, p.pickup_longitude, p.pickup_address, p.latitude, p.longitude, p.created_at, p.updated_at, p.boosted_at,
-		       COALESCE(u.name, 'User') as seller_name, COALESCE(u.profile_picture, '') as seller_profile_picture,
+		       ` + boostWindowHours + ` AS boost_duration_hours,
+		       COALESCE(u.name, 'User') as seller_name, COALESCE(u.profile_picture, '') as seller_profile_picture, COALESCE(u.premium_tier, 'free') as seller_premium_tier,
 		       u.latitude as seller_latitude, u.longitude as seller_longitude,
 		   (SELECT COUNT(*) FROM wishlists w WHERE w.product_id = p.id) as want_count,
 		   (SELECT COUNT(*) FROM trades t WHERE t.target_product_id = p.id AND t.status = 'pending') as offer_count,
@@ -976,14 +987,14 @@ func (h *ProductHandler) GetProducts(c *fiber.Ctx) error {
 
 	// Apply sorting based on sort_by parameter
 	tierSort := "(CASE WHEN u.premium_tier = 'pro' THEN 3 WHEN u.premium_tier = 'plus' THEN 2 ELSE 1 END)"
-	// Check if boost is still active (less than 3 hours old) - this should be prioritized HIGH
-	isActiveBoosted := "(CASE WHEN p.boosted_at IS NOT NULL AND p.boosted_at > DATE_SUB(NOW(), INTERVAL 3 HOUR) THEN 1 ELSE 0 END)"
-	boostTimestamp := "(CASE WHEN p.boosted_at IS NOT NULL AND p.boosted_at > DATE_SUB(NOW(), INTERVAL 3 HOUR) THEN p.boosted_at ELSE p.created_at END)"
+	isActiveBoosted := "(CASE WHEN p.boosted_at IS NOT NULL AND p.boosted_at > DATE_SUB(NOW(), INTERVAL " + boostWindowHours + " HOUR) THEN 1 ELSE 0 END)"
+	boostTimestamp := "(CASE WHEN p.boosted_at IS NOT NULL AND p.boosted_at > DATE_SUB(NOW(), INTERVAL " + boostWindowHours + " HOUR) THEN p.boosted_at ELSE p.created_at END)"
+	stableDistanceOrder := fmt.Sprintf(`%s DESC, ISNULL(distance_km) ASC, distance_km ASC, p.created_at DESC, p.id DESC`, isActiveBoosted)
 
 	switch sortBy {
 	case "nearest":
 		// Active-boosted stays on top; everything else sorted purely by distance (closest first).
-		query += fmt.Sprintf(` ORDER BY %s DESC, ISNULL(distance_km) ASC, distance_km ASC`, isActiveBoosted)
+		query += ` ORDER BY ` + stableDistanceOrder
 	case "newest":
 		query += fmt.Sprintf(` ORDER BY p.premium DESC, %s DESC, %s DESC, %s DESC`, isActiveBoosted, tierSort, boostTimestamp)
 	case "most_offers":
@@ -993,7 +1004,7 @@ func (h *ProductHandler) GetProducts(c *fiber.Ctx) error {
 	default: // most_relevant — when viewer coords available, sort by distance by default
 		if viewerLat != nil {
 			// Active-boosted stays on top; below that, distance wins regardless of premium flag/tier.
-			query += fmt.Sprintf(` ORDER BY %s DESC, ISNULL(distance_km) ASC, distance_km ASC, %s DESC`, isActiveBoosted, boostTimestamp)
+			query += ` ORDER BY ` + stableDistanceOrder
 		} else {
 			query += fmt.Sprintf(` ORDER BY p.premium DESC, %s DESC, %s DESC, %s DESC`, isActiveBoosted, tierSort, boostTimestamp)
 		}
@@ -1040,8 +1051,8 @@ func (h *ProductHandler) GetProducts(c *fiber.Ctx) error {
 			&product.EstimatedValueMin, &product.EstimatedValueMax, &product.ShowEstimatedValue, &product.Value,
 			&wantsNull, &wantedCategoriesRaw,
 			&locationTypeNull, &pickupLatNull, &pickupLonNull, &pickupAddressNull,
-			&latNull, &lonNull, &product.CreatedAt, &product.UpdatedAt, &boostedAtNull,
-			&product.SellerName, &sellerProfile, &sLatNull, &sLonNull, &product.WantCount, &product.OfferCount,
+			&latNull, &lonNull, &product.CreatedAt, &product.UpdatedAt, &boostedAtNull, &product.BoostDurationHours,
+			&product.SellerName, &sellerProfile, &product.SellerPremiumTier, &sLatNull, &sLonNull, &product.WantCount, &product.OfferCount,
 			&distKmNull)
 
 		if wantsNull.Valid {
@@ -1417,6 +1428,14 @@ func (h *ProductHandler) BoostProduct(c *fiber.Ctx) error {
 		return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to fetch user plan capabilities"})
 	}
 	monthlyBoostLimit := getCapInt(plan.Capabilities, "monthly_boost_limit", 0)
+	boostDurationHours := getCapInt(plan.Capabilities, "boost_duration_hours", 0)
+	if boostDurationHours <= 0 {
+		boostDurationHours = getBoostDurationHoursForTier(h.db, plan.Tier)
+	}
+	if boostDurationHours <= 0 {
+		boostDurationHours = 3
+	}
+	boostDuration := time.Duration(boostDurationHours) * time.Hour
 	if monthlyBoostLimit <= 0 {
 		return c.Status(403).JSON(models.APIResponse{
 			Success: false,
@@ -1434,7 +1453,7 @@ func (h *ProductHandler) BoostProduct(c *fiber.Ctx) error {
 		age := time.Since(boostedAt.Time)
 		if age < 24*time.Hour {
 			remainingCooldown := 24*time.Hour - age
-			activeRemaining := 3*time.Hour - age
+			activeRemaining := boostDuration - age
 			isActive := activeRemaining > 0
 			if !isActive {
 				activeRemaining = 0
@@ -1469,9 +1488,9 @@ func (h *ProductHandler) BoostProduct(c *fiber.Ctx) error {
 		}
 	}
 
-	// Calculate boost expiration time (3 hours from now)
+	// Calculate boost expiration time based on the seller's tier
 	boostedAtTime := time.Now()
-	expiresAt := boostedAtTime.Add(3 * time.Hour)
+	expiresAt := boostedAtTime.Add(boostDuration)
 
 	query := "UPDATE products SET boosted_at = NOW()"
 	if canPin {
@@ -1491,8 +1510,12 @@ func (h *ProductHandler) BoostProduct(c *fiber.Ctx) error {
 	`, userID, usageMonth)
 
 	// Prepare response with boost details
+	boostDurationLabel := "3 hours"
+	if boostDuration >= 6*time.Hour {
+		boostDurationLabel = "6 hours"
+	}
 	responseData := map[string]interface{}{
-		"boost_duration": "3 hours",
+		"boost_duration": boostDurationLabel,
 		"boosted_at":     boostedAtTime,
 		"expires_at":     expiresAt,
 	}
@@ -2601,12 +2624,13 @@ func (h *ProductHandler) GetUserProducts(c *fiber.Ctx) error {
 	rows, err := h.db.Query(`
 		SELECT p.id, p.slug, p.title, p.description, p.price, p.image_urls, p.seller_id, 
 		       p.premium, p.status, p.allow_buying, p.barter_only, p.category, p.created_at, p.updated_at, p.boosted_at,
+		       p.featured_order,
 		       u.name as seller_name, u.profile_picture as seller_profile_picture,
 		       (SELECT COUNT(*) FROM trades t WHERE t.target_product_id = p.id AND t.status = 'pending') as offer_count
 		FROM products p
 		JOIN users u ON p.seller_id = u.id
 		`+where+`
-		ORDER BY COALESCE(p.boosted_at, p.created_at) DESC
+		ORDER BY CASE WHEN p.featured_order IS NULL THEN 1 ELSE 0 END, p.featured_order ASC, COALESCE(p.boosted_at, p.created_at) DESC
 		LIMIT ? OFFSET ?
 	`, queryArgs...)
 
@@ -2628,9 +2652,10 @@ func (h *ProductHandler) GetUserProducts(c *fiber.Ctx) error {
 		var sellerProfile sql.NullString
 		var imageURLsJSONStr string
 		var boostedAtNull sql.NullTime
+		var featuredOrderNull sql.NullInt64
 		err := rows.Scan(&product.ID, &slugNull, &product.Title, &product.Description, &priceNull,
 			&imageURLsJSONStr, &product.SellerID, &product.Premium, &product.Status,
-			&product.AllowBuying, &product.BarterOnly, &product.Category, &product.CreatedAt, &product.UpdatedAt, &boostedAtNull,
+			&product.AllowBuying, &product.BarterOnly, &product.Category, &product.CreatedAt, &product.UpdatedAt, &boostedAtNull, &featuredOrderNull,
 			&product.SellerName, &sellerProfile, &product.OfferCount)
 		if slugNull.Valid {
 			product.Slug = slugNull.String
@@ -2640,6 +2665,10 @@ func (h *ProductHandler) GetUserProducts(c *fiber.Ctx) error {
 		}
 		if boostedAtNull.Valid {
 			product.BoostedAt = &boostedAtNull.Time
+		}
+		if featuredOrderNull.Valid {
+			order := int(featuredOrderNull.Int64)
+			product.FeaturedOrder = &order
 		}
 		if priceNull.Valid {
 			p := priceNull.Float64
@@ -2675,6 +2704,159 @@ func (h *ProductHandler) GetUserProducts(c *fiber.Ctx) error {
 			TotalPages: totalPages,
 		},
 	})
+}
+
+const maxFeaturedListings = 3
+
+func (h *ProductHandler) compactFeaturedListings(userID int) {
+	rows, err := h.db.Query(`
+		SELECT id
+		FROM products
+		WHERE seller_id = ? AND status = 'available' AND featured_order IS NOT NULL
+		ORDER BY featured_order ASC, updated_at DESC
+	`, userID)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	position := 1
+	for rows.Next() {
+		var productID int
+		if err := rows.Scan(&productID); err != nil {
+			continue
+		}
+		_, _ = h.db.Exec("UPDATE products SET featured_order = ? WHERE id = ? AND seller_id = ?", position, productID, userID)
+		position++
+	}
+}
+
+// SetFeaturedProduct pins or unpins one of the current user's available listings.
+func (h *ProductHandler) SetFeaturedProduct(c *fiber.Ctx) error {
+	userID, ok := middleware.GetUserIDFromContext(c)
+	if !ok {
+		return c.Status(401).JSON(models.APIResponse{Success: false, Error: "User not authenticated"})
+	}
+
+	productID, err := strconv.Atoi(c.Params("id"))
+	if err != nil {
+		return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Invalid product ID"})
+	}
+
+	var payload struct {
+		Featured bool `json:"featured"`
+	}
+	if err := c.BodyParser(&payload); err != nil {
+		return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Invalid request body"})
+	}
+
+	var sellerID int
+	var status string
+	var currentOrder sql.NullInt64
+	err = h.db.QueryRow("SELECT seller_id, status, featured_order FROM products WHERE id = ?", productID).Scan(&sellerID, &status, &currentOrder)
+	if err == sql.ErrNoRows {
+		return c.Status(404).JSON(models.APIResponse{Success: false, Error: "Product not found"})
+	}
+	if err != nil {
+		return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to load product"})
+	}
+	if sellerID != userID {
+		return c.Status(403).JSON(models.APIResponse{Success: false, Error: "You can only feature your own listings"})
+	}
+	if status != "available" {
+		return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Only available listings can be featured"})
+	}
+
+	if !payload.Featured {
+		_, err = h.db.Exec("UPDATE products SET featured_order = NULL WHERE id = ? AND seller_id = ?", productID, userID)
+		if err != nil {
+			return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to update featured listing"})
+		}
+		h.compactFeaturedListings(userID)
+		return c.JSON(models.APIResponse{Success: true, Message: "Listing removed from featured"})
+	}
+
+	if currentOrder.Valid {
+		return c.JSON(models.APIResponse{Success: true, Message: "Listing is already featured"})
+	}
+
+	var featuredCount int
+	var maxOrder sql.NullInt64
+	err = h.db.QueryRow(`
+		SELECT COUNT(*), MAX(featured_order)
+		FROM products
+		WHERE seller_id = ? AND status = 'available' AND featured_order IS NOT NULL
+	`, userID).Scan(&featuredCount, &maxOrder)
+	if err != nil {
+		return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to check featured listings"})
+	}
+	if featuredCount >= maxFeaturedListings {
+		return c.Status(409).JSON(models.APIResponse{
+			Success: false,
+			Error:   "You can feature up to 3 listings. Remove or replace one first.",
+		})
+	}
+
+	nextOrder := featuredCount + 1
+	if maxOrder.Valid && int(maxOrder.Int64) >= nextOrder {
+		nextOrder = int(maxOrder.Int64) + 1
+	}
+	_, err = h.db.Exec("UPDATE products SET featured_order = ? WHERE id = ? AND seller_id = ?", nextOrder, productID, userID)
+	if err != nil {
+		return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to feature listing"})
+	}
+	h.compactFeaturedListings(userID)
+	return c.JSON(models.APIResponse{Success: true, Message: "Listing added to featured"})
+}
+
+// ReorderFeaturedProducts persists the current user's featured listing order.
+func (h *ProductHandler) ReorderFeaturedProducts(c *fiber.Ctx) error {
+	userID, ok := middleware.GetUserIDFromContext(c)
+	if !ok {
+		return c.Status(401).JSON(models.APIResponse{Success: false, Error: "User not authenticated"})
+	}
+
+	var payload struct {
+		ProductIDs []int `json:"product_ids"`
+	}
+	if err := c.BodyParser(&payload); err != nil {
+		return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Invalid request body"})
+	}
+	if len(payload.ProductIDs) > maxFeaturedListings {
+		return c.Status(400).JSON(models.APIResponse{Success: false, Error: "You can feature up to 3 listings"})
+	}
+
+	seen := map[int]bool{}
+	for _, productID := range payload.ProductIDs {
+		if productID <= 0 || seen[productID] {
+			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Featured list contains duplicate or invalid products"})
+		}
+		seen[productID] = true
+		var count int
+		err := h.db.QueryRow("SELECT COUNT(*) FROM products WHERE id = ? AND seller_id = ? AND status = 'available'", productID, userID).Scan(&count)
+		if err != nil || count == 0 {
+			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Featured products must be your available listings"})
+		}
+	}
+
+	tx, err := h.db.Begin()
+	if err != nil {
+		return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to start reorder"})
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("UPDATE products SET featured_order = NULL WHERE seller_id = ? AND featured_order IS NOT NULL", userID); err != nil {
+		return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to clear featured order"})
+	}
+	for index, productID := range payload.ProductIDs {
+		if _, err := tx.Exec("UPDATE products SET featured_order = ? WHERE id = ? AND seller_id = ?", index+1, productID, userID); err != nil {
+			return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to save featured order"})
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to save featured order"})
+	}
+	return c.JSON(models.APIResponse{Success: true, Message: "Featured order updated"})
 }
 
 // GenerateProductDetailsWithAI analyzes product images using Groq AI and returns structured product details

@@ -487,7 +487,7 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
             <Text mb={compact ? 1 : 2} fontWeight="bold" fontSize="xs" color="brand.600">{formatPHP(p.price as number)}</Text>
           )}
 
-          {!compact && <Text mt="auto" mb={2} fontSize="10px" color="gray.500" fontWeight="medium">Seller: {p.seller_name || `#${p.seller_id}`}</Text>}
+          {!compact && <Text mt="auto" mb={2} fontSize="10px" color="gray.500" fontWeight="medium">Trader: {p.seller_name || `#${p.seller_id}`}</Text>}
 
           <Button as={'a'} href={getProductUrl(p)} variant="outline" colorScheme="brand" mt="auto" size="xs" w="full" borderRadius="md">View Listing</Button>
         </Box>
@@ -768,20 +768,20 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
                       <Text fontWeight="semibold" color="gray.900">{new Date(effectiveTrade.completed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
                     </HStack>
                   )}
-                  {/* Show buyer/seller ratings if available */}
+                  {/* Show role-aware ratings if available */}
                   {(effectiveTrade.buyer_rating || effectiveTrade.seller_rating) && (
                     <HStack justify="space-between">
                       <Text color="gray.700">Ratings:</Text>
                       <HStack spacing={2}>
                         {effectiveTrade.buyer_rating && (
                           <HStack spacing={0.5}>
-                            <Text fontSize="10px" color="gray.600">Buyer:</Text>
+                            <Text fontSize="10px" color="gray.600">{isBuyout ? 'Buyer' : 'Trader 1'}:</Text>
                             <Text fontWeight="bold" color="yellow.500">⭐ {effectiveTrade.buyer_rating}/5</Text>
                           </HStack>
                         )}
                         {effectiveTrade.seller_rating && (
                           <HStack spacing={0.5}>
-                            <Text fontSize="10px" color="gray.600">Seller:</Text>
+                            <Text fontSize="10px" color="gray.600">{isBuyout ? 'Seller' : 'Trader 2'}:</Text>
                             <Text fontWeight="bold" color="yellow.500">⭐ {effectiveTrade.seller_rating}/5</Text>
                           </HStack>
                         )}
@@ -833,7 +833,7 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
                         <Button size="xs" colorScheme="red" variant="outline" onClick={rejectOptionChange}>Reject</Button>
                       </HStack>
                     ) : (
-                      <Text fontSize="xs" color="gray.600" fontStyle="italic">Waiting for seller...</Text>
+                      <Text fontSize="xs" color="gray.600" fontStyle="italic">{isBuyout ? 'Waiting for seller...' : 'Waiting for the other trader...'}</Text>
                     )}
                   </Box>
                 )}

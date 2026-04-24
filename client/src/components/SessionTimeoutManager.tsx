@@ -14,6 +14,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { api } from '../services/api'
 import { markAuthInvalid, onAuthInvalid } from '../utils/authEvents'
+import { broadcastSessionActivity, getLastSessionActivity, onSessionActivity } from '../utils/authSync'
 
 const minutesFromEnv = Number(import.meta.env.VITE_SESSION_IDLE_TIMEOUT_MINUTES)
 const warningSecondsFromEnv = Number(import.meta.env.VITE_SESSION_TIMEOUT_WARNING_SECONDS)
@@ -36,6 +37,7 @@ const SessionTimeoutManager: React.FC = () => {
   const warningTimerRef = useRef<number | undefined>()
   const logoutTimerRef = useRef<number | undefined>()
   const lastSessionTouchRef = useRef(0)
+  const lastActivityRef = useRef(getLastSessionActivity())
   const handledExpiryRef = useRef(false)
   const [isWarningOpen, setIsWarningOpen] = useState(false)
 
@@ -84,9 +86,17 @@ const SessionTimeoutManager: React.FC = () => {
     clearTimers()
     if (!isAuthenticated) return
 
-    const warningDelay = Math.max(IDLE_TIMEOUT_MS - WARNING_MS, 1000)
+    const elapsed = Math.max(Date.now() - lastActivityRef.current, 0)
+    const remaining = IDLE_TIMEOUT_MS - elapsed
+
+    if (remaining <= 0) {
+      expireSession()
+      return
+    }
+
+    const warningDelay = Math.max(remaining - WARNING_MS, 0)
     warningTimerRef.current = window.setTimeout(() => setIsWarningOpen(true), warningDelay)
-    logoutTimerRef.current = window.setTimeout(expireSession, IDLE_TIMEOUT_MS)
+    logoutTimerRef.current = window.setTimeout(expireSession, remaining)
   }, [clearTimers, expireSession, isAuthenticated])
 
   const touchSession = useCallback(async (force = false): Promise<boolean> => {
@@ -107,12 +117,15 @@ const SessionTimeoutManager: React.FC = () => {
 
   const markActivity = useCallback(() => {
     if (!isAuthenticated || isWarningOpen) return
+    lastActivityRef.current = broadcastSessionActivity()
+    setIsWarningOpen(false)
     scheduleTimers()
     void touchSession()
   }, [isAuthenticated, isWarningOpen, scheduleTimers, touchSession])
 
   const stayLoggedIn = useCallback(async () => {
     setIsWarningOpen(false)
+    lastActivityRef.current = broadcastSessionActivity()
     const refreshed = await touchSession(true)
     if (!refreshed) return
     await refreshUser().catch(() => undefined)
@@ -124,8 +137,18 @@ const SessionTimeoutManager: React.FC = () => {
   useEffect(() => {
     if (isAuthenticated) {
       handledExpiryRef.current = false
+      lastActivityRef.current = broadcastSessionActivity(getLastSessionActivity())
     }
   }, [isAuthenticated])
+
+  useEffect(() => {
+    return onSessionActivity((at) => {
+      lastActivityRef.current = at
+      if (!isAuthenticated) return
+      setIsWarningOpen(false)
+      scheduleTimers()
+    })
+  }, [isAuthenticated, scheduleTimers])
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -134,6 +157,7 @@ const SessionTimeoutManager: React.FC = () => {
       return
     }
 
+    lastActivityRef.current = broadcastSessionActivity(getLastSessionActivity())
     scheduleTimers()
     void touchSession(true)
 

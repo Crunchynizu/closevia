@@ -56,12 +56,16 @@ export interface Product {
   seller_id: number
   seller_name?: string
   seller_profile_picture?: string
+  seller_premium_tier?: 'free' | 'plus' | 'pro'
   premium: boolean
   status: 'available' | 'sold' | 'traded' | 'locked' | 'suspended' | 'deleted'
   allow_buying: boolean
   barter_only: boolean
   location?: string
   location_type?: 'current_location' | 'pickup_location' | 'no_location'
+  pickup_address?: string
+  pickup_latitude?: number
+  pickup_longitude?: number
   condition?: string
   suggested_value?: number
   category?: string
@@ -70,6 +74,7 @@ export interface Product {
   created_at: string
   updated_at: string
   boosted_at?: string
+  featured_order?: number
   wishlist_count?: number;
   bidding_type?: 'none' | 'blind' | 'open'
   counterfeit_confidence?: number;
@@ -89,6 +94,7 @@ export interface Product {
   brand?: string;
   max_items_per_offer?: number;
   view_count?: number;
+  boost_duration_hours?: number;
   organization_tags?: Array<{
     id: number;
     slug: string;
@@ -330,6 +336,9 @@ export interface TradeCreate {
   delivery_address?: string // Required if trade_option is 'delivery'
   payment_method?: 'cod' | 'upfront' // Payment method preference for buyout offers
   additional_target_product_ids?: number[]
+  meetup_location?: string
+  meetup_date?: string
+  meetup_time?: string
 }
 
 export interface TradeAction {

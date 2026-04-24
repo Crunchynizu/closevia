@@ -53,6 +53,22 @@ import {
 } from '@chakra-ui/react'
 import { FiMessageSquare, FiHeart, FiShare2, FiStar, FiClock, FiCheckCircle, FiSend, FiCamera, FiActivity, FiTag, FiInfo } from 'react-icons/fi'
 import { FaHeart, FaBuilding, FaGraduationCap, FaStore, FaFileAlt, FaThumbsUp, FaThumbtack } from 'react-icons/fa'
+import {
+  closestCenter,
+  DndContext,
+  DragEndEvent,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core'
+import {
+  arrayMove,
+  horizontalListSortingStrategy,
+  SortableContext,
+  useSortable,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import VerifiedAvatar from '../components/VerifiedAvatar'
@@ -125,6 +141,96 @@ type SellerStats = {
   }
 }
 
+type FeaturedListingCardProps = {
+  product: Product
+  index: number
+  canManage: boolean
+  count: number
+  onRemove: (product: Product) => void
+  onMove: (productId: number, direction: -1 | 1) => void
+}
+
+const FeaturedListingCard: React.FC<FeaturedListingCardProps> = ({ product, index, canManage, count, onRemove, onMove }) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: product.id })
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 2 : undefined,
+  }
+
+  return (
+    <Box
+      ref={setNodeRef}
+      style={style}
+      position="relative"
+      border="1px"
+      borderColor="orange.300"
+      rounded="md"
+      overflow="hidden"
+      bg="white"
+      shadow={isDragging ? 'lg' : 'sm'}
+      opacity={isDragging ? 0.9 : 1}
+      _hover={{ transform: isDragging ? undefined : 'translateY(-2px)', shadow: 'md', borderColor: 'orange.400' }}
+      transition="box-shadow 0.2s, border-color 0.2s"
+    >
+      <HStack spacing={0} position="absolute" top={1} left={1} zIndex={1}>
+        <Badge colorScheme="orange" borderRadius="full">#{index + 1}</Badge>
+      </HStack>
+      <RouterLink to={getProductUrl(product)} style={{ textDecoration: 'none', display: 'block' }}>
+        <HStack display="flex" alignItems="center" gap={3} p={2} pt={7} h="full">
+          <Image
+            src={getFirstImage(product.image_urls) || '/placeholder-item.jpg'}
+            alt={product.title}
+            boxSize="50px"
+            objectFit="cover"
+            borderRadius="md"
+            flexShrink={0}
+          />
+          <Box minW={0}>
+            <Text fontSize="xs" fontWeight="semibold" noOfLines={2} color="gray.800">{product.title}</Text>
+            <Text fontSize="xs" color="brand.500" fontWeight="bold">
+              {product.price ? `₱${product.price.toFixed(2)}` : 'For Trade'}
+            </Text>
+          </Box>
+        </HStack>
+      </RouterLink>
+      {canManage && (
+        <HStack position="absolute" top={1} right={1} spacing={1}>
+          <IconButton
+            aria-label="Drag to rearrange featured listing"
+            icon={<Icon as={FaThumbtack} />}
+            size="xs"
+            colorScheme="orange"
+            cursor={isDragging ? 'grabbing' : 'grab'}
+            sx={{ touchAction: 'none' }}
+            {...attributes}
+            {...listeners}
+          />
+          <Tooltip label="Remove from featured" hasArrow>
+            <IconButton
+              aria-label="Remove from featured"
+              icon={<Icon as={FiStar} fill="currentColor" />}
+              size="xs"
+              colorScheme="yellow"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                onRemove(product)
+              }}
+            />
+          </Tooltip>
+        </HStack>
+      )}
+      {canManage && (
+        <HStack px={2} pb={2} spacing={2}>
+          <Button size="xs" variant="outline" flex={1} isDisabled={index === 0} onClick={() => onMove(product.id, -1)}>Move left</Button>
+          <Button size="xs" variant="outline" flex={1} isDisabled={index === count - 1} onClick={() => onMove(product.id, 1)}>Move right</Button>
+        </HStack>
+      )}
+    </Box>
+  )
+}
+
 const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
   const { id: routeId } = useParams<{ id: string }>()
   // If we have an explicit userId, use it as a string.
@@ -174,6 +280,11 @@ const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
 
   // Saved/wishlist state for product cards
   const [savedProductIds, setSavedProductIds] = useState<Set<number>>(new Set())
+  const [updatingFeaturedIds, setUpdatingFeaturedIds] = useState<Set<number>>(new Set())
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 120, tolerance: 8 } })
+  )
 
 
   // Reply state
@@ -346,6 +457,107 @@ const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
       }
     } catch {
       toast({ id: 'failed-to-update', title: 'Failed to update', status: 'error', duration: 2000 })
+    }
+  }
+
+  const applyFeaturedOrder = (orderedIds: number[]) => {
+    setProducts(prev => prev.map(product => {
+      const orderIndex = orderedIds.indexOf(product.id)
+      if (orderIndex >= 0) return { ...product, featured_order: orderIndex + 1 }
+      if (typeof product.featured_order === 'number') return { ...product, featured_order: undefined }
+      return product
+    }))
+  }
+
+  const persistFeaturedOrder = async (orderedIds: number[]) => {
+    applyFeaturedOrder(orderedIds)
+    await api.put('/api/products/featured/reorder', { product_ids: orderedIds })
+  }
+
+  const handleToggleFeatured = async (product: Product) => {
+    if (!isOwnProfile) return
+    const isFeatured = featuredProductIds.has(product.id)
+    if (!isFeatured && featuredProducts.length >= 3) {
+      toast({
+        id: 'featured-limit-reached',
+        title: 'Featured limit reached',
+        description: 'You can feature up to 3 listings. Remove one first, then pin this item.',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+
+    setUpdatingFeaturedIds(prev => new Set(prev).add(product.id))
+    const previousProducts = products
+    try {
+      await api.put(`/api/products/${product.id}/featured`, { featured: !isFeatured })
+      if (isFeatured) {
+        applyFeaturedOrder(featuredProducts.filter(p => p.id !== product.id).map(p => p.id))
+        toast({ id: `unfeatured-${product.id}`, title: 'Removed from featured', status: 'info', duration: 1600 })
+      } else {
+        applyFeaturedOrder([...featuredProducts.map(p => p.id), product.id])
+        toast({ id: `featured-${product.id}`, title: 'Listing featured', status: 'success', duration: 1600 })
+      }
+    } catch (err: any) {
+      setProducts(previousProducts)
+      toast({
+        id: `featured-error-${product.id}`,
+        title: 'Could not update featured listing',
+        description: err?.response?.data?.error || 'Please try again.',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      })
+    } finally {
+      setUpdatingFeaturedIds(prev => {
+        const next = new Set(prev)
+        next.delete(product.id)
+        return next
+      })
+    }
+  }
+
+  const handleFeaturedDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = featuredProducts.findIndex(product => product.id === active.id)
+    const newIndex = featuredProducts.findIndex(product => product.id === over.id)
+    if (oldIndex < 0 || newIndex < 0) return
+    const ordered = arrayMove(featuredProducts, oldIndex, newIndex).map(product => product.id)
+    const previousProducts = products
+    try {
+      await persistFeaturedOrder(ordered)
+    } catch (err: any) {
+      setProducts(previousProducts)
+      toast({
+        id: 'featured-reorder-failed',
+        title: 'Could not save featured order',
+        description: err?.response?.data?.error || 'Please try again.',
+        status: 'error',
+        duration: 3000,
+      })
+    }
+  }
+
+  const handleMoveFeatured = async (productId: number, direction: -1 | 1) => {
+    const currentIndex = featuredProducts.findIndex(product => product.id === productId)
+    const nextIndex = currentIndex + direction
+    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= featuredProducts.length) return
+    const ordered = arrayMove(featuredProducts, currentIndex, nextIndex).map(product => product.id)
+    const previousProducts = products
+    try {
+      await persistFeaturedOrder(ordered)
+    } catch (err: any) {
+      setProducts(previousProducts)
+      toast({
+        id: 'featured-move-failed',
+        title: 'Could not save featured order',
+        description: err?.response?.data?.error || 'Please try again.',
+        status: 'error',
+        duration: 3000,
+      })
     }
   }
 
@@ -559,6 +771,16 @@ const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
     }
   }, [availableProducts, sortBy])
 
+  const isOwnProfile = Boolean(currentUser && (String(currentUser.id) === id || (currentUser as any).slug === id))
+  const featuredProducts = useMemo(() => {
+    return availableProducts
+      .filter(p => typeof p.featured_order === 'number')
+      .sort((a, b) => (a.featured_order || 999) - (b.featured_order || 999))
+      .slice(0, 3)
+  }, [availableProducts])
+
+  const featuredProductIds = useMemo(() => new Set(featuredProducts.map(p => p.id)), [featuredProducts])
+
   // Merge trade history with reviews for unified "Trade Activity" feed
   const mergedTradeActivity = useMemo(() => {
     const completedTrades = userTrades.filter(t => t.status === 'completed' || t.completed_at)
@@ -577,6 +799,28 @@ const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
       return dateB - dateA
     })
   }, [userTrades, reviews])
+
+  const tradeActivityCounts = useMemo(() => {
+    const completedStatuses = new Set(['completed', 'auto_completed'])
+    const cancelledStatuses = new Set(['cancelled', 'cancelled_due_to_conflict', 'declined', 'rejected', 'expired', 'broken'])
+    const pendingStatuses = new Set(['pending', 'pending_multiway', 'accepted', 'accepted_by_one', 'accepted_by_both', 'countered', 'active', 'ongoing', 'awaiting_confirmation', 'multiway_active'])
+    return userTrades.reduce((acc, trade) => {
+      const status = String(trade.status || '').toLowerCase()
+      if (completedStatuses.has(status)) acc.completed += 1
+      else if (cancelledStatuses.has(status)) acc.cancelled += 1
+      else if (pendingStatuses.has(status)) acc.pending += 1
+      acc.total = acc.completed + acc.cancelled + acc.pending
+      return acc
+    }, { total: 0, completed: 0, cancelled: 0, pending: 0 })
+  }, [userTrades])
+
+  const tradeHistoryItems = useMemo(() => {
+    return [...userTrades].sort((a, b) => {
+      const dateA = new Date(a.completed_at || a.updated_at || a.created_at).getTime()
+      const dateB = new Date(b.completed_at || b.updated_at || b.created_at).getTime()
+      return dateB - dateA
+    })
+  }, [userTrades])
 
   // Handle canceling a trade and reverting item to Available status
   const handleCancelTrade = async (tradeId: number) => {
@@ -1109,7 +1353,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
                 <Text color="gray.700" fontSize="sm" mb={3}>{user.bio}</Text>
               ) : currentUser && (String(currentUser.id) === id || (currentUser as any).slug === id) ? (
                 <Text color="gray.500" fontSize="sm" mb={3}>
-                  Tell buyers about yourself — <Button variant="link" size="sm" colorScheme="brand" onClick={openEdit}>Add a bio</Button>
+                  Tell other users about yourself — <Button variant="link" size="sm" colorScheme="brand" onClick={openEdit}>Add a bio</Button>
                 </Text>
               ) : null}
 
@@ -1168,7 +1412,10 @@ const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
                 Available Items ({sortedProducts.length})
               </Tab>
               <Tab _selected={{ color: 'brand.500', borderBottom: '2px solid', borderColor: 'brand.500' }}>
-                Trade Activity ({mergedTradeActivity.length})
+                Trade Activity ({tradeActivityCounts.total})
+              </Tab>
+              <Tab _selected={{ color: 'brand.500', borderBottom: '2px solid', borderColor: 'brand.500' }}>
+                Traded Items ({tradeActivityCounts.completed})
               </Tab>
             </TabList>
 
@@ -1178,8 +1425,8 @@ const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
                 <Box p={4} borderBottom="1px" borderColor="gray.100">
                   <HStack spacing={4} justify="space-between" flexWrap="wrap">
                     <Text fontWeight="medium">{sortedProducts.length} items</Text>
-                    {currentUser && (String(currentUser.id) === id || (currentUser as any).slug === id) && (
-                      <Text fontSize="xs" color="gray.500" fontStyle="italic">💡 Manage featured items by clicking the star icon on listings below</Text>
+                    {isOwnProfile && (
+                      <Text fontSize="xs" color="gray.500">Feature up to 3 listings with the star button, then rearrange them above.</Text>
                     )}
                   </HStack>
                 </Box>
@@ -1206,73 +1453,40 @@ const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
                 ) : (
                   <Box>
                     {/* Pinned / Featured Listings */}
-                    {sortedProducts.length > 0 && (
+                    {(featuredProducts.length > 0 || isOwnProfile) && (
                       <Box p={4} borderBottom="1px" borderColor="gray.100">
                         <HStack spacing={2} mb={3} justify="space-between">
                           <HStack spacing={2}>
                             <Icon as={FaThumbtack} color="orange.400" boxSize={3.5} />
                             <Text fontSize="sm" fontWeight="semibold" color="gray.700">Featured Listings (Top 3)</Text>
                           </HStack>
-                          {currentUser && (String(currentUser.id) === id || (currentUser as any).slug === id) && (
-                            <Text fontSize="xs" color="orange.500" fontStyle="italic">Drag to reorder</Text>
+                          {isOwnProfile && featuredProducts.length > 1 && (
+                            <Text fontSize="xs" color="orange.600">Drag to rearrange your featured items</Text>
                           )}
                         </HStack>
+                        {featuredProducts.length === 0 && (
+                          <Box borderWidth="1px" borderStyle="dashed" borderColor="orange.200" borderRadius="md" p={4} bg="orange.50">
+                            <Text fontSize="sm" color="gray.600">
+                              No featured listings yet. Use the star button on an available item to pin it here.
+                            </Text>
+                          </Box>
+                        )}
+                        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleFeaturedDragEnd}>
+                          <SortableContext items={featuredProducts.map(product => product.id)} strategy={horizontalListSortingStrategy}>
                         <SimpleGrid columns={{ base: 1, sm: 2, md: 3 }} spacing={3}>
-                          {sortedProducts.slice(0, 3).map((product, idx) => (
-                            <Box
-                              key={`pin-${product.id}`}
-                              position="relative"
-                              border="1px"
-                              borderColor="orange.200"
-                              rounded="md"
-                              overflow="hidden"
-                              bg="white"
-                              _hover={{ transform: 'translateY(-2px)', shadow: 'sm', borderColor: 'orange.400' }}
-                              transition="all 0.2s"
-                            >
-                              <RouterLink to={getProductUrl(product)} style={{ textDecoration: 'none', display: 'block' }}>
-                                <HStack display="flex" alignItems="center" gap={3} p={2} h="full">
-                                  <Image
-                                    src={getFirstImage(product.image_urls) || '/placeholder-item.jpg'}
-                                    alt={product.title}
-                                    boxSize="50px"
-                                    objectFit="cover"
-                                    borderRadius="md"
-                                    flexShrink={0}
-                                  />
-                                  <Box minW={0}>
-                                    <Text fontSize="xs" fontWeight="semibold" noOfLines={2} color="gray.800">{product.title}</Text>
-                                    <Text fontSize="xs" color="brand.500" fontWeight="bold">
-                                      {product.price ? `₱${product.price.toFixed(2)}` : 'For Trade'}
-                                    </Text>
-                                  </Box>
-                                </HStack>
-                              </RouterLink>
-                              {currentUser && (String(currentUser.id) === id || (currentUser as any).slug === id) && (
-                                <Tooltip label="Remove from featured" hasArrow>
-                                  <IconButton
-                                    aria-label="Remove from featured"
-                                    icon={<Icon as={FaThumbtack} />}
-                                    size="sm"
-                                    position="absolute"
-                                    top={1}
-                                    right={1}
-                                    colorScheme="orange"
-                                    variant="solid"
-                                    opacity={0}
-                                    _groupHover={{ opacity: 1 }}
-                                    transition="opacity 0.2s"
-                                    onClick={(e) => {
-                                      e.preventDefault()
-                                      e.stopPropagation()
-                                      // Will implement backend call to remove from featured
-                                    }}
-                                  />
-                                </Tooltip>
-                              )}
-                            </Box>
-                          ))}
-                        </SimpleGrid>
+                          {featuredProducts.map((product, idx) => (
+                            <FeaturedListingCard
+                              key={`featured-${product.id}`}
+                              product={product}
+                              index={idx}
+                              canManage={isOwnProfile}
+                              count={featuredProducts.length}
+                              onRemove={handleToggleFeatured}
+                              onMove={handleMoveFeatured}
+                            />
+                          ))}                        </SimpleGrid>
+                          </SortableContext>
+                        </DndContext>
                       </Box>
                     )}
 
@@ -1312,7 +1526,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
                         <Box
                           key={product.id}
                           border="1px"
-                          borderColor="gray.200"
+                          borderColor={featuredProductIds.has(product.id) ? 'yellow.300' : 'gray.200'}
                           rounded="md"
                           overflow="hidden"
                           bg="white"
@@ -1341,6 +1555,27 @@ const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
                                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleToggleSave(product.id) }}
                                     _hover={{ color: savedProductIds.has(product.id) ? 'red.600' : 'red.500', bg: 'white' }}
                                   />
+                                </Box>
+                              )}
+                              {isOwnProfile && (
+                                <Box position="absolute" top="2" right="2">
+                                  <Tooltip label={featuredProductIds.has(product.id) ? 'Remove from featured' : 'Feature / Pin'} hasArrow>
+                                    <IconButton
+                                      aria-label={featuredProductIds.has(product.id) ? 'Remove from featured' : 'Feature listing'}
+                                      icon={<Icon as={FiStar} fill={featuredProductIds.has(product.id) ? 'currentColor' : 'none'} />}
+                                      size="sm"
+                                      borderRadius="full"
+                                      bg="white"
+                                      color={featuredProductIds.has(product.id) ? 'yellow.500' : 'gray.600'}
+                                      isLoading={updatingFeaturedIds.has(product.id)}
+                                      onClick={(e) => {
+                                        e.preventDefault()
+                                        e.stopPropagation()
+                                        handleToggleFeatured(product)
+                                      }}
+                                      _hover={{ color: 'yellow.500', bg: 'white' }}
+                                    />
+                                  </Tooltip>
                                 </Box>
                               )}
                               <Box position="absolute" top="2" left="2">
@@ -1385,12 +1620,62 @@ const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
                 )}
               </TabPanel>
 
-              {/* Trade Activity Tab - Combined Trade History & Reviews */}
+              {/* Trade Activity Summary Tab */}
+              <TabPanel p={0}>
+                <Box p={4} borderBottom="1px" borderColor="gray.100">
+                  <Heading size="md" mb={1}>Trade Activity</Heading>
+                  <Text fontSize="sm" color="gray.500">A quick breakdown of this trader's recent trade lifecycle.</Text>
+                </Box>
+                {tradesLoading ? (
+                  <Center p={10}><Spinner size="lg" color="brand.500" /></Center>
+                ) : tradesError ? (
+                  <Center p={10}><Text color="red.500">Failed to load trade activity</Text></Center>
+                ) : (
+                  <Box p={4}>
+                    <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} mb={5}>
+                      {[
+                        { label: 'Total trades', value: tradeActivityCounts.total, color: 'blue' },
+                        { label: 'Completed', value: tradeActivityCounts.completed, color: 'green' },
+                        { label: 'Cancelled', value: tradeActivityCounts.cancelled, color: 'red' },
+                        { label: 'Pending', value: tradeActivityCounts.pending, color: 'orange' },
+                      ].map(stat => (
+                        <Box key={stat.label} p={4} bg={`${stat.color}.50`} borderWidth="1px" borderColor={`${stat.color}.100`} borderRadius="md">
+                          <Text fontSize="2xl" fontWeight="bold" color={`${stat.color}.600`}>{stat.value}</Text>
+                          <Text fontSize="sm" color="gray.600">{stat.label}</Text>
+                        </Box>
+                      ))}
+                    </SimpleGrid>
+                    {tradeHistoryItems.length > 0 ? (
+                      <VStack align="stretch" spacing={2}>
+                        {tradeHistoryItems.slice(0, 5).map(trade => {
+                          const status = String(trade.status || 'pending')
+                          const isDone = status === 'completed' || status === 'auto_completed'
+                          const isCancelled = ['cancelled', 'cancelled_due_to_conflict', 'declined', 'rejected', 'expired', 'broken'].includes(status)
+                          const completedOn = new Date(trade.completed_at || trade.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                          return (
+                            <Flex key={trade.id} justify="space-between" align={{ base: 'start', sm: 'center' }} gap={3} p={3} borderWidth="1px" borderColor="gray.100" borderRadius="md" direction={{ base: 'column', sm: 'row' }}>
+                              <Box>
+                                <Text fontWeight="semibold" fontSize="sm">{trade.product_title || 'Trade item'}</Text>
+                                <Text fontSize="xs" color="gray.500">{trade.trade_type || 'Trade Connect'} • {completedOn}</Text>
+                              </Box>
+                              <Badge colorScheme={isDone ? 'green' : isCancelled ? 'red' : 'orange'}>{status.replace(/_/g, ' ')}</Badge>
+                            </Flex>
+                          )
+                        })}
+                      </VStack>
+                    ) : (
+                      <Text fontSize="sm" color="gray.500">No trade activity yet.</Text>
+                    )}
+                  </Box>
+                )}
+              </TabPanel>
+
+              {/* Traded Items Tab - Combined Trade History & Reviews */}
               <TabPanel p={0}>
                 <Box p={4} borderBottom="1px" borderColor="gray.100">
                   <HStack justify="space-between" align="flex-start" flexWrap="wrap">
                     <Box>
-                      <Heading size="md" mb={1}>Trade Activity</Heading>
+                      <Heading size="md" mb={1}>Traded Items</Heading>
                       {displayTotalReviews === 0 ? (
                         <Text fontSize="md" color="gray.500" mb={1}>⭐ No reviews yet</Text>
                       ) : (
@@ -1679,7 +1964,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
                       }
                     }}
                     rows={4}
-                    placeholder="Tell buyers about yourself (30-50 characters required)"
+                    placeholder="Tell other users about yourself (30-50 characters required)"
                     maxLength={50}
                     borderColor={draftBio.length < 30 ? 'red.300' : 'gray.300'}
                   />
