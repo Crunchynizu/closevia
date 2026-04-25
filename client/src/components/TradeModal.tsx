@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useMemo } from 'react'
 import { Modal, ModalOverlay, ModalContent, ModalHeader, ModalBody, ModalCloseButton, VStack, Grid, Box, Image, Text, FormControl, FormLabel, Input, HStack, Button, useToast, Badge, Card, CardBody, Icon, useColorModeValue, Spinner, Flex, Checkbox, Alert, AlertIcon, Switch, RadioGroup, Radio, useBreakpointValue, Accordion, AccordionItem, AccordionButton, AccordionPanel, AccordionIcon, Progress, Divider } from '@chakra-ui/react'
 import { motion, useDragControls, type PanInfo } from 'framer-motion'
-import { FaMapMarkerAlt, FaTruck, FaLocationArrow, FaBoxOpen, FaHandshake, FaTimes, FaCheckCircle, FaExternalLinkAlt } from 'react-icons/fa'
+import { FaMapMarkerAlt, FaTruck, FaLocationArrow, FaBoxOpen, FaHandshake, FaTimes, FaCheckCircle, FaExternalLinkAlt, FaClock, FaLock } from 'react-icons/fa'
+import { AvailabilitySlot } from '../types'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../contexts/AuthContext'
@@ -51,6 +52,7 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
   const [locationPlan, setLocationPlan] = useState<'product' | 'shared' | 'later'>('product')
   const [mobileStep, setMobileStep] = useState(0)
   const [locationPlanAcknowledged, setLocationPlanAcknowledged] = useState(false)
+  const [scheduleAgreed, setScheduleAgreed] = useState(false)
   // Delivery location state
   const [detectedCoords, setDetectedCoords] = useState<{ lat: number; lng: number } | null>(null)
   const [detectedLocationLabel, setDetectedLocationLabel] = useState('')
@@ -63,6 +65,7 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
   const [meetupTime, setMeetupTime] = useState('')
   const [midpointLabel, setMidpointLabel] = useState('')
   const [loadingMidpoint, setLoadingMidpoint] = useState(false)
+  const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null)
   const isEditMode = !!editTrade
   const cardBg = useColorModeValue('white', 'gray.800')
   const borderColor = useColorModeValue('gray.200', 'gray.700')
@@ -183,6 +186,22 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
     return null
   }, [meetupChoice, myProductForMeetup, targetProduct, meetupMidpointCoords])
 
+  // Parse seller's availability slots from target product
+  const sellerAvailabilitySlots = useMemo<AvailabilitySlot[]>(() => {
+    if (!targetProduct) return []
+    const raw = (targetProduct as any).availability_slots
+    if (!raw) return []
+    try {
+      const slots: AvailabilitySlot[] = typeof raw === 'string' ? JSON.parse(raw) : raw
+      const today = new Date().toISOString().split('T')[0]
+      return Array.isArray(slots) ? slots.filter(s => s.date >= today) : []
+    } catch {
+      return []
+    }
+  }, [targetProduct])
+
+  const sellerAvailabilityType = (targetProduct as any)?.availability_type as 'flexible' | 'strict' | undefined
+
   const hasFixedLocation = useMemo(() => {
     return selectedTargetProducts.some((product) => {
       const locationType = product.location_type
@@ -238,7 +257,9 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
     setTargetSearchTerm('')
     setLocationPlan('product')
     setLocationPlanAcknowledged(false)
+    setScheduleAgreed(false)
     setMobileStep(0)
+    setSelectedSlotId(null)
     if (user && targetProductId) {
       ; (async () => {
         try {
@@ -512,6 +533,17 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
       return
     }
 
+    if (selectedTargetProducts.length > 0 && !scheduleAgreed) {
+      toast({
+        id: 'trademodal-schedule-ack',
+        title: 'Confirm location & schedule',
+        description: 'Please check the box confirming you agree with the pickup location and preferred schedule.',
+        status: 'warning',
+        duration: 3500,
+      })
+      return
+    }
+
     if (selectedTargetsNeedLocationPlan && !locationPlanAcknowledged) {
       toast({
         id: "trademodal-location-plan-ack",
@@ -594,6 +626,7 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
         ...(proposedMeetupLocation && { meetup_location: proposedMeetupLocation }),
         ...(proposedMeetupDate && { meetup_date: proposedMeetupDate }),
         ...(proposedMeetupTime && { meetup_time: proposedMeetupTime }),
+        ...(selectedSlotId && { selected_availability_slot_id: selectedSlotId }),
       }
       if (isEditMode && editTrade?.id) {
         await updateTrade(editTrade.id, {
@@ -607,6 +640,7 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
           ...(proposedMeetupLocation && { meetup_location: proposedMeetupLocation }),
           ...(proposedMeetupDate && { meetup_date: proposedMeetupDate }),
           ...(proposedMeetupTime && { meetup_time: proposedMeetupTime }),
+          ...(selectedSlotId && { selected_availability_slot_id: selectedSlotId }),
         })
       } else {
         await api.post('/api/trades', payload)
@@ -641,7 +675,7 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
     }
   }
 
-  const canConfirm = selectedOfferIds.length > 0 && !!tradeOption && (!selectedTargetsNeedLocationPlan || locationPlanAcknowledged)
+  const canConfirm = selectedOfferIds.length > 0 && !!tradeOption && (!selectedTargetsNeedLocationPlan || locationPlanAcknowledged) && (selectedTargetProducts.length === 0 || scheduleAgreed)
   const mobileSteps = ['Trading For', 'My Offered Items', 'Trade Details', 'Review']
 
   const selectedSummary = selectedProducts.length > 0 ? (
@@ -839,7 +873,7 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
               {/* Location option cards */}
               <VStack spacing={1.5} align="stretch">
                 {/* Near my item */}
-                {getProductRawLocation(myProductForMeetup) && (
+                {getProductLocationLabel(myProductForMeetup) && (
                   <HStack
                     p={2.5} bg={meetupChoice === 'my_product' ? 'green.50' : 'white'}
                     borderWidth={meetupChoice === 'my_product' ? '2px' : '1px'}
@@ -850,14 +884,14 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
                     <Icon as={FaBoxOpen} color="green.500" boxSize={3} flexShrink={0} />
                     <VStack spacing={0} align="start" flex={1} minW={0}>
                       <Text fontSize="10px" fontWeight="700" color="gray.800">Near my item</Text>
-                      <Text fontSize="9px" color="gray.500" noOfLines={1}>{getProductRawLocation(myProductForMeetup)}</Text>
+                      <Text fontSize="9px" color="gray.500" noOfLines={1}>{getProductLocationLabel(myProductForMeetup)}</Text>
                     </VStack>
                     {meetupChoice === 'my_product' && <Icon as={FaCheckCircle} color="green.500" boxSize={3} flexShrink={0} />}
                   </HStack>
                 )}
 
                 {/* Near their item */}
-                {getProductRawLocation(targetProduct) && (
+                {getProductLocationLabel(targetProduct) && (
                   <HStack
                     p={2.5} bg={meetupChoice === 'their_product' ? 'blue.50' : 'white'}
                     borderWidth={meetupChoice === 'their_product' ? '2px' : '1px'}
@@ -868,7 +902,7 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
                     <Icon as={FaMapMarkerAlt} color="blue.500" boxSize={3} flexShrink={0} />
                     <VStack spacing={0} align="start" flex={1} minW={0}>
                       <Text fontSize="10px" fontWeight="700" color="gray.800">Near their item</Text>
-                      <Text fontSize="9px" color="gray.500" noOfLines={1}>{getProductRawLocation(targetProduct)}</Text>
+                      <Text fontSize="9px" color="gray.500" noOfLines={1}>{getProductLocationLabel(targetProduct)}</Text>
                     </VStack>
                     {meetupChoice === 'their_product' && <Icon as={FaCheckCircle} color="blue.500" boxSize={3} flexShrink={0} />}
                   </HStack>
@@ -937,26 +971,95 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
 
               <Divider />
 
-              {/* Date and time proposal */}
-              <Text fontSize="11px" fontWeight="700" color={mutedTextColor} textTransform="uppercase" letterSpacing="0.5px">
-                Propose Date &amp; Time
-              </Text>
-              <HStack spacing={2}>
-                <Input
-                  type="date" value={meetupDate}
-                  onChange={(e) => setMeetupDate(e.target.value)}
-                  fontSize="11px" size="sm" flex={1}
-                  min={new Date().toISOString().split('T')[0]}
-                />
-                <Input
-                  type="time" value={meetupTime}
-                  onChange={(e) => setMeetupTime(e.target.value)}
-                  fontSize="11px" size="sm" flex={1}
-                />
+              {/* Date and time proposal — slot-aware */}
+              <HStack justify="space-between" align="center">
+                <Text fontSize="11px" fontWeight="700" color={mutedTextColor} textTransform="uppercase" letterSpacing="0.5px">
+                  Meetup Date &amp; Time
+                </Text>
+                {sellerAvailabilitySlots.length > 0 && (
+                  <Badge colorScheme={sellerAvailabilityType === 'strict' ? 'orange' : 'teal'} fontSize="8px">
+                    <Icon as={sellerAvailabilityType === 'strict' ? FaLock : FaClock} boxSize={2} mr={1} />
+                    {sellerAvailabilityType === 'strict' ? 'Strict' : 'Flexible'}
+                  </Badge>
+                )}
               </HStack>
-              <Text fontSize="9px" color="gray.500">
-                Date and time are optional. The other trader can accept or suggest changes after the offer is accepted.
-              </Text>
+
+              {sellerAvailabilitySlots.length > 0 && (
+                <>
+                  <Text fontSize="9px" color="teal.700" fontWeight="semibold">
+                    Seller's available slots — pick one:
+                  </Text>
+                  <VStack align="stretch" spacing={1}>
+                    {sellerAvailabilitySlots.map(slot => {
+                      const fmt = (t: string) => {
+                        const [h, m] = t.split(':').map(Number)
+                        const ampm = h >= 12 ? 'PM' : 'AM'
+                        const hour = h % 12 || 12
+                        return m === 0 ? `${hour}${ampm}` : `${hour}:${String(m).padStart(2, '0')}${ampm}`
+                      }
+                      const d = new Date(`${slot.date}T00:00:00`)
+                      const dateStr = d.toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' })
+                      const isSelected = selectedSlotId === slot.id
+                      return (
+                        <HStack
+                          key={slot.id}
+                          p={1.5}
+                          borderRadius="md"
+                          borderWidth="1.5px"
+                          borderColor={isSelected ? 'teal.400' : 'gray.200'}
+                          bg={isSelected ? 'teal.50' : 'white'}
+                          cursor="pointer"
+                          spacing={2}
+                          onClick={() => {
+                            setSelectedSlotId(slot.id)
+                            setMeetupDate(slot.date)
+                            setMeetupTime(slot.start_time)
+                          }}
+                        >
+                          <Icon as={FaClock} color={isSelected ? 'teal.500' : 'gray.400'} boxSize={3} />
+                          <Text fontSize="11px" color={isSelected ? 'teal.800' : 'gray.700'} fontWeight={isSelected ? 'semibold' : 'normal'}>
+                            {dateStr} · {fmt(slot.start_time)}–{fmt(slot.end_time)}
+                          </Text>
+                          {isSelected && <Icon as={FaCheckCircle} color="teal.500" boxSize={3} ml="auto" />}
+                        </HStack>
+                      )
+                    })}
+                  </VStack>
+                </>
+              )}
+
+              {/* Custom time input — hidden for strict schedule, optional for flexible */}
+              {sellerAvailabilityType !== 'strict' && (
+                <>
+                  {sellerAvailabilitySlots.length > 0 && (
+                    <Text fontSize="9px" color="gray.500">Or propose a different time:</Text>
+                  )}
+                  <HStack spacing={2}>
+                    <Input
+                      type="date" value={meetupDate}
+                      onChange={(e) => { setMeetupDate(e.target.value); setSelectedSlotId(null) }}
+                      fontSize="11px" size="sm" flex={1}
+                      min={new Date().toISOString().split('T')[0]}
+                    />
+                    <Input
+                      type="time" value={meetupTime}
+                      onChange={(e) => { setMeetupTime(e.target.value); setSelectedSlotId(null) }}
+                      fontSize="11px" size="sm" flex={1}
+                    />
+                  </HStack>
+                </>
+              )}
+
+              {sellerAvailabilityType === 'strict' && sellerAvailabilitySlots.length > 0 && !selectedSlotId && (
+                <Text fontSize="9px" color="orange.600">
+                  This seller has a strict schedule — please select one of the slots above.
+                </Text>
+              )}
+              {(!sellerAvailabilitySlots.length && sellerAvailabilityType !== 'strict') && (
+                <Text fontSize="9px" color="gray.500">
+                  Date and time are optional. The other trader can accept or suggest changes after the offer is accepted.
+                </Text>
+              )}
             </VStack>
           )}
           {tradeOption === 'pickup' && (
@@ -986,46 +1089,217 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
     </FormControl>
   )
 
+  // Helper: format a time string "HH:MM" → "3:00 PM"
+  const fmtTime = (t: string) => {
+    const [h, m] = t.split(':').map(Number)
+    const ampm = h >= 12 ? 'PM' : 'AM'
+    const hour = h % 12 || 12
+    return m === 0 ? `${hour}:00 ${ampm}` : `${hour}:${String(m).padStart(2, '0')} ${ampm}`
+  }
+
   const locationSection = selectedTargetProducts.length > 0 ? (
-    <Box p={3} bg="gray.50" borderWidth="1px" borderColor={selectedTargetsNeedLocationPlan ? 'orange.200' : borderColor} borderRadius="md">
-      <VStack spacing={2.5} align="stretch">
-        <HStack spacing={2}>
-          <Icon as={FaMapMarkerAlt} color={selectedTargetsNeedLocationPlan ? 'orange.500' : 'gray.500'} />
-          <Text fontSize="11px" fontWeight="bold" textTransform="uppercase" color={mutedTextColor} letterSpacing="0.5px">Location Details</Text>
-          {selectedTargetsNeedLocationPlan && (
-            <Badge colorScheme="orange" variant="subtle" fontSize="9px" ml="auto">Different locations</Badge>
-          )}
-        </HStack>
-        <VStack spacing={1.5} align="stretch">
-          {selectedTargetProducts.map((product) => {
-            const rawLoc = getProductRawLocation(product)
-            return (
-              <HStack key={product.id} spacing={2} align="center" minH="32px">
-                <Text fontSize="10px" fontWeight="700" color="gray.700" noOfLines={1} flex={1}>{product.title}</Text>
-                <Badge colorScheme={rawLoc ? 'blue' : 'gray'} variant="subtle" maxW="200px">
-                  <Text as="span" fontSize="9px" noOfLines={1}>{rawLoc || 'Location to be decided'}</Text>
-                </Badge>
-              </HStack>
-            )
-          })}
-        </VStack>
+    <Box borderWidth="1px" borderColor={selectedTargetsNeedLocationPlan ? 'orange.200' : 'gray.200'} borderRadius="lg" overflow="hidden">
+      {/* Header */}
+      <HStack px={3} py={2} bg="gray.50" borderBottomWidth="1px" borderBottomColor="gray.200" spacing={2}>
+        <Icon as={FaMapMarkerAlt} color="gray.500" boxSize={3.5} />
+        <Text fontSize="11px" fontWeight="800" textTransform="uppercase" color={mutedTextColor} letterSpacing="0.5px">Location Details</Text>
         {selectedTargetsNeedLocationPlan && (
-          <VStack spacing={2} align="stretch">
+          <Badge colorScheme="orange" variant="subtle" fontSize="9px" ml="auto">Multiple locations</Badge>
+        )}
+      </HStack>
+
+      <VStack spacing={0} align="stretch" divider={<Box borderBottomWidth="1px" borderBottomColor="gray.100" />}>
+        {selectedTargetProducts.map((prod) => {
+          const displayLabel = getProductLocationLabel(prod)
+          const coords = getProductCoords(prod)
+          const mapUrl = coords
+            ? `https://www.openstreetmap.org/?mlat=${coords.lat}&mlon=${coords.lng}&zoom=14`
+            : null
+          const embedUrl = coords
+            ? `https://www.openstreetmap.org/export/embed.html?bbox=${coords.lng - 0.02},${coords.lat - 0.015},${coords.lng + 0.02},${coords.lat + 0.015}&layer=mapnik&marker=${coords.lat},${coords.lng}`
+            : null
+
+          // Parse this product's own slots if it has them
+          const prodSlots = (() => {
+            const raw = (prod as any).availability_slots
+            if (!raw) return sellerAvailabilitySlots // fall back to target product slots
+            try {
+              const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+              const today = new Date().toISOString().split('T')[0]
+              return Array.isArray(parsed) ? parsed.filter((s: any) => s.date >= today) : []
+            } catch { return [] }
+          })()
+          const prodAvType = (prod as any).availability_type || sellerAvailabilityType
+
+          return (
+            <Box key={prod.id} p={3}>
+              {/* ── 1. PICKUP LOCATION ── */}
+              <Text fontSize="9px" fontWeight="800" color="gray.500" textTransform="uppercase" letterSpacing="0.6px" mb={1.5}>
+                Pickup Location
+              </Text>
+
+              {(displayLabel || coords) ? (
+                <VStack align="stretch" spacing={1.5}>
+                  {displayLabel && (
+                    <HStack spacing={2} p={2} bg="blue.50" borderRadius="md" borderLeft="3px solid" borderLeftColor="blue.400">
+                      <Icon as={FaMapMarkerAlt} color="blue.500" boxSize={3} flexShrink={0} />
+                      <Text fontSize="11px" fontWeight="600" color="blue.900" flex={1}>{displayLabel}</Text>
+                    </HStack>
+                  )}
+
+                  {/* Mini map preview (approximate area — exact address hidden for privacy) */}
+                  {embedUrl && (
+                    <Box borderRadius="md" overflow="hidden" borderWidth="1px" borderColor="gray.200" h="90px" position="relative">
+                      <Box
+                        as="iframe"
+                        src={embedUrl}
+                        width="100%"
+                        height="100%"
+                        style={{ border: 'none', pointerEvents: 'none' }}
+                        title="Pickup location map"
+                        loading="lazy"
+                      />
+                      {/* Overlay to prevent accidental interaction + show link */}
+                      <HStack
+                        position="absolute"
+                        bottom={1}
+                        right={1}
+                        zIndex={1}
+                      >
+                        <Button
+                          as="a"
+                          href={mapUrl!}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          size="xs"
+                          fontSize="9px"
+                          bg="white"
+                          color="blue.700"
+                          borderWidth="1px"
+                          borderColor="blue.200"
+                          _hover={{ bg: 'blue.50' }}
+                          leftIcon={<Icon as={FaExternalLinkAlt} boxSize={2} />}
+                          h="20px"
+                          px={2}
+                          onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                        >
+                          Open map
+                        </Button>
+                      </HStack>
+                    </Box>
+                  )}
+                </VStack>
+              ) : (
+                <HStack spacing={2} p={2} bg="gray.50" borderRadius="md" borderLeft="3px solid" borderLeftColor="gray.300">
+                  <Icon as={FaMapMarkerAlt} color="gray.400" boxSize={3} flexShrink={0} />
+                  <Text fontSize="11px" color="gray.500" fontStyle="italic">No pickup location set</Text>
+                </HStack>
+              )}
+
+              {/* ── 2. PREFERRED SCHEDULE ── */}
+              <Text fontSize="9px" fontWeight="800" color="gray.500" textTransform="uppercase" letterSpacing="0.6px" mt={3} mb={1.5}>
+                Preferred Schedule
+                <Text as="span" fontWeight="500" color="gray.400" textTransform="none" letterSpacing="normal" ml={1.5}>
+                  — Suggested by product owner
+                </Text>
+              </Text>
+
+              {prodSlots.length > 0 ? (
+                <VStack align="stretch" spacing={1}>
+                  {prodSlots.map((slot: any) => {
+                    const d = new Date(`${slot.date}T00:00:00`)
+                    const dateStr = d.toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+                    const isChosen = selectedSlotId === slot.id
+                    return (
+                      <HStack
+                        key={slot.id}
+                        p={2}
+                        borderRadius="md"
+                        borderWidth="1.5px"
+                        borderColor={isChosen ? 'teal.400' : 'teal.100'}
+                        bg={isChosen ? 'teal.50' : 'white'}
+                        spacing={2}
+                        cursor="pointer"
+                        onClick={() => {
+                          setSelectedSlotId(slot.id)
+                          setMeetupDate(slot.date)
+                          setMeetupTime(slot.start_time)
+                        }}
+                        role="button"
+                      >
+                        <Icon as={FaClock} color={isChosen ? 'teal.500' : 'teal.300'} boxSize={3} flexShrink={0} />
+                        <VStack spacing={0} align="start" flex={1}>
+                          <Text fontSize="11px" fontWeight={isChosen ? '700' : '600'} color={isChosen ? 'teal.900' : 'gray.800'}>
+                            {dateStr}
+                          </Text>
+                          <Text fontSize="10px" color={isChosen ? 'teal.700' : 'gray.500'}>
+                            {fmtTime(slot.start_time)} – {fmtTime(slot.end_time)}
+                          </Text>
+                        </VStack>
+                        {isChosen && <Icon as={FaCheckCircle} color="teal.500" boxSize={3.5} flexShrink={0} />}
+                      </HStack>
+                    )
+                  })}
+                  {prodAvType === 'strict' && (
+                    <HStack spacing={1.5} p={1.5} bg="orange.50" borderRadius="md" borderLeft="2px solid" borderLeftColor="orange.300">
+                      <Icon as={FaLock} color="orange.500" boxSize={2.5} flexShrink={0} />
+                      <Text fontSize="9px" color="orange.700" fontWeight="600">
+                        Strict schedule — please select one of the slots above before sending your offer.
+                      </Text>
+                    </HStack>
+                  )}
+                </VStack>
+              ) : (
+                <HStack spacing={2} p={2} bg="teal.50" borderRadius="md" borderLeft="3px solid" borderLeftColor="teal.300">
+                  <Icon as={FaClock} color="teal.400" boxSize={3} flexShrink={0} />
+                  <Text fontSize="11px" color="teal.700" fontWeight="500">Flexible / To be agreed</Text>
+                </HStack>
+              )}
+            </Box>
+          )
+        })}
+
+        {/* ── Multi-location plan (if needed) ── */}
+        {selectedTargetsNeedLocationPlan && (
+          <Box px={3} py={2.5} bg="orange.50">
+            <Text fontSize="10px" fontWeight="700" color="orange.800" mb={2}>
+              These products are in different locations — how will you handle pickup?
+            </Text>
             <RadioGroup value={locationPlan} onChange={(value) => setLocationPlan(value as 'product' | 'shared' | 'later')}>
-              <VStack align="stretch" spacing={2}>
-                <Radio size="md" value="product" colorScheme="orange"><Text fontSize="11px">Pick up each item at its listed location</Text></Radio>
-                <Radio size="md" value="shared" colorScheme="orange"><Text fontSize="11px">Agree on one shared meetup spot instead</Text></Radio>
-                <Radio size="md" value="later" colorScheme="orange"><Text fontSize="11px">Decide the final arrangement later</Text></Radio>
+              <VStack align="stretch" spacing={1.5}>
+                <Radio size="sm" value="product" colorScheme="orange">
+                  <Text fontSize="11px">Pick up each item at its listed location</Text>
+                </Radio>
+                <Radio size="sm" value="shared" colorScheme="orange">
+                  <Text fontSize="11px">Agree on one shared meetup spot instead</Text>
+                </Radio>
+                <Radio size="sm" value="later" colorScheme="orange">
+                  <Text fontSize="11px">Decide the final arrangement later</Text>
+                </Radio>
               </VStack>
             </RadioGroup>
-            <Checkbox size="md" colorScheme="orange" isChecked={locationPlanAcknowledged} onChange={(event) => setLocationPlanAcknowledged(event.target.checked)}>
-              <Text fontSize="11px" color="gray.700">I reviewed the different pickup locations and will confirm the plan before meetup.</Text>
+            <Checkbox size="sm" colorScheme="orange" isChecked={locationPlanAcknowledged} onChange={(e) => setLocationPlanAcknowledged(e.target.checked)} mt={2}>
+              <Text fontSize="10px" color="gray.700">I reviewed the different locations and will confirm the plan before meetup.</Text>
             </Checkbox>
-          </VStack>
+          </Box>
         )}
-        {!selectedTargetsNeedLocationPlan && (
-          <Text fontSize="9px" color="gray.500">Pickup date and time can be proposed after the offer is accepted.</Text>
-        )}
+
+        {/* ── Agreement checkbox ── */}
+        <Box px={3} py={2.5} bg={scheduleAgreed ? 'green.50' : 'gray.50'}>
+          <Checkbox
+            size="md"
+            colorScheme="green"
+            isChecked={scheduleAgreed}
+            onChange={(e) => setScheduleAgreed(e.target.checked)}
+          >
+            <Text fontSize="11px" color="gray.800" fontWeight="600">
+              I agree with the pickup location and preferred schedule.
+            </Text>
+          </Checkbox>
+          <Text fontSize="9px" color="gray.500" mt={1} pl={6}>
+            Can't follow the schedule? You can propose a different time after sending the offer.
+          </Text>
+        </Box>
       </VStack>
     </Box>
   ) : null

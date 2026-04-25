@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, VStack, HStack, Box, Image, Text, Badge, Button, Divider, Grid, useToast, ModalFooter, AlertDialog, AlertDialogOverlay, AlertDialogContent, AlertDialogHeader, AlertDialogBody, AlertDialogFooter, useDisclosure, Icon, Card, CardBody, useColorModeValue, FormControl, FormLabel, Textarea } from '@chakra-ui/react'
-import { FaMapMarkerAlt, FaTruck, FaHandshake, FaChevronLeft, FaChevronRight } from 'react-icons/fa'
+import { Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, VStack, HStack, Box, Image, Text, Badge, Button, Divider, Grid, useToast, ModalFooter, AlertDialog, AlertDialogOverlay, AlertDialogContent, AlertDialogHeader, AlertDialogBody, AlertDialogFooter, useDisclosure, Icon, Card, CardBody, useColorModeValue, FormControl, FormLabel, Textarea, Input } from '@chakra-ui/react'
+import { FaMapMarkerAlt, FaTruck, FaHandshake, FaChevronLeft, FaChevronRight, FaClock, FaCalendarAlt, FaCheckCircle } from 'react-icons/fa'
 import { formatPHP } from '../utils/currency'
 import { Trade, Product, TradeAction, TradeOption } from '../types'
 import { useProducts } from '../contexts/ProductContext'
@@ -37,6 +37,11 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
   const [isAccepting, setIsAccepting] = useState(false)
   const [isDeclining, setIsDeclining] = useState(false)
   const [isCountering, setIsCountering] = useState(false)
+  const [showSuggestTime, setShowSuggestTime] = useState(false)
+  const [suggestDate, setSuggestDate] = useState('')
+  const [suggestTime, setSuggestTime] = useState('')
+  const [isSuggestingTime, setIsSuggestingTime] = useState(false)
+  const [isAcceptingTime, setIsAcceptingTime] = useState(false)
 
   // Build instant placeholder products from trade data to avoid blink
   const buildPlaceholderProduct = (id: number, title?: string, imageUrl?: string): Product => ({
@@ -242,6 +247,44 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
         id: "offerdetailsmodal-failed-to-accept", title: 'Failed to accept', description: e?.response?.data?.error || 'Try again', status: 'error' })
     } finally {
       setIsAccepting(false)
+    }
+  }
+
+  const acceptMeetupTime = async () => {
+    if (!effectiveTrade || isAcceptingTime) return
+    try {
+      setIsAcceptingTime(true)
+      await api.post(`/api/trades/${effectiveTrade.id}/meetup/propose`, {
+        proposed_time: `${effectiveTrade.meetup_date || ''}T${effectiveTrade.meetup_time || ''}:00`,
+        proposed_location: effectiveTrade.meetup_location || '',
+      })
+      toast({ id: 'odm-time-accepted', title: 'Meetup time accepted', description: 'Both parties agreed — trade is now ongoing!', status: 'success' })
+      onAccepted()
+      onClose()
+    } catch (e: any) {
+      toast({ id: 'odm-time-accept-fail', title: 'Failed to confirm time', description: e?.response?.data?.error || 'Try again', status: 'error' })
+    } finally {
+      setIsAcceptingTime(false)
+    }
+  }
+
+  const suggestAnotherTime = async () => {
+    if (!effectiveTrade || !suggestDate || !suggestTime || isSuggestingTime) return
+    try {
+      setIsSuggestingTime(true)
+      await api.post(`/api/trades/${effectiveTrade.id}/meetup/propose`, {
+        proposed_time: `${suggestDate}T${suggestTime}:00`,
+        proposed_location: effectiveTrade.meetup_location || '',
+      })
+      toast({ id: 'odm-time-suggested', title: 'New time suggested', description: 'The other trader will be notified.', status: 'success' })
+      setShowSuggestTime(false)
+      setSuggestDate('')
+      setSuggestTime('')
+      onAccepted()
+    } catch (e: any) {
+      toast({ id: 'odm-time-suggest-fail', title: 'Failed to suggest time', description: e?.response?.data?.error || 'Try again', status: 'error' })
+    } finally {
+      setIsSuggestingTime(false)
     }
   }
 
@@ -553,6 +596,113 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
                 </VStack>
               </HStack>
             </Box>
+
+            {/* Proposed Meetup Section */}
+            {(effectiveTrade?.meetup_date || effectiveTrade?.meetup_time) && (
+              <Box p={3} bg="teal.50" borderRadius="lg" borderWidth="1px" borderColor="teal.200">
+                <HStack mb={2} spacing={2}>
+                  <Icon as={FaCalendarAlt} color="teal.600" boxSize={3.5} />
+                  <Text fontSize="10px" fontWeight="bold" color="teal.700" textTransform="uppercase" letterSpacing="wider">
+                    Proposed Meetup
+                  </Text>
+                  <Badge colorScheme="teal" fontSize="8px">
+                    {effectiveTrade.buyer_id === user?.id ? 'You proposed' : `${effectiveTrade.buyer_name || 'Buyer'} proposed`}
+                  </Badge>
+                </HStack>
+
+                <Grid templateColumns="1fr 1fr" gap={2} mb={2}>
+                  {effectiveTrade.meetup_date && (
+                    <VStack align="start" spacing={0}>
+                      <Text fontSize="9px" fontWeight="bold" color="teal.600" textTransform="uppercase">Date</Text>
+                      <Text fontSize="12px" fontWeight="semibold" color="teal.900">
+                        {new Date(`${effectiveTrade.meetup_date}T00:00:00`).toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' })}
+                      </Text>
+                    </VStack>
+                  )}
+                  {effectiveTrade.meetup_time && (
+                    <VStack align="start" spacing={0}>
+                      <Text fontSize="9px" fontWeight="bold" color="teal.600" textTransform="uppercase">Time</Text>
+                      <Text fontSize="12px" fontWeight="semibold" color="teal.900">
+                        {(() => {
+                          const [h, m] = effectiveTrade.meetup_time.split(':').map(Number)
+                          const ampm = h >= 12 ? 'PM' : 'AM'
+                          const hour = h % 12 || 12
+                          return `${hour}:${String(m || 0).padStart(2, '0')} ${ampm}`
+                        })()}
+                      </Text>
+                    </VStack>
+                  )}
+                  {effectiveTrade.meetup_location && (
+                    <VStack align="start" spacing={0} gridColumn="span 2">
+                      <Text fontSize="9px" fontWeight="bold" color="teal.600" textTransform="uppercase">Location</Text>
+                      <Text fontSize="11px" color="teal.800" noOfLines={2}>
+                        📍 {effectiveTrade.meetup_location}
+                      </Text>
+                    </VStack>
+                  )}
+                </Grid>
+
+                {/* Accept / Suggest Another Time */}
+                {effectiveTrade.buyer_id !== user?.id && !showSuggestTime && (
+                  <HStack spacing={2} mt={1}>
+                    <Button
+                      size="xs"
+                      colorScheme="teal"
+                      leftIcon={<Icon as={FaCheckCircle} boxSize={3} />}
+                      fontSize="11px"
+                      isLoading={isAcceptingTime}
+                      onClick={acceptMeetupTime}
+                    >
+                      Accept This Time
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      colorScheme="teal"
+                      leftIcon={<Icon as={FaClock} boxSize={3} />}
+                      fontSize="11px"
+                      onClick={() => setShowSuggestTime(true)}
+                    >
+                      Suggest Another Time
+                    </Button>
+                  </HStack>
+                )}
+
+                {/* Suggest Another Time form */}
+                {showSuggestTime && (
+                  <VStack align="stretch" spacing={2} mt={2} p={2} bg="white" borderRadius="md" borderWidth="1px" borderColor="teal.200">
+                    <Text fontSize="10px" fontWeight="semibold" color="teal.700">Propose a different time:</Text>
+                    <HStack spacing={2}>
+                      <Input
+                        type="date"
+                        value={suggestDate}
+                        onChange={e => setSuggestDate(e.target.value)}
+                        min={new Date().toISOString().split('T')[0]}
+                        size="xs"
+                        fontSize="11px"
+                        flex={1}
+                      />
+                      <Input
+                        type="time"
+                        value={suggestTime}
+                        onChange={e => setSuggestTime(e.target.value)}
+                        size="xs"
+                        fontSize="11px"
+                        flex={1}
+                      />
+                    </HStack>
+                    <HStack spacing={2}>
+                      <Button size="xs" colorScheme="teal" fontSize="10px" isLoading={isSuggestingTime} isDisabled={!suggestDate || !suggestTime} onClick={suggestAnotherTime}>
+                        Send Suggestion
+                      </Button>
+                      <Button size="xs" variant="ghost" fontSize="10px" onClick={() => { setShowSuggestTime(false); setSuggestDate(''); setSuggestTime('') }}>
+                        Cancel
+                      </Button>
+                    </HStack>
+                  </VStack>
+                )}
+              </Box>
+            )}
 
             {/* Offer Details Section - Compact 2-Column Info Grid */}
             <Box p={2.5} bg="orange.50" borderRadius="md" borderWidth="1px" borderColor="orange.200">

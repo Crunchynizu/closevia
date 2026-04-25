@@ -26,6 +26,8 @@ import OptimizedImage from './OptimizedImage'
 import { getBoostStatus } from '../utils/boostUtils'
 import { useAuth } from '../contexts/AuthContext'
 import { api } from '../services/api'
+import AvailabilitySlots from './AvailabilitySlots'
+import { AvailabilitySlot } from '../types'
 
 interface ProductCardProps {
   product: any
@@ -610,6 +612,21 @@ const ProductCard: React.FC<ProductCardProps> = ({
             </Badge>
           )}
         </Flex>
+
+        {/* Availability Slots (compact) */}
+        {(() => {
+          const raw = (product as any).availability_slots
+          if (!raw) return null
+          try {
+            const slots: AvailabilitySlot[] = typeof raw === 'string' ? JSON.parse(raw) : raw
+            if (!Array.isArray(slots) || slots.length === 0) return null
+            return (
+              <Box mb={1}>
+                <AvailabilitySlots slots={slots} availabilityType={(product as any).availability_type} compact />
+              </Box>
+            )
+          } catch { return null }
+        })()}
 
         {/* Organization Tags */}
         {product.organization_tags && product.organization_tags.length > 0 && (

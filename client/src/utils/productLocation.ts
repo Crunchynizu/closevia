@@ -16,26 +16,23 @@ const cleanLocationText = (value?: string) => {
   return text
 }
 
-export const getProductLocationLabel = (product: Partial<Product> | null | undefined): string => {
-  if (!product) return 'Location to be decided'
+// Drop the first comma-delimited segment when there are 3+ parts (removes street number/name)
+// so we show barangay/area level rather than an exact street address.
+const toAreaLabel = (text: string): string => {
+  const parts = text.split(',').map(s => s.trim()).filter(Boolean)
+  if (parts.length <= 2) return text
+  return parts.slice(1).join(', ')
+}
 
-  const locationType = product.location_type || 'no_location'
+export const getProductLocationLabel = (product: Partial<Product> | null | undefined): string => {
+  if (!product) return ''
+
   const pickupAddress = cleanLocationText(product.pickup_address)
   const location = cleanLocationText(product.location)
+  const area = pickupAddress || location
+  if (!area) return ''
 
-  if (locationType === 'pickup_location') {
-    return pickupAddress || location
-      ? `Pickup at ${pickupAddress || location}`
-      : 'Pickup location saved'
-  }
-
-  if (locationType === 'current_location') {
-    return location ? `Pickup near ${location}` : 'Pickup area saved'
-  }
-
-  // Fallback: use raw location text even when location_type is not explicitly set
-  const rawLocation = pickupAddress || location
-  return rawLocation || 'Location to be decided'
+  return `Near ${toAreaLabel(area)}`
 }
 
 export const getProductRawLocation = (product: Partial<Product> | null | undefined): string | null => {

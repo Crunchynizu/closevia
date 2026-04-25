@@ -244,6 +244,8 @@ type Product struct {
 	BoostDurationHours   int               `json:"boost_duration_hours,omitempty"`
 	FeaturedOrder        *int              `json:"featured_order,omitempty"`
 	OrganizationTags     []Organization    `json:"organization_tags,omitempty"` // Tagged organizations
+	AvailabilitySlots    string            `json:"availability_slots,omitempty"` // JSON array of {id,date,start_time,end_time}
+	AvailabilityType     string            `json:"availability_type,omitempty"`  // "flexible" or "strict"
 }
 
 // ProductCreate represents data for creating a product
