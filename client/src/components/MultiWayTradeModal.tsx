@@ -1798,53 +1798,69 @@ const MultiWayTradeModal: React.FC<MultiWayTradeModalProps> = ({
                                 </Box>
 
                                 {/* Arrow + Item Pill */}
-                                {idx < sortedParticipants.length - 1 && (
-                                  <HStack spacing={1} minW="120px">
-                                    <Icon as={FaArrowRight} boxSize={2.5} color={useColorModeValue('gray.400', 'gray.500')} />
-                                    <Box
-                                      display="flex"
-                                      alignItems="center"
-                                      gap={1}
-                                      px={1.5}
-                                      py={0.5}
-                                      borderRadius="full"
-                                      borderWidth="0.5px"
-                                      borderColor={useColorModeValue('gray.300', 'gray.600')}
-                                      bg={useColorModeValue('gray.100', 'gray.800')}
-                                      cursor="pointer"
-                                      transition="all 0.2s"
-                                      onClick={() => navigate(getProductUrl({ ...participant, id: participant.product_id }))}
-                                      title={`View ${participant.product_title} listing`}
-                                      role="button"
-                                      tabIndex={0}
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter' || e.key === ' ') {
-                                          navigate(getProductUrl({ ...participant, id: participant.product_id }))
-                                        }
-                                      }}
-                                      _hover={{ bg: useColorModeValue('gray.200', 'gray.700'), borderColor: useColorModeValue('gray.400', 'gray.500') }}
-                                    >
-                                      {participant.product_image && (
-                                        <Image
-                                          src={participant.product_image}
-                                          alt={participant.product_title}
-                                          h="16px"
-                                          w="16px"
-                                          borderRadius="sm"
-                                          objectFit="cover"
-                                        />
-                                      )}
-                                      <Text fontSize="10px" fontWeight="500" color={useColorModeValue('gray.700', 'gray.200')} noOfLines={1}>
-                                        {participant.product_title}
-                                      </Text>
-                                      <Icon as={FaChevronDown} boxSize={2.5} color={useColorModeValue('gray.600', 'gray.400')} transform="rotate(-90deg)" />
-                                    </Box>
-                                  </HStack>
-                                )}
+                                <HStack spacing={1} minW="120px">
+                                  <Icon as={FaArrowRight} boxSize={2.5} color={useColorModeValue('gray.400', 'gray.500')} />
+                                  <Box
+                                    display="flex"
+                                    alignItems="center"
+                                    gap={1}
+                                    px={1.5}
+                                    py={0.5}
+                                    borderRadius="full"
+                                    borderWidth="0.5px"
+                                    borderColor={useColorModeValue('gray.300', 'gray.600')}
+                                    bg={useColorModeValue('gray.100', 'gray.800')}
+                                    cursor="pointer"
+                                    transition="all 0.2s"
+                                    onClick={() => navigate(getProductUrl({ ...participant, id: participant.product_id }))}
+                                    title={`View ${participant.product_title} listing`}
+                                    role="button"
+                                    tabIndex={0}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter' || e.key === ' ') {
+                                        navigate(getProductUrl({ ...participant, id: participant.product_id }))
+                                      }
+                                    }}
+                                    _hover={{ bg: useColorModeValue('gray.200', 'gray.700'), borderColor: useColorModeValue('gray.400', 'gray.500') }}
+                                  >
+                                    {participant.product_image && (
+                                      <Image
+                                        src={participant.product_image}
+                                        alt={participant.product_title}
+                                        h="16px"
+                                        w="16px"
+                                        borderRadius="sm"
+                                        objectFit="cover"
+                                      />
+                                    )}
+                                    <Text fontSize="10px" fontWeight="500" color={useColorModeValue('gray.700', 'gray.200')} noOfLines={1}>
+                                      {participant.product_title}
+                                    </Text>
+                                    <Icon as={FaChevronDown} boxSize={2.5} color={useColorModeValue('gray.600', 'gray.400')} transform="rotate(-90deg)" />
+                                  </Box>
+                                </HStack>
                               </Box>
                             )
                           })}
+                          {/* Loop closure — first participant again to show circular chain */}
+                          <Box display="flex" flexDirection="column" alignItems="center" gap={1} flexShrink={0}>
+                            <Avatar
+                              name={sortedParticipants[0].user_name}
+                              size="sm"
+                              bg="brand.500"
+                              cursor="pointer"
+                              title={`View ${sortedParticipants[0].user_name}'s profile`}
+                              aria-label={`View ${sortedParticipants[0].user_name}'s profile`}
+                              onClick={() => navigate(getUserProfileUrl(sortedParticipants[0].user_id, sortedParticipants[0].user_slug))}
+                              transition="all 0.2s"
+                              _hover={{ ring: '2px', ringColor: 'brand.600', opacity: 0.85 }}
+                            />
+                            <Text fontSize="8px" fontWeight="semibold" textAlign="center">{sortedParticipants[0].user_name.split(' ')[0]}</Text>
+                          </Box>
                         </HStack>
+                        <Text fontSize="10px" color="gray.500" textAlign="center" mt={2} px={2}>
+                          Each person gives their item to the next user in the loop. The last user gives their item back to the first.
+                        </Text>
                       </Box>
                     )}
                   </Box>

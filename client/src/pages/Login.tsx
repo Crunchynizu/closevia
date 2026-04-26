@@ -15,25 +15,38 @@ import {
   AlertIcon,
   InputGroup,
   InputRightElement,
+  InputLeftElement,
   IconButton,
   useToast,
   Image,
   Flex,
   Center,
   Divider,
-  Container,
+  Checkbox,
+  Icon,
 } from '@chakra-ui/react'
-import { ViewIcon, ViewOffIcon, ArrowBackIcon } from '@chakra-ui/icons'
-import { FaGoogle } from 'react-icons/fa'
+import { ViewIcon, ViewOffIcon } from '@chakra-ui/icons'
+import { FaGoogle, FaShieldAlt, FaMapMarkerAlt, FaUserCheck } from 'react-icons/fa'
+import { MdEmail, MdLock } from 'react-icons/md'
+import { motion } from 'framer-motion'
 import { useAuth } from '../contexts/AuthContext'
 import { auth } from '../config/firebase'
 import { clearStoredAuth, getStoredUser } from '../utils/authStorage'
 import { signInWithPopup, GoogleAuthProvider, User as FirebaseUser } from 'firebase/auth'
 
+const MotionBox = motion(Box as any)
+
+const valuePoints = [
+  { icon: FaShieldAlt, label: 'Safe student trades' },
+  { icon: FaMapMarkerAlt, label: 'Meetups near you' },
+  { icon: FaUserCheck, label: 'Verified users' },
+]
+
 const Login: React.FC = () => {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [rememberMe, setRememberMe] = useState(false)
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
   const [error, setError] = useState('')
@@ -55,7 +68,7 @@ const Login: React.FC = () => {
     })
 
     toast({
-      id: "login-login-successful-2",
+      id: 'login-login-successful-2',
       title: 'Login successful!',
       description: `Welcome, ${firebaseUser.displayName || firebaseUser.email}`,
       status: 'success',
@@ -66,19 +79,15 @@ const Login: React.FC = () => {
     setGoogleLoginSuccess(true)
   }, [googleLogin, toast])
 
-  // Navigate to appropriate page when user state is updated after Google login
   useEffect(() => {
     if (googleLoginSuccess && isAuthenticated && !isLoggingIn) {
       navigate(user?.role === 'admin' ? '/admin' : '/dashboard')
     }
   }, [googleLoginSuccess, isAuthenticated, isLoggingIn, navigate, user])
 
-  // Redirect authenticated users away from login page.
-  // Important: run when auth state becomes ready, not only on mount.
   useEffect(() => {
     const isOnLoginPage = window.location.pathname === '/login'
     if (!isOnLoginPage) return
-
     if (isAuthenticated && !isLoggingIn && !authLoading) {
       navigate(user?.role === 'admin' ? '/admin' : '/dashboard', { replace: true })
     }
@@ -86,7 +95,7 @@ const Login: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     if (!email || !password) {
       setError('Please fill in all fields')
       return
@@ -100,7 +109,7 @@ const Login: React.FC = () => {
       await login(email, password)
 
       toast({
-        id: "login-login-successful",
+        id: 'login-login-successful',
         title: 'Login successful!',
         description: 'Welcome back to Clovia',
         status: 'success',
@@ -108,13 +117,9 @@ const Login: React.FC = () => {
         isClosable: true,
       })
 
-      // Check user role from localStorage since state may not be updated yet
       const storedUser = getStoredUser()
       const parsedUser = storedUser ? JSON.parse(storedUser) : null
       const redirectPath = parsedUser?.role === 'admin' ? '/admin' : '/dashboard'
-
-      // Navigate immediately; if auth state finalizes a moment later,
-      // the effect above will still redirect away from /login.
       navigate(redirectPath, { replace: true })
     } catch (error: any) {
       setError(error.message || 'Login failed')
@@ -129,11 +134,9 @@ const Login: React.FC = () => {
       setGoogleLoading(true)
       setIsLoggingIn(true)
       setError('')
-      
-      // Clear any existing auth state before new login
+
       clearStoredAuth()
 
-      // Check if Firebase is initialized
       if (!auth) {
         setError('Firebase is not properly configured. Please check your environment variables.')
         setGoogleLoading(false)
@@ -141,28 +144,17 @@ const Login: React.FC = () => {
         return
       }
 
-      // Create Google Auth Provider
       const googleProvider = new GoogleAuthProvider()
 
-      if (!auth) {
-        setError('Google login is not available in this environment.')
-        setGoogleLoading(false)
-        setIsLoggingIn(false)
-        return
-      }
-
-      // Set language to English
       try {
-        // some firebase auth instances allow setting languageCode
         ;(auth as any).languageCode = 'en'
       } catch (e) {
-        // ignore if auth object doesn't support languageCode
+        // ignore
       }
 
       const result = await signInWithPopup(auth, googleProvider)
       await completeGoogleLogin(result.user)
     } catch (error: any) {
-      // Handle specific error codes
       if (error.code === 'auth/popup-closed-by-user') {
         setError('Login popup was closed. Please try again.')
       } else if (error.code === 'auth/popup-blocked') {
@@ -175,325 +167,467 @@ const Login: React.FC = () => {
       setIsLoggingIn(false)
     }
   }
-    
+
   return (
-    <Box 
-      bg={{ base: '#E8F5E9', md: '#FFFDF1' }} 
-      w="100%" 
-      minH="100vh"
-      display="flex"
-      flexDirection={{ base: 'column', md: 'row' }}
-      overflow="hidden"
-    >
-      {/* Image on the left - fixed height (desktop only) */}
+    <Box minH="100vh" w="100%" display="flex" overflow="hidden">
+
+      {/* ── LEFT: Hero image panel (lg+) ── */}
       <Box
-        flex={{ base: '0', md: '1.2' }}
-        display={{ base: 'none', md: 'flex' }}
-        alignItems="center"
-        justifyContent="center"
-        h="100vh"
-        maxH="100vh"
+        display={{ base: 'none', lg: 'flex' }}
+        flex="0 0 55%"
+        position="relative"
         overflow="hidden"
+        flexDirection="column"
+        justifyContent="flex-end"
+        minH="100vh"
       >
+        {/* Photo */}
         <Image
           src="/barter.jpg"
-          alt="Barter"
+          position="absolute"
+          top={0} left={0} right={0} bottom={0}
+          w="100%" h="100%"
           objectFit="cover"
           objectPosition="center"
-          w="100%"
-          h="100%"
           draggable={false}
-          borderTopRightRadius="3xl"
-          borderBottomRightRadius="3xl"
         />
-      </Box>
- 
-      {/* Form on the right - centered vertically */}
-      <Flex
-        flex={{ base: '1', md: '0.8' }}
-        alignItems={{ base: 'flex-start', md: 'center' }}
-        justifyContent="center"
-        px={{ base: 4, md: 20 }}
-        py={{ base: 8, md: 0 }}
-        bg={{ base: '#E8F5E9', md: '#FFFDF1' }}
-        position="relative"
-        minH={{ base: '100vh', md: '100vh' }}
-        w="100%"
-        overflow="auto"
-      >
-        {/* Back Button - Mobile Only */}
-        <IconButton
-          aria-label="Go back"
-          icon={<ArrowBackIcon />}
+
+        {/* Dark gradient overlay for readability */}
+        <Box
           position="absolute"
-          top={4}
-          left={4}
-          display={{ base: 'flex', md: 'none' }}
-          variant="ghost"
-          colorScheme="teal"
-          onClick={() => navigate(-1)}
-          size="md"
-          zIndex={10}
+          inset={0}
+          bg="linear-gradient(170deg, rgba(0,0,0,0.08) 0%, rgba(0,0,0,0.55) 60%, rgba(0,0,0,0.78) 100%)"
         />
-        
-        {/* Login Form Container - Card Style */}
-        <Container maxW="container.sm" position="relative" p={0}>
-          <VStack spacing={6} w="full">
-            {/* Decorative Header - Mobile Optimized */}
-            <Box 
-              w="full" 
-              textAlign="center" 
-              pt={{ base: 12, md: 0 }}
-              mb={{ base: 4, md: 2 }}
-            >
-              {/* Nature Illustration - SVG Plants */}
-              <Flex justify="center" mb={6} h="120px">
-                <svg width="100%" height="120" viewBox="0 0 200 120" fill="none" style={{ maxWidth: '200px' }}>
-                  {/* Left plant */}
-                  <g>
-                    <path d="M 40 100 Q 30 80 35 60 Q 40 40 45 20" stroke="#4CAF50" strokeWidth="3" fill="none" strokeLinecap="round"/>
-                    <ellipse cx="30" cy="70" rx="8" ry="15" fill="#66BB6A" transform="rotate(-40 30 70)"/>
-                    <ellipse cx="45" cy="50" rx="8" ry="15" fill="#81C784" transform="rotate(-20 45 50)"/>
-                    <ellipse cx="50" cy="30" rx="8" ry="15" fill="#66BB6A" transform="rotate(0 50 30)"/>
-                    <circle cx="40" cy="95" r="4" fill="#2D876D"/>
-                  </g>
-                  {/* Center plant - Main */}
-                  <g>
-                    <path d="M 100 100 L 100 20" stroke="#2D876D" strokeWidth="4" fill="none"/>
-                    <ellipse cx="75" cy="60" rx="12" ry="20" fill="#4CAF50" transform="rotate(-45 75 60)"/>
-                    <ellipse cx="125" cy="65" rx="12" ry="20" fill="#4CAF50" transform="rotate(45 125 65)"/>
-                    <ellipse cx="70" cy="40" rx="12" ry="20" fill="#66BB6A" transform="rotate(-50 70 40)"/>
-                    <ellipse cx="130" cy="35" rx="12" ry="20" fill="#66BB6A" transform="rotate(50 130 35)"/>
-                    <ellipse cx="85" cy="25" rx="10" ry="18" fill="#81C784" transform="rotate(-35 85 25)"/>
-                    <ellipse cx="115" cy="25" rx="10" ry="18" fill="#81C784" transform="rotate(35 115 25)"/>
-                    <circle cx="100" cy="95" r="5" fill="#2D876D"/>
-                  </g>
-                  {/* Right plant */}
-                  <g>
-                    <path d="M 160 100 Q 170 80 165 60 Q 160 40 155 20" stroke="#4CAF50" strokeWidth="3" fill="none" strokeLinecap="round"/>
-                    <ellipse cx="170" cy="70" rx="8" ry="15" fill="#66BB6A" transform="rotate(40 170 70)"/>
-                    <ellipse cx="155" cy="50" rx="8" ry="15" fill="#81C784" transform="rotate(20 155 50)"/>
-                    <ellipse cx="150" cy="30" rx="8" ry="15" fill="#66BB6A" transform="rotate(0 150 30)"/>
-                    <circle cx="160" cy="95" r="4" fill="#2D876D"/>
-                  </g>
-                  {/* Decorative flowers */}
-                  <circle cx="55" cy="35" r="3" fill="#FFD54F"/>
-                  <circle cx="145" cy="40" r="3" fill="#FFD54F"/>
-                  <circle cx="75" cy="15" r="2.5" fill="#FFEB3B"/>
-                </svg>
-              </Flex>
-              
-              <Heading 
-                size="lg" 
-                color="#2D876D" 
-                mb={2}
-                fontSize={{ base: '28px', md: '32px' }}
-                fontWeight="700"
-                letterSpacing="-0.5px"
-              >
-                Welcome Back
-              </Heading>
-              <Text 
-                color="#555"
-                fontSize={{ base: '14px', md: '16px' }}
-                fontWeight="500"
-              >
-                Sign in to your Clovia account
-              </Text>
-            </Box>
 
-            {/* Form Card */}
+        {/* Hero content */}
+        <Box position="relative" zIndex={1} px={12} pb={14}>
+          {/* Mini logo */}
+          <Box
+            w="38px" h="38px"
+            borderRadius="10px"
+            overflow="hidden"
+            mb={8}
+            boxShadow="0 2px 10px rgba(0,0,0,0.25)"
+          >
+            <Image src="/logo.svg" w="100%" h="100%" objectFit="cover" draggable={false} />
+          </Box>
+
+          <Heading
+            fontSize="40px"
+            fontWeight="800"
+            color="white"
+            letterSpacing="-1px"
+            lineHeight="1.15"
+            mb={3}
+          >
+            Trade smarter,<br />live better.
+          </Heading>
+
+          <Text fontSize="15.5px" color="whiteAlpha.750" mb={9} fontWeight="400" lineHeight="1.5">
+            Clovia — the community marketplace for bartering.
+          </Text>
+
+          {/* Value points */}
+          <VStack align="start" spacing={3.5}>
+            {valuePoints.map(({ icon, label }) => (
+              <HStack key={label} spacing={3}>
+                <Box
+                  w="30px" h="30px"
+                  borderRadius="8px"
+                  bg="whiteAlpha.200"
+                  backdropFilter="blur(4px)"
+                  display="flex"
+                  alignItems="center"
+                  justifyContent="center"
+                  flexShrink={0}
+                >
+                  <Icon as={icon} boxSize="13px" color="white" />
+                </Box>
+                <Text fontSize="14px" color="white" fontWeight="500">
+                  {label}
+                </Text>
+              </HStack>
+            ))}
+          </VStack>
+        </Box>
+      </Box>
+
+      {/* ── RIGHT: Form panel ── */}
+      <Box
+        flex="1"
+        display="flex"
+        flexDirection="column"
+        alignItems={{ base: 'center', lg: 'flex-start' }}
+        justifyContent="center"
+        position="relative"
+        bg="#FFFDF1"
+        pl={{ base: 5, md: 8, lg: '7%' }}
+        pr={{ base: 5, md: 8, lg: '4%' }}
+        py={{ base: 10, md: 12 }}
+        overflow="auto"
+        minH="100vh"
+      >
+        {/* Mobile watermark */}
+        <Box
+          display={{ base: 'block', lg: 'none' }}
+          position="fixed"
+          top="50%" left="50%"
+          transform="translate(-50%, -50%)"
+          w="340px" h="340px"
+          opacity={0.04}
+          pointerEvents="none"
+          zIndex={0}
+          filter="blur(3px)"
+        >
+          <Image src="/logo.svg" w="100%" h="100%" objectFit="contain" draggable={false} />
+        </Box>
+
+        {/* Mobile top brand section */}
+        <MotionBox
+          display={{ base: 'flex', lg: 'none' }}
+          flexDirection="column"
+          alignItems="center"
+          mb={6}
+          zIndex={1}
+          initial={{ opacity: 0, y: -14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45 }}
+        >
+          <Box
+            w="52px" h="52px"
+            borderRadius="14px"
+            overflow="hidden"
+            boxShadow="0 4px 18px rgba(21,134,146,0.22)"
+            mb={2.5}
+          >
+            <Image src="/logo.svg" w="100%" h="100%" objectFit="cover" draggable={false} />
+          </Box>
+          <Text fontSize="13px" color="gray.500" fontWeight="500" letterSpacing="0.1px">
+            Start trading smarter today
+          </Text>
+        </MotionBox>
+
+        {/* Card wrapper — holds peeking logo + card body */}
+        <MotionBox
+          w="full"
+          maxW="420px"
+          position="relative"
+          zIndex={1}
+          initial={{ opacity: 0, y: 28 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.08 }}
+        >
+          {/* Floating logo — peeks above card on desktop */}
+          <Box
+            display={{ base: 'none', lg: 'flex' }}
+            position="absolute"
+            top="-34px"
+            left="50%"
+            transform="translateX(-50%)"
+            zIndex={2}
+            alignItems="center"
+            justifyContent="center"
+          >
             <Box
-              w="full"
-              bg="white"
-              borderRadius={{ base: '24px', md: '16px' }}
-              p={{ base: 6, md: 8 }}
-              boxShadow={{ base: 'none', md: '0 4px 20px rgba(0, 0, 0, 0.08)' }}
-              border={{ base: 'none', md: '1px solid' }}
-              borderColor={{ base: 'transparent', md: 'gray.100' }}
+              w="68px" h="68px"
+              borderRadius="18px"
+              overflow="hidden"
+              boxShadow="0 6px 24px rgba(21,134,146,0.30), 0 0 0 3px white, 0 0 0 4px rgba(21,134,146,0.10)"
+              sx={{
+                animation: 'logoFloat 3.2s ease-in-out infinite',
+                '@keyframes logoFloat': {
+                  '0%, 100%': { transform: 'translateY(0px)' },
+                  '50%': { transform: 'translateY(-5px)' },
+                },
+              }}
             >
-              <form onSubmit={handleSubmit}>
-                <VStack spacing={5} w="full">
-                  {/* Error Alert */}
-                  {error && (
-                    <Alert status="error" borderRadius="12px" bg="#FFEBEE">
-                      <AlertIcon color="#C62828" />
-                      <Text color="#B71C1C" fontSize="sm">
-                        {error}
-                      </Text>
-                    </Alert>
-                  )}
+              <Image src="/logo.svg" w="100%" h="100%" objectFit="cover" draggable={false} />
+            </Box>
+          </Box>
 
-                  {/* Email Field */}
-                  <FormControl isRequired>
-                    <FormLabel fontSize={{ base: '13px', md: '14px' }} fontWeight="600" color="#333" mb="8px">Email</FormLabel>
-                    <Input
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="Enter your email"
-                      size={{ base: 'lg', md: 'lg' }}
-                      bg="#F5F5F5"
-                      borderColor="#E0E0E0"
-                      borderWidth="1px"
-                      height={{ base: '48px', md: '44px' }}
-                      fontSize={{ base: '15px', md: '16px' }}
-                      _focus={{
-                        borderColor: '#2D876D',
-                        boxShadow: '0 0 0 3px rgba(45, 135, 109, 0.1)',
-                        bg: 'white',
-                      }}
+          {/* Card body */}
+          <Box
+            bg="white"
+            borderRadius="22px"
+            boxShadow={{
+              base: '0 4px 24px rgba(0,0,0,0.07)',
+              lg: '0 8px 48px rgba(0,0,0,0.10), 0 1px 6px rgba(0,0,0,0.04)',
+            }}
+            border="1px solid"
+            borderColor="rgba(0,0,0,0.06)"
+            pt={{ base: 7, lg: 14 }}
+            pb={{ base: 7, lg: 9 }}
+            px={{ base: 6, lg: 9 }}
+          >
+            <VStack spacing={0} w="full" align="stretch">
+
+              {/* Header */}
+              <VStack spacing={1} align="center" mb={6}>
+                <Heading
+                  fontSize={{ base: '22px', lg: '26px' }}
+                  fontWeight="800"
+                  color="gray.900"
+                  letterSpacing="-0.5px"
+                  lineHeight="1.2"
+                >
+                  Welcome back
+                </Heading>
+                <Text fontSize="13.5px" color="gray.400" textAlign="center" fontWeight="400">
+                  Sign in to your account
+                </Text>
+              </VStack>
+
+              {/* Error */}
+              {error && (
+                <Alert status="error" borderRadius="10px" fontSize="sm" mb={4} py={2.5}>
+                  <AlertIcon boxSize={4} />
+                  <Text fontSize="sm">{error}</Text>
+                </Alert>
+              )}
+
+              {/* Form */}
+              <form onSubmit={handleSubmit}>
+                <VStack spacing={4} w="full" align="stretch">
+
+                  {/* Email */}
+                  <MotionBox
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.35, delay: 0.2 }}
+                  >
+                    <FormControl isRequired>
+                      <FormLabel
+                        fontSize="11.5px"
+                        fontWeight="700"
+                        color="gray.500"
+                        mb={1.5}
+                        textTransform="uppercase"
+                        letterSpacing="0.6px"
+                      >
+                        Email
+                      </FormLabel>
+                      <InputGroup>
+                        <InputLeftElement h="44px" pl={1} pointerEvents="none">
+                          <Icon as={MdEmail} boxSize="17px" color="gray.400" />
+                        </InputLeftElement>
+                        <Input
+                          type="email"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          placeholder="you@example.com"
+                          pl="38px"
+                          h="44px"
+                          bg="gray.50"
+                          border="1.5px solid"
+                          borderColor="gray.200"
+                          borderRadius="10px"
+                          fontSize="sm"
+                          color="gray.800"
+                          _placeholder={{ color: 'gray.400' }}
+                          _focus={{
+                            bg: 'white',
+                            borderColor: '#2D876D',
+                            boxShadow: '0 0 0 3px rgba(45,135,109,0.10)',
+                          }}
+                          _hover={{ borderColor: 'gray.300' }}
+                          transition="all 0.15s"
+                        />
+                      </InputGroup>
+                    </FormControl>
+                  </MotionBox>
+
+                  {/* Password */}
+                  <MotionBox
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.35, delay: 0.28 }}
+                  >
+                    <FormControl isRequired>
+                      <Flex justify="space-between" align="center" mb={1.5}>
+                        <FormLabel
+                          fontSize="11.5px"
+                          fontWeight="700"
+                          color="gray.500"
+                          mb={0}
+                          textTransform="uppercase"
+                          letterSpacing="0.6px"
+                        >
+                          Password
+                        </FormLabel>
+                        <Link
+                          as={RouterLink}
+                          to="/forgot-password"
+                          fontSize="12px"
+                          color="#2D876D"
+                          fontWeight="500"
+                          _hover={{ color: '#1f5c47', textDecoration: 'none' }}
+                        >
+                          Forgot password?
+                        </Link>
+                      </Flex>
+                      <InputGroup>
+                        <InputLeftElement h="44px" pl={1} pointerEvents="none">
+                          <Icon as={MdLock} boxSize="17px" color="gray.400" />
+                        </InputLeftElement>
+                        <Input
+                          type={showPassword ? 'text' : 'password'}
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          placeholder="••••••••"
+                          pl="38px"
+                          h="44px"
+                          bg="gray.50"
+                          border="1.5px solid"
+                          borderColor="gray.200"
+                          borderRadius="10px"
+                          fontSize="sm"
+                          color="gray.800"
+                          sx={{
+                            '&::-ms-reveal, &::-ms-clear': { display: 'none' },
+                            '&::-webkit-credentials-auto-fill-button': { display: 'none' },
+                          }}
+                          _placeholder={{ color: 'gray.400' }}
+                          _focus={{
+                            bg: 'white',
+                            borderColor: '#2D876D',
+                            boxShadow: '0 0 0 3px rgba(45,135,109,0.10)',
+                          }}
+                          _hover={{ borderColor: 'gray.300' }}
+                          transition="all 0.15s"
+                        />
+                        <InputRightElement h="44px" pr={1}>
+                          <IconButton
+                            aria-label={showPassword ? 'Hide password' : 'Show password'}
+                            icon={showPassword ? <ViewOffIcon /> : <ViewIcon />}
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setShowPassword(!showPassword)}
+                            color="gray.400"
+                            _hover={{ color: 'gray.600', bg: 'transparent' }}
+                          />
+                        </InputRightElement>
+                      </InputGroup>
+                    </FormControl>
+                  </MotionBox>
+
+                  {/* Remember me */}
+                  <MotionBox
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.3, delay: 0.34 }}
+                  >
+                    <Checkbox
+                      isChecked={rememberMe}
+                      onChange={(e) => setRememberMe(e.target.checked)}
+                      colorScheme="green"
+                      size="sm"
+                      mt={-1}
+                    >
+                      <Text fontSize="13px" color="gray.600">Remember me</Text>
+                    </Checkbox>
+                  </MotionBox>
+
+                  {/* Sign in button */}
+                  <MotionBox
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.35, delay: 0.40 }}
+                    mt={1}
+                  >
+                    <Button
+                      type="submit"
+                      w="full"
+                      h="46px"
+                      bg="#2D876D"
+                      color="white"
+                      fontWeight="700"
+                      fontSize="sm"
+                      letterSpacing="0.2px"
+                      borderRadius="10px"
+                      isLoading={loading}
+                      loadingText="Signing in..."
                       _hover={{
-                        borderColor: '#E8E8E8',
+                        bg: '#256b57',
+                        transform: 'translateY(-1px)',
+                        boxShadow: '0 10px 28px rgba(45,135,109,0.30)',
+                      }}
+                      _active={{
+                        transform: 'scale(0.98)',
+                        boxShadow: 'none',
+                        bg: '#1f5c47',
                       }}
                       transition="all 0.2s"
-                    />
-                  </FormControl>
-
-                  {/* Password Field */}
-                  <FormControl isRequired>
-                    <FormLabel fontSize={{ base: '13px', md: '14px' }} fontWeight="600" color="#333" mb="8px">Password</FormLabel>
-                    <InputGroup size={{ base: 'lg', md: 'lg' }}>
-                      <Input
-                        type={showPassword ? 'text' : 'password'}
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        placeholder="Enter your password"
-                        bg="#F5F5F5"
-                        borderColor="#E0E0E0"
-                        borderWidth="1px"
-                        height={{ base: '48px', md: '44px' }}
-                        fontSize={{ base: '15px', md: '16px' }}
-                        sx={{
-                          '&::-ms-reveal, &::-ms-clear': { display: 'none' },
-                          '&::-webkit-credentials-auto-fill-button': { display: 'none' },
-                        }}
-                        _focus={{
-                          borderColor: '#2D876D',
-                          boxShadow: '0 0 0 3px rgba(45, 135, 109, 0.1)',
-                          bg: 'white',
-                        }}
-                        _hover={{
-                          borderColor: '#E8E8E8',
-                        }}
-                        transition="all 0.2s"
-                      />
-                      <InputRightElement h={{ base: '48px', md: '44px' }} pr={2}>
-                        <IconButton
-                          aria-label={showPassword ? 'Hide password' : 'Show password'}
-                          icon={showPassword ? <ViewOffIcon /> : <ViewIcon />}
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setShowPassword(!showPassword)}
-                          color="#666"
-                          _hover={{ color: '#2D876D', bg: 'transparent' }}
-                        />
-                      </InputRightElement>
-                    </InputGroup>
-                  </FormControl>
-                  
-                  <Box w="full" textAlign="right" mt={-3}>
-                    <Link
-                      as={RouterLink}
-                      to="/forgot-password"
-                      fontSize="xs"
-                      color="#666"
-                      fontWeight="600"
-                      _hover={{ color: '#2D876D', textDecoration: 'underline' }}
                     >
-                      Forgot password?
-                    </Link>
-                  </Box>
+                      Sign in
+                    </Button>
+                  </MotionBox>
 
-                  {/* Sign In Button */}
-                  <Button
-                    type="submit"
-                    bg="#2D876D"
-                    color="white"
-                    size={{ base: 'lg', md: 'lg' }}
-                    w="full"
-                    isLoading={loading}
-                    loadingText="Signing in..."
-                    fontSize={{ base: '16px', md: '15px' }}
-                    fontWeight="600"
-                    height={{ base: '48px', md: '44px' }}
-                    borderRadius={{ base: '12px', md: '10px' }}
-                    mt={2}
-                    _hover={{
-                      bg: '#25704d',
-                      transform: 'translateY(-2px)',
-                      boxShadow: '0 8px 16px rgba(45, 135, 109, 0.3)',
-                    }}
-                    _active={{
-                      transform: 'translateY(0)',
-                    }}
-                    transition="all 0.3s ease"
-                  >
-                    Sign In
-                  </Button>
-
-                  {/* Divider */}
-                  <HStack w="full" spacing={3} my={2}>
-                    <Divider borderColor="#DDD" />
-                    <Text fontSize="xs" color="#888" whiteSpace="nowrap" fontWeight="500">
-                      Or
-                    </Text>
-                    <Divider borderColor="#DDD" />
-                  </HStack>
-
-              {/* Google Login Button */}
-                  <Button
-                    w="full"
-                    variant="outline"
-                    borderColor="#DDD"
-                    borderWidth="1px"
-                    leftIcon={<FaGoogle size={18} />}
-                    onClick={handleGoogleLogin}
-                    isLoading={googleLoading}
-                    loadingText="Signing in..."
-                    size={{ base: 'lg', md: 'lg' }}
-                    fontSize={{ base: '16px', md: '15px' }}
-                    fontWeight="600"
-                    color="#333"
-                    height={{ base: '48px', md: '44px' }}
-                    borderRadius={{ base: '12px', md: '10px' }}
-                    bg="white"
-                    _hover={{
-                      bg: '#F9F9F9',
-                      borderColor: '#BBB',
-                    }}
-                    _active={{
-                      bg: '#F0F0F0',
-                    }}
-                    transition="all 0.2s"
-                  >
-                    Continue with Google
-                  </Button>
-
-                  {/* Sign Up Link */}
-                  <Box textAlign="center" w="full" pt={2}>
-                    <Text 
-                      fontSize={{ base: '14px', md: '15px' }}
-                      color="#666"
-                    >
-                      Don't have an account?{' '}
-                      <Link 
-                        as={RouterLink} 
-                        to="/register" 
-                        color="#2D876D"
-                        fontWeight="600"
-                        _hover={{ textDecoration: 'underline', color: '#1f5c47' }}
-                      >
-                        Sign up
-                      </Link>
-                    </Text>
-                  </Box>
                 </VStack>
               </form>
-            </Box>
-          </VStack>
-        </Container>
-      </Flex>
+
+              {/* Divider */}
+              <HStack w="full" spacing={3} my={5}>
+                <Divider borderColor="gray.200" />
+                <Text
+                  fontSize="11px"
+                  color="gray.400"
+                  whiteSpace="nowrap"
+                  letterSpacing="0.6px"
+                  textTransform="uppercase"
+                  px={1}
+                >
+                  or
+                </Text>
+                <Divider borderColor="gray.200" />
+              </HStack>
+
+              {/* Google */}
+              <Button
+                w="full"
+                h="44px"
+                variant="outline"
+                border="1.5px solid"
+                borderColor="gray.200"
+                leftIcon={<FaGoogle size={14} />}
+                onClick={handleGoogleLogin}
+                isLoading={googleLoading}
+                loadingText="Signing in..."
+                fontWeight="600"
+                fontSize="sm"
+                color="gray.600"
+                borderRadius="10px"
+                bg="white"
+                _hover={{
+                  bg: 'gray.50',
+                  borderColor: '#2D876D',
+                  color: 'gray.800',
+                }}
+                _active={{ transform: 'scale(0.98)', bg: 'gray.100' }}
+                transition="all 0.15s"
+              >
+                Continue with Google
+              </Button>
+
+              {/* Sign up */}
+              <Center mt={5}>
+                <Text fontSize="13px" color="gray.500">
+                  Don't have an account?{' '}
+                  <Link
+                    as={RouterLink}
+                    to="/register"
+                    color="#2D876D"
+                    fontWeight="600"
+                    _hover={{ textDecoration: 'underline', color: '#1f5c47' }}
+                  >
+                    Sign up
+                  </Link>
+                </Text>
+              </Center>
+
+            </VStack>
+          </Box>
+        </MotionBox>
+      </Box>
     </Box>
   )
 }

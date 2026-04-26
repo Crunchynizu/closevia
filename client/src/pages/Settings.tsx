@@ -177,81 +177,15 @@ interface SettingsSheetProps {
   children: React.ReactNode
 }
 
-const SettingsSheet: React.FC<SettingsSheetProps> = ({ isMobile, sheetAnimation, dragControls, onClose, children }) => {
+const SettingsSheet: React.FC<SettingsSheetProps> = ({ children }) => {
   const pageBg = useColorModeValue('#FFFDF1', 'gray.900')
-  const pageBgRaw = useColorModeValue('#FFFDF1', '#171923')
-  const handleBg = useColorModeValue('gray.300', 'gray.600')
-
-  if (isMobile !== true) {
-    return (
-      <Box minH="100vh" bg={pageBg} pb={{ base: '100px', md: '80px' }}>
-        {children}
-      </Box>
-    )
-  }
 
   return (
-    <>
-      <Box
-        position="fixed"
-        top={0}
-        left={0}
-        right={0}
-        bottom={0}
-        bg="blackAlpha.600"
-        zIndex={1000}
-        onClick={onClose}
-      />
-      <motion.div
-        initial={{ y: '100%' }}
-        animate={sheetAnimation}
-        drag="y"
-        dragControls={dragControls}
-        dragListener={false}
-        dragConstraints={{ top: 0 }}
-        dragElastic={{ top: 0.05, bottom: 0.3 }}
-        onDragEnd={(_: any, info: any) => {
-          if (info.offset.y > 120 || info.velocity.y > 400) {
-            onClose()
-          } else {
-            sheetAnimation.start({ y: 0, transition: { type: 'spring', damping: 30, stiffness: 300 } })
-          }
-        }}
-        style={{
-          position: 'fixed',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          zIndex: 1001,
-          maxHeight: '92dvh',
-          borderTopLeftRadius: '24px',
-          borderTopRightRadius: '24px',
-          backgroundColor: pageBgRaw,
-          display: 'flex',
-          flexDirection: 'column' as const,
-          overflow: 'hidden',
-          boxShadow: '0 -8px 40px rgba(0,0,0,0.15)',
-          willChange: 'transform',
-        }}
-      >
-        <Box
-          pt={3}
-          pb={2}
-          display="flex"
-          justifyContent="center"
-          alignItems="center"
-          cursor="grab"
-          userSelect="none"
-          onPointerDown={(e: React.PointerEvent) => dragControls.start(e)}
-          flexShrink={0}
-        >
-          <Box w="40px" h="5px" borderRadius="full" bg={handleBg} />
-        </Box>
-        <Box overflowY="auto" flex={1} overflowX="hidden" pb={{ base: '100px', md: '80px' }}>
-          {children}
-        </Box>
-      </motion.div>
-    </>
+    <Box h="100dvh" w="100%" bg={pageBg} display="flex" flexDirection="column" overflow="hidden">
+      <Box flex={1} overflowY="auto" overflowX="hidden" pb={{ base: '100px', md: '80px' }}>
+        {children}
+      </Box>
+    </Box>
   )
 }
 
@@ -1283,19 +1217,9 @@ const SettingsPage: React.FC = () => {
     }
   }
 
-  const handleClose = useCallback(async () => {
-    await sheetAnimation.start({
-      y: '100%',
-      transition: { type: 'spring', damping: 30, stiffness: 300 },
-    })
+  const handleClose = useCallback(() => {
     navigate(-1)
-  }, [sheetAnimation, navigate])
-
-  useEffect(() => {
-    if (isMobile === true) {
-      sheetAnimation.start({ y: 0, transition: { type: 'spring', damping: 30, stiffness: 300 } })
-    }
-  }, [isMobile, sheetAnimation])
+  }, [navigate])
 
   return (
     <SettingsSheet isMobile={isMobile} sheetAnimation={sheetAnimation} dragControls={dragControls} onClose={handleClose}>
@@ -1308,7 +1232,7 @@ const SettingsPage: React.FC = () => {
             {/* Sticky Header Pill */}
             <Box
               position="sticky"
-              top={{ base: '40px', md: '64px' }}
+              top={0}
               zIndex={20}
               bg={cardBg}
               borderRadius="2xl"
@@ -1316,7 +1240,6 @@ const SettingsPage: React.FC = () => {
               border="1px"
               borderColor={borderColor}
               shadow="sm"
-              transform={{ base: 'translateY(-12px)', md: 'translateY(-20px)' }}
             >
               {/* Header Title & Actions */}
               <Flex justify="space-between" align="center" mb={4}>

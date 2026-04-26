@@ -9,23 +9,14 @@ import {
   Heading,
   Text,
   Center,
-  Image,
   Badge,
   Button,
   Skeleton,
-  Modal,
-  ModalOverlay,
-  ModalContent,
-  ModalCloseButton,
-  ModalBody,
-  useDisclosure,
 } from '@chakra-ui/react'
 import { useProducts } from '../contexts/ProductContext'
-import { getFirstImage, getImageUrl } from '../utils/imageUtils'
+import { getFirstImage } from '../utils/imageUtils'
 import { getProductUrl } from '../utils/productUtils'
-import { formatPHP } from '../utils/currency'
 import FloatingTab from '../components/FloatingTab'
-import ImageZoomModal from '../components/ImageZoomModal'
 import OptimizedImage from '../components/OptimizedImage'
 
 const ProductsList: React.FC = () => {
@@ -33,9 +24,6 @@ const ProductsList: React.FC = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const [initialized, setInitialized] = useState(false)
-  const [isZoomOpen, setIsZoomOpen] = useState(false)
-  const [zoomImageUrl, setZoomImageUrl] = useState('')
-  const [zoomAltText, setZoomAltText] = useState('')
   const sellerId = useMemo(() => {
     const params = new URLSearchParams(location.search)
     const idStr = params.get('seller_id')
@@ -54,13 +42,6 @@ const ProductsList: React.FC = () => {
     load()
     // Intentionally depend only on sellerId to avoid re-runs on provider renders
   }, [sellerId])
-
-  const handleImageZoom = (e: React.MouseEvent, url: string, alt: string) => {
-    e.stopPropagation()
-    setZoomImageUrl(url)
-    setZoomAltText(alt)
-    setIsZoomOpen(true)
-  }
 
   const renderCard = (p: any) => (
     <Box
@@ -81,8 +62,8 @@ const ProductsList: React.FC = () => {
         w="full"
         pt="100%"
         overflow="hidden"
-        cursor="zoom-in"
-        onClick={(e) => handleImageZoom(e, getFirstImage(p.image_urls), p.title)}
+        cursor="pointer"
+        role="group"
       >
         <OptimizedImage
           src={getFirstImage(p.image_urls)}
@@ -95,29 +76,41 @@ const ProductsList: React.FC = () => {
           objectFit="cover"
           loading="lazy"
           fallbackSrc="/no-image.svg"
-          cursor="zoom-in"
           width={300}
-          onClick={(e) => {
-            e.stopPropagation()
-            handleImageZoom(e, getFirstImage(p.image_urls), p.title)
-          }}
         />
+        <Box
+          position="absolute"
+          top={0}
+          left={0}
+          right={0}
+          bottom={0}
+          bg="blackAlpha.400"
+          opacity={0}
+          _groupHover={{ opacity: 1 }}
+          transition="opacity 0.2s"
+          display="flex"
+          alignItems="center"
+          justifyContent="center"
+        >
+          <Text fontSize="xs" color="white" fontWeight="semibold" px={2} textAlign="center">
+            View product details
+          </Text>
+        </Box>
         {p.premium && (
           <Badge position="absolute" top={2} right={2} colorScheme="yellow" variant="solid" borderRadius="full" px={2}>
             Boosted
           </Badge>
         )}
       </Box>
-      <Box p={4} display="flex" flexDirection="column" h={{ base: 180, md: 192 }} overflow="hidden">
-        <Heading size="sm" noOfLines={2} mb={2} color="gray.800" flexShrink={0} wordBreak="break-word">
+      <Box p={4} display="flex" flexDirection="column" h={{ base: 148, md: 160 }} overflow="hidden">
+        <Heading size="sm" noOfLines={2} mb={1.5} color="gray.800" flexShrink={0} wordBreak="break-word">
           {p.title}
         </Heading>
-        <Text color="gray.600" noOfLines={2} mb={2} fontSize="sm" flexShrink={0} wordBreak="break-word">
+        <Text color="gray.500" noOfLines={3} fontSize="xs" flexShrink={0} wordBreak="break-word">
           {p.description || 'No description available'}
         </Text>
-        {/* Wishlist Count Badge */}
         {p.wishlist_count > 0 && (
-          <HStack mb={2} spacing={1}>
+          <HStack mt="auto" spacing={1}>
             <Badge
               colorScheme="pink"
               variant="subtle"
@@ -126,16 +119,10 @@ const ProductsList: React.FC = () => {
               py={0.5}
               fontSize="xs"
             >
-              ❤️ {p.wishlist_count} {p.wishlist_count === 1 ? 'person wants' : 'people want'}
+              ❤️ {p.wishlist_count}
             </Badge>
           </HStack>
         )}
-        <HStack justify="space-between" align="center" mt="auto">
-          <Text fontSize="sm" color="green.600" fontWeight="medium">Open for Offers</Text>
-          <Badge colorScheme={p.status === 'available' ? 'green' : p.status === 'traded' ? 'blue' : 'red'}>
-            {p.status}
-          </Badge>
-        </HStack>
       </Box>
     </Box>
   )
@@ -212,13 +199,6 @@ const ProductsList: React.FC = () => {
       </Container>
 
       <FloatingTab />
-
-      <ImageZoomModal
-        isOpen={isZoomOpen}
-        onClose={() => setIsZoomOpen(false)}
-        imageUrl={zoomImageUrl}
-        altText={zoomAltText}
-      />
     </Box>
   )
 }

@@ -1890,7 +1890,7 @@ func (h *ProductHandler) GetProduct(c *fiber.Ctx) error {
 	productID, parseErr := strconv.Atoi(idOrSlug)
 	if parseErr == nil {
 		// It's a numeric ID
-		err = h.db.QueryRow(`
+		err = h.db.QueryRow(fmt.Sprintf(`
 			SELECT p.id, p.slug, p.title, p.description, p.price, p.image_urls, p.video_url, p.seller_id,
 			       p.premium, p.status, p.allow_buying, p.barter_only, p.location, p.`+"condition"+`,
 			       p.suggested_value, p.category, p.estimated_value_min, p.estimated_value_max, COALESCE(p.show_estimated_value, TRUE), p.`+"`value`"+`, p.wants, p.wanted_categories,
@@ -1911,11 +1911,7 @@ func (h *ProductHandler) GetProduct(c *fiber.Ctx) error {
 			&product.CreatedAt, &product.UpdatedAt,
 			&sellerNameNull, &sellerProfilePictureNull, &product.WantCount,
 			&availabilitySlotsNull, &availabilityTypeNull)
-			&sellerNameNull, &sellerProfilePictureNull, &product.WantCount, &product.IsSaved)
 	} else {
-		err = h.db.QueryRow(`
-			SELECT p.id, p.slug, p.title, p.description, p.price, p.image_urls, p.video_url, p.seller_id,
-			       p.premium, p.status, p.allow_buying, p.barter_only, p.location, p.`+"condition"+`,
 		err = h.db.QueryRow(fmt.Sprintf(`
 			SELECT p.id, p.slug, p.title, p.description, p.price, p.image_urls, p.video_url, p.seller_id, 
 			       p.premium, p.status, p.allow_buying, p.barter_only, p.location, p.`+"condition"+`, 

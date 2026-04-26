@@ -54,7 +54,7 @@ import {
   Checkbox,
   Skeleton,
 } from '@chakra-ui/react'
-import { AddIcon, EditIcon, DeleteIcon, SettingsIcon, WarningIcon, ChevronLeftIcon, ChevronRightIcon, CheckIcon, CloseIcon, SearchIcon, ViewIcon, StarIcon } from '@chakra-ui/icons'
+import { AddIcon, EditIcon, DeleteIcon, SettingsIcon, WarningIcon, ChevronLeftIcon, ChevronRightIcon, CheckIcon, CloseIcon, SearchIcon, ViewIcon, StarIcon, ChevronDownIcon } from '@chakra-ui/icons'
 import { useAuth } from '../contexts/AuthContext'
 import { useProducts } from '../contexts/ProductContext'
 import { useRealtime } from '../contexts/RealtimeContext'
@@ -63,7 +63,7 @@ import FloatingTab from '../components/FloatingTab'
 import { api } from '../services/api'
 import { getStoredToken } from '../utils/authStorage'
 import { FaCrown, FaHandshake, FaTimes, FaCheckCircle, FaClock, FaHistory, FaShoppingBag, FaExchangeAlt, FaComments, FaMapMarkerAlt, FaTruck, FaMoneyBillWave, FaArrowUp, FaRegLightbulb, FaRocket, FaCalendarAlt } from 'react-icons/fa'
-import { FiShoppingBag, FiRefreshCw, FiMessageCircle, FiGrid, FiList, FiSend, FiInbox, FiArchive, FiSliders } from 'react-icons/fi'
+import { FiShoppingBag, FiRefreshCw, FiMessageCircle, FiGrid, FiList, FiSend, FiInbox, FiArchive, FiSliders, FiMoreVertical } from 'react-icons/fi'
 import { formatPHP } from '../utils/currency'
 import { getFirstImage, getImageUrl } from '../utils/imageUtils'
 import { PRODUCT_CATEGORIES } from '../utils/categories'
@@ -111,7 +111,7 @@ const Dashboard: React.FC = () => {
   const shouldLoadOffersTab = activeTab === 1
   const shouldLoadSentOffers = shouldLoadOffersTab && offersSubTab === 1
   const shouldLoadReceivedOffers = shouldLoadOffersTab && offersSubTab === 0
-  const shouldLoadOngoingTrades = shouldLoadOffersTab && offersSubTab === 2
+  const shouldLoadOngoingTrades = true
   const shouldLoadArchivedTrades = shouldLoadOffersTab && offersSubTab === 3
   const shouldLoadMultiWay = activeTab === 2 || activeTab === 3 || shouldLoadOngoingTrades
   const shouldLoadTradeHistory = activeTab === 4
@@ -202,6 +202,8 @@ const Dashboard: React.FC = () => {
   const [productSort, setProductSort] = useState<'newest' | 'oldest'>('newest')
   const [productViewMode, setProductViewMode] = useState<'grid' | 'list'>('list')
   const [selectedProductIds, setSelectedProductIds] = useState<Set<number>>(new Set())
+  const [isProductSelectMode, setIsProductSelectMode] = useState(false)
+  const [tipDismissed, setTipDismissed] = useState(() => localStorage.getItem('clovia_product_tip_dismissed') === '1')
 
   // Unified search - searches across all content
   const [unifiedSearch, setUnifiedSearch] = useState('')
@@ -2482,18 +2484,45 @@ const Dashboard: React.FC = () => {
                 </HStack>
               </Heading>
               <HStack spacing={2} flexShrink={0}>
-
-
                 {shouldShowActions && (
-                  <IconButton
-                    as={RouterLink}
-                    to={`/edit-product/${product.id}`}
-                    aria-label="Edit"
-                    icon={<EditIcon />}
-                    variant="ghost"
-                    colorScheme="brand"
-                    size="sm"
-                  />
+                  <>
+                    {/* Mobile: ⋮ menu with Edit + Delete */}
+                    <Menu placement="bottom-end">
+                      <MenuButton
+                        as={IconButton}
+                        aria-label="More actions"
+                        icon={<Icon as={FiMoreVertical} />}
+                        variant="ghost"
+                        size="sm"
+                        colorScheme="gray"
+                        display={{ base: 'flex', md: 'none' }}
+                      />
+                      <MenuList fontSize="sm" minW="140px">
+                        <MenuItem icon={<EditIcon />} as={RouterLink} to={`/edit-product/${product.id}`}>
+                          Edit
+                        </MenuItem>
+                        <MenuItem
+                          icon={<DeleteIcon color="red.400" />}
+                          color="red.500"
+                          isDisabled={isLocked}
+                          onClick={() => handleDeleteProductClick(product)}
+                        >
+                          Delete
+                        </MenuItem>
+                      </MenuList>
+                    </Menu>
+                    {/* Desktop: plain edit icon */}
+                    <IconButton
+                      as={RouterLink}
+                      to={`/edit-product/${product.id}`}
+                      aria-label="Edit"
+                      icon={<EditIcon />}
+                      variant="ghost"
+                      colorScheme="brand"
+                      size="sm"
+                      display={{ base: 'none', md: 'flex' }}
+                    />
+                  </>
                 )}
               </HStack>
             </Flex>
@@ -2557,15 +2586,15 @@ const Dashboard: React.FC = () => {
               </HStack>
               </VStack>
           </CardBody>
-          {shouldShowActions && (
+          {shouldShowActions && (isAvailable || !isLocked) && (
             <CardFooter pt={0}>
               <HStack spacing={2} w="full">
                 {isAvailable && (
                   <Button
                     size="sm"
-                    colorScheme="yellow"
-                    variant="outline"
-                    leftIcon={<Icon as={FaRegLightbulb} boxSize={3} />}
+                    colorScheme="brand"
+                    variant="solid"
+                    leftIcon={<Icon as={FaHandshake} boxSize={3} />}
                     onClick={() => handleFindTradesClick(product)}
                     fontSize="sm"
                     flex={1}
@@ -2576,12 +2605,14 @@ const Dashboard: React.FC = () => {
                     Find Trades
                   </Button>
                 )}
+                {/* Desktop-only Delete button — accessible via ⋮ menu on mobile */}
                 <Tooltip
                   label={isLocked ? 'Cannot delete locked products' : ''}
                   isDisabled={!isLocked}
                   hasArrow
                 >
                   <Button
+                    display={{ base: 'none', md: 'flex' }}
                     leftIcon={<DeleteIcon />}
                     variant="outline"
                     colorScheme="red"
@@ -2611,7 +2642,8 @@ const Dashboard: React.FC = () => {
     onToggleSelect,
     onDelete,
     offersCount,
-
+    isSelectMode = false,
+    onEnterSelectMode,
   }: {
     product: Product
     showActions: boolean
@@ -2619,13 +2651,36 @@ const Dashboard: React.FC = () => {
     onToggleSelect: () => void
     onDelete: () => void
     offersCount: number
-
+    isSelectMode?: boolean
+    onEnterSelectMode?: () => void
   }) => {
     const normalizedStatus = String(product.status || '').toLowerCase().trim()
     const isAvailable = normalizedStatus === 'available'
     const isLocked = normalizedStatus === 'locked'
     const statusColor = isAvailable ? 'green' : isLocked ? 'orange' : normalizedStatus === 'sold' ? 'red' : 'blue'
-    
+
+    const [isPressing, setIsPressing] = React.useState(false)
+    const longPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+
+    const startLongPress = React.useCallback((e: React.PointerEvent) => {
+      if (e.pointerType === 'mouse') return
+      setIsPressing(true)
+      longPressTimerRef.current = setTimeout(() => {
+        setIsPressing(false)
+        navigator.vibrate?.(50)
+        onEnterSelectMode?.()
+        onToggleSelect()
+      }, 500)
+    }, [onEnterSelectMode, onToggleSelect])
+
+    const cancelLongPress = React.useCallback(() => {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current)
+        longPressTimerRef.current = null
+      }
+      setIsPressing(false)
+    }, [])
+
     const boostRemaining = React.useMemo(() => {
       if (!product.boosted_at) return null;
       const boostedAtRaw = String(product.boosted_at)
@@ -2635,7 +2690,7 @@ const Dashboard: React.FC = () => {
       const expiresAt = boostedTime + 3 * 60 * 60 * 1000
       const remaining = expiresAt - new Date().getTime()
       if (remaining <= 0) return null
-      
+
       const hours = Math.floor(remaining / (60 * 60 * 1000))
       const minutes = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000))
       return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`
@@ -2647,7 +2702,16 @@ const Dashboard: React.FC = () => {
         py={{ base: 2.5, md: 3 }}
         borderBottom="1px"
         borderColor={borderColor}
-        _hover={{ bg: 'gray.50' }}
+        bg={isPressing ? 'brand.50' : (isSelectMode && isSelected ? 'brand.50' : undefined)}
+        _hover={{ bg: isSelectMode && isSelected ? 'brand.50' : 'gray.50' }}
+        onClick={isSelectMode ? onToggleSelect : undefined}
+        cursor={isSelectMode ? 'pointer' : undefined}
+        userSelect="none"
+        transition="background 0.15s"
+        onPointerDown={startLongPress}
+        onPointerUp={cancelLongPress}
+        onPointerLeave={cancelLongPress}
+        onPointerCancel={cancelLongPress}
       >
         <Flex
           align="center"
@@ -2656,9 +2720,12 @@ const Dashboard: React.FC = () => {
         >
           {showActions && (isAvailable || isLocked) && (
             <Checkbox
+              display={isSelectMode ? { base: 'flex', md: 'flex' } : { base: 'none', md: 'flex' }}
               isChecked={isSelected}
               onChange={onToggleSelect}
+              onClick={(e) => e.stopPropagation()}
               flexShrink={0}
+              colorScheme="brand"
               aria-label={`Select ${product.title}`}
             />
           )}
@@ -2706,20 +2773,22 @@ const Dashboard: React.FC = () => {
               </Badge>
             )}
           </Box>
-          <VStack align="start" spacing={{ base: 1.5, md: 0 }} flex={1} minW={0}>
-            <Flex
-              w="full"
-              align={{ base: 'flex-start', sm: 'center' }}
-              gap={{ base: 1, sm: 3 }}
-              direction={{ base: 'column', sm: 'row' }}
-              minW={0}
-            >
-              <Text fontWeight="semibold" noOfLines={2} fontSize={{ base: 'sm', md: 'md' }} lineHeight="1.25" minW={0}>
+          <VStack align="start" spacing={1.5} flex={1} minW={0}>
+            {/* Title + offers count: one horizontal row, title truncates */}
+            <Flex w="full" align="center" justify="space-between" gap={2} minW={0}>
+              <Text
+                fontWeight="semibold"
+                noOfLines={1}
+                fontSize={{ base: 'sm', md: 'md' }}
+                lineHeight="1.3"
+                flex={1}
+                minW={0}
+              >
                 {product.title}
               </Text>
-              <HStack spacing={1} fontSize="xs" color="gray.500" flexShrink={0} lineHeight="1">
+              <HStack spacing={1} fontSize="xs" color="gray.400" flexShrink={0}>
                 <Icon as={FaHandshake} boxSize={3} />
-                <Text>{offersCount} offers</Text>
+                <Text whiteSpace="nowrap">{offersCount} offers</Text>
               </HStack>
             </Flex>
             {!isAvailable && (
@@ -2729,54 +2798,67 @@ const Dashboard: React.FC = () => {
                 </Badge>
               </HStack>
             )}
-            {showActions && (
-              <HStack spacing={1.5} display={{ base: 'flex', md: 'none' }} flexWrap="wrap" align="center">
+            {/* Mobile action row — hidden when in selection mode */}
+            {showActions && !isSelectMode && (
+              <Flex w="full" gap={1.5} display={{ base: 'flex', md: 'none' }} align="center">
                 {isAvailable && (
                   <Button
                     size="sm"
                     h="32px"
-                    colorScheme="yellow"
-                    variant="outline"
-                    leftIcon={<Icon as={FaRegLightbulb} boxSize={3} />}
-                    onClick={() => handleFindTradesClick(product)}
+                    colorScheme="brand"
+                    variant="solid"
+                    leftIcon={<Icon as={FaHandshake} boxSize={3} />}
+                    onClick={(e) => { e.stopPropagation(); handleFindTradesClick(product) }}
                     fontSize="xs"
-                    px={2.5}
-                    whiteSpace="nowrap"
+                    flex={1}
+                    borderRadius="lg"
+                    _hover={{ opacity: 0.88 }}
+                    transition="all 0.2s"
                   >
                     Find Trades
                   </Button>
                 )}
-                <Button
-                  as={RouterLink}
-                  to={`/edit-product/${product.id}`}
-                  leftIcon={<EditIcon />}
-                  variant="outline"
-                  colorScheme="brand"
-                  size="sm"
-                  h="32px"
-                  fontSize="xs"
-                  px={2.5}
-                >
-                  Edit
-                </Button>
-                <Tooltip
-                  label={product.status === 'locked' ? 'Cannot delete locked products' : ''}
-                  isDisabled={product.status !== 'locked'}
-                  hasArrow
-                >
-                  <IconButton
-                    aria-label="Delete"
-                    icon={<DeleteIcon />}
+                <Menu placement="bottom-end">
+                  <MenuButton
+                    as={IconButton}
+                    aria-label="More actions"
+                    icon={<Icon as={FiMoreVertical} boxSize={4} />}
                     variant="outline"
-                    colorScheme="red"
                     size="sm"
                     h="32px"
+                    w="32px"
                     minW="32px"
-                    isDisabled={product.status === 'locked'}
-                    onClick={onDelete}
+                    borderRadius="lg"
+                    color="gray.500"
+                    borderColor="gray.200"
+                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                    _hover={{ bg: 'gray.50' }}
                   />
-                </Tooltip>
-              </HStack>
+                  <MenuList fontSize="sm" minW="150px">
+                    <MenuItem icon={<EditIcon />} as={RouterLink} to={`/edit-product/${product.id}`}>
+                      Edit
+                    </MenuItem>
+                    <MenuItem
+                      icon={<Icon as={FiMoreVertical} boxSize={3} color="brand.500" />}
+                      onClick={(e: React.MouseEvent) => {
+                        e.stopPropagation()
+                        onEnterSelectMode?.()
+                      }}
+                    >
+                      Select items
+                    </MenuItem>
+                    <MenuDivider />
+                    <MenuItem
+                      icon={<DeleteIcon color="red.400" />}
+                      color="red.500"
+                      isDisabled={isLocked}
+                      onClick={(e: React.MouseEvent) => { e.stopPropagation(); onDelete() }}
+                    >
+                      Delete
+                    </MenuItem>
+                  </MenuList>
+                </Menu>
+              </Flex>
             )}
           </VStack>
           {/* Desktop: show actions inline */}
@@ -2787,9 +2869,9 @@ const Dashboard: React.FC = () => {
                 {isAvailable && (
                   <Button
                     size="sm"
-                    colorScheme="yellow"
-                    variant="outline"
-                    leftIcon={<Icon as={FaRegLightbulb} boxSize={3} />}
+                    colorScheme="brand"
+                    variant="solid"
+                    leftIcon={<Icon as={FaHandshake} boxSize={3} />}
                     onClick={() => handleFindTradesClick(product)}
                     fontSize="sm"
                     px={3}
@@ -3124,7 +3206,7 @@ const Dashboard: React.FC = () => {
           role="article"
           bg="white"
         >
-          <Box position="relative" w="full" h={{ base: '120px', md: '140px' }} display="flex" gap={1} p={2} bg="gray.50" flexWrap="nowrap" alignContent="flex-start" overflow="hidden">
+          <Box position="relative" w="full" h={{ base: '96px', md: '130px' }} display="flex" gap={1} p={2} bg="gray.50" flexWrap="nowrap" alignContent="flex-start" overflow="hidden">
             {/* Requested seller items: primary target plus optional multi-product bundle items */}
             <Box flex={1} display="flex" gap={1} minW="0" position="relative">
               {[{ product_id: trade.target_product_id, product_title: trade.product_title, product_image_url: trade.product_image_url }, ...requestedItems].slice(0, 3).map((item: any, idx: number) => (
@@ -3196,56 +3278,52 @@ const Dashboard: React.FC = () => {
             </Box>
           </Box>
 
-          <CardHeader pb={3} pt={4} flex={1}>
-            <VStack spacing={3} align="stretch">
-              <Flex justify="space-between" align="start">
-                <HStack spacing={1.5} flexWrap="wrap">
-                  <Badge colorScheme={tradeKind === 'Buyout' ? 'orange' : 'brand'} variant="solid" fontSize="10px" px={3} py={1} borderRadius="md" fontWeight="700" letterSpacing="wider" textTransform="uppercase">
-                    {tradeKind}
-                  </Badge>
-                  <Badge colorScheme={statusBadge.color} bg={`${statusBadge.color}.100`} color={`${statusBadge.color}.700`} variant="solid" fontSize="10px" px={3} py={1} borderRadius="md" fontWeight="700" letterSpacing="wider" textTransform="uppercase">
-                    {statusBadge.text}
-                  </Badge>
-                </HStack>
-              </Flex>
+          <CardHeader pb={{ base: 2, md: 3 }} pt={{ base: 3, md: 4 }} px={{ base: 3, md: 5 }} flex={1}>
+            <VStack spacing={{ base: 2, md: 3 }} align="stretch">
+              <HStack spacing={1.5} flexWrap="wrap">
+                <Badge colorScheme={tradeKind === 'Buyout' ? 'orange' : 'brand'} variant="solid" fontSize="10px" px={2} py={0.5} borderRadius="md" fontWeight="700" letterSpacing="wider" textTransform="uppercase">
+                  {tradeKind}
+                </Badge>
+                <Badge colorScheme={statusBadge.color} bg={`${statusBadge.color}.100`} color={`${statusBadge.color}.700`} variant="solid" fontSize="10px" px={2} py={0.5} borderRadius="md" fontWeight="700" letterSpacing="wider" textTransform="uppercase">
+                  {statusBadge.text}
+                </Badge>
+              </HStack>
 
-              <Box>
-                <Heading fontSize="md" fontWeight="700" color="gray.800" noOfLines={2} lineHeight="1.3" letterSpacing="tight">
-                  {getRequestedBundleTitle(trade)}
-                </Heading>
-              </Box>
+              <Heading fontSize={{ base: 'sm', md: 'md' }} fontWeight="700" color="gray.800" noOfLines={2} lineHeight="1.3" letterSpacing="tight">
+                {getRequestedBundleTitle(trade)}
+              </Heading>
 
-              <HStack spacing={2} mt={1}>
+              <HStack spacing={2}>
                 <Avatar
                   name={userName}
-                  size="sm"
+                  size="xs"
                   bg={isIncoming ? 'green.500' : 'blue.500'}
                   color="white"
                 />
                 <Box flex={1} minW={0}>
-                  <Text fontSize="sm" fontWeight="600" color="gray.800" noOfLines={1} letterSpacing="tight">
+                  <Text fontSize="xs" fontWeight="600" color="gray.700" noOfLines={1}>
                     {userName}
                   </Text>
-                  <Text fontSize="10px" fontWeight="500" color="gray.400" textTransform="uppercase" letterSpacing="wider">
-                    Accepted {timeAgo}
+                  <Text fontSize="10px" color="gray.400" textTransform="uppercase" letterSpacing="wider">
+                    {timeAgo}
                   </Text>
                 </Box>
               </HStack>
             </VStack>
           </CardHeader>
 
-          <CardFooter pt={0} pb={4} px={4}>
+          <CardFooter pt={0} pb={{ base: 3, md: 4 }} px={{ base: 3, md: 4 }} borderTopWidth="1px" borderTopColor="gray.100">
             <Button
-              size="md"
+              size={{ base: 'sm', md: 'md' }}
               borderRadius="2xl"
               fontWeight="600"
               colorScheme="brand"
               w="full"
               onClick={() => onView(trade)}
-              leftIcon={<Icon as={ViewIcon} />}
+              leftIcon={<Icon as={ViewIcon} boxSize={{ base: 3, md: 4 }} />}
               _hover={{ transform: 'translateY(-2px)' }}
               transition="all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1)"
-              shadow="md"
+              shadow="sm"
             >
               View Trade
             </Button>
@@ -4406,18 +4484,30 @@ const Dashboard: React.FC = () => {
                 {/* Products Tab */}
                 <TabPanel px={{ base: 2, md: 4 }} py={{ base: 3, md: 4 }}>
                   <VStack spacing={6} align="stretch">
-                    <Box p={3} bg="blue.50" border="1px solid" borderColor="blue.200" borderRadius="lg">
-                      <VStack align="start" spacing={1}>
-                        <Text fontSize="xs" color="blue.800">
-                          Tip: Products shown here are available products. Use "Find Trades" to connect your product to other products.
-                        </Text>
-                        {!user?.is_premium && (
-                          <Text fontSize="xs" color="blue.900" fontWeight="semibold">
-                            Upgrade to Premium to be able to boost your products.
+                    {!tipDismissed && (
+                      <Box p={2.5} bg="blue.50" border="1px solid" borderColor="blue.200" borderRadius="lg">
+                        <Flex justify="space-between" align="flex-start" gap={2}>
+                          <Text fontSize="xs" color="blue.800" lineHeight="1.5">
+                            Tap <strong>Find Trades</strong> to connect your product with others.
+                            {!user?.is_premium && (
+                              <Box as="span" color="blue.900" fontWeight="semibold"> Upgrade to Premium to boost your products.</Box>
+                            )}
                           </Text>
-                        )}
-                      </VStack>
-                    </Box>
+                          <IconButton
+                            aria-label="Dismiss tip"
+                            icon={<CloseIcon boxSize={2} />}
+                            size="xs"
+                            variant="ghost"
+                            colorScheme="blue"
+                            flexShrink={0}
+                            onClick={() => {
+                              setTipDismissed(true)
+                              localStorage.setItem('clovia_product_tip_dismissed', '1')
+                            }}
+                          />
+                        </Flex>
+                      </Box>
+                    )}
 
 
                     {/* Products Grid or List - Apply Sort */}
@@ -4480,10 +4570,58 @@ const Dashboard: React.FC = () => {
                     ) : productViewMode === 'list' ? (
                       <>
                         <Box border="1px" borderColor={borderColor} borderRadius="lg" overflow="hidden" bg={cardBg}>
-                          {/* Select All header row - only in list view */}
+                          {/* Mobile: selection mode bar (only when active) */}
+                          {isProductSelectMode && (
+                            <Flex
+                              display={{ base: 'flex', md: 'none' }}
+                              align="center"
+                              justify="space-between"
+                              px={3}
+                              py={2.5}
+                              bg="brand.500"
+                              color="white"
+                              borderBottom="1px"
+                              borderColor="brand.600"
+                            >
+                              <HStack spacing={3}>
+                                <Text fontSize="sm" fontWeight="semibold">
+                                  {selectedProductIds.size} selected
+                                </Text>
+                                <Button
+                                  size="xs"
+                                  variant="ghost"
+                                  color="white"
+                                  fontWeight="medium"
+                                  px={2}
+                                  h="28px"
+                                  _hover={{ bg: 'whiteAlpha.200' }}
+                                  onClick={toggleSelectAllProducts}
+                                >
+                                  Select all
+                                </Button>
+                              </HStack>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                color="white"
+                                fontWeight="semibold"
+                                px={2}
+                                h="28px"
+                                _hover={{ bg: 'whiteAlpha.200' }}
+                                onClick={() => {
+                                  setSelectedProductIds(new Set())
+                                  setIsProductSelectMode(false)
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                            </Flex>
+                          )}
+                          {/* Desktop: always-visible select-all row */}
                           <Flex
+                            display={{ base: 'none', md: 'flex' }}
                             align="center"
-                            gap={{ base: 2, md: 4 }}
+                            gap={4}
                             p={3}
                             borderBottom="1px"
                             borderColor={borderColor}
@@ -4496,6 +4634,7 @@ const Dashboard: React.FC = () => {
                                 !currentPageSelectableProducts.every(p => selectedProductIds.has(p.id))
                               }
                               onChange={toggleSelectAllProducts}
+                              colorScheme="brand"
                               flexShrink={0}
                             />
                             <Text fontSize="sm" color="gray.600" fontWeight="medium">
@@ -4511,6 +4650,8 @@ const Dashboard: React.FC = () => {
                               onToggleSelect={() => toggleProductSelection(product.id)}
                               onDelete={() => handleDeleteProductClick(product)}
                               offersCount={getProductOffersCount(product.id)}
+                              isSelectMode={isProductSelectMode}
+                              onEnterSelectMode={() => setIsProductSelectMode(true)}
                             />
                           ))}
                         </Box>
@@ -4554,11 +4695,13 @@ const Dashboard: React.FC = () => {
                       isLazy
                       lazyBehavior="keepMounted"
                     >
+                      <Flex align="center" gap={1.5}>
                       <TabList
                         flexWrap="nowrap"
-                        overflowX={{ base: 'auto', md: 'visible' }}
-                        justifyContent={{ base: 'flex-start', md: 'flex-start' }}
-                        w="100%"
+                        overflowX="auto"
+                        justifyContent="flex-start"
+                        flex={1}
+                        minW={0}
                         sx={{
                           '&::-webkit-scrollbar': { display: 'none' },
                           scrollbarWidth: 'none',
@@ -4656,26 +4799,36 @@ const Dashboard: React.FC = () => {
                           )}
                         </Tab>
                       </TabList>
-
-                      <HStack spacing={1.5} flexWrap="wrap" pt={3}>
-                        {(['all', 'trade', 'buyout'] as const).map((type) => (
-                          <Button
-                            key={type}
+                      {/* Filter dropdown — inline with tabs, always visible */}
+                      <Box flexShrink={0}>
+                        <Menu placement="bottom-end">
+                          <MenuButton
+                            as={Button}
                             size="xs"
                             h="30px"
                             px={3}
                             borderRadius="full"
-                            variant={offersTypeFilter === type ? 'solid' : 'outline'}
-                            colorScheme={type === 'buyout' ? 'orange' : 'brand'}
-                            onClick={() => {
-                              setOffersTypeFilter(type)
-                              setOffersPage(1)
-                            }}
+                            variant={offersTypeFilter === 'all' ? 'outline' : 'solid'}
+                            colorScheme={offersTypeFilter === 'buyout' ? 'orange' : 'brand'}
+                            rightIcon={<ChevronDownIcon />}
                           >
-                            {type === 'all' ? 'All' : type === 'trade' ? 'Trade' : 'Buyout'}
-                          </Button>
-                        ))}
-                      </HStack>
+                            {offersTypeFilter === 'all' ? 'All' : offersTypeFilter === 'trade' ? 'Trade' : 'Buyout'}
+                          </MenuButton>
+                          <MenuList fontSize="sm" minW="130px">
+                            {(['all', 'trade', 'buyout'] as const).map((type) => (
+                              <MenuItem
+                                key={type}
+                                fontWeight={offersTypeFilter === type ? 'semibold' : 'normal'}
+                                color={offersTypeFilter === type ? (type === 'buyout' ? 'orange.600' : 'brand.600') : 'inherit'}
+                                onClick={() => { setOffersTypeFilter(type); setOffersPage(1) }}
+                              >
+                                {type === 'all' ? 'All' : type === 'trade' ? 'Trade' : 'Buyout'}
+                              </MenuItem>
+                            ))}
+                          </MenuList>
+                        </Menu>
+                      </Box>
+                      </Flex>
 
                       <TabPanels>
                         {/* Inbox */}
@@ -5116,98 +5269,91 @@ const Dashboard: React.FC = () => {
                                       h="100%"
                                       display="flex"
                                       flexDirection="column"
-                                      _hover={{
-                                        shadow: 'lg',
-                                        transform: 'translateY(-4px)',
-                                        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                                        borderColor: 'purple.400',
-                                      }}
-                                      transition="all 0.3s cubic-bezier(0.4, 0, 0.2, 1)"
+                                      borderRadius="2xl"
+                                      overflow="hidden"
+                                      borderWidth="0"
                                       borderLeftWidth="4px"
                                       borderLeftColor="purple.400"
+                                      shadow="sm"
+                                      _hover={{
+                                        shadow: 'md',
+                                        transform: 'translateY(-3px)',
+                                        transition: 'all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)',
+                                      }}
+                                      transition="all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)"
                                       role="article"
+                                      bg="white"
                                     >
-                                      <Box position="relative" w="full" h={{ base: '120px', md: '140px' }} display="flex" gap={1} p={1} bg="gray.50" flexWrap="nowrap" alignContent="flex-start" overflow="hidden">
-                                        {/* Your Item */}
+                                      {/* Image area */}
+                                      <Box position="relative" w="full" h={{ base: '96px', md: '130px' }} display="flex" gap={1} p={2} bg="gray.50" flexWrap="nowrap" overflow="hidden">
                                         <Box flex={1} position="relative" borderRadius="xl" overflow="hidden" shadow="sm" minW="0">
                                           {yourProductImage ? (
-                                            <Image src={yourProductImage} alt="Your Item" objectFit="cover" w="100%" h="100%" fallback={
-                                              <Box w="100%" h="100%" bg="gray.200" />
-                                            } />
+                                            <Image src={yourProductImage} alt="Your Item" objectFit="cover" w="100%" h="100%" />
                                           ) : (
-                                            <Box w="100%" h="100%" bg="gray.200" display="flex" alignItems="center" justifyContent="center">
-                                              <Text fontSize="xs" color="gray.600" fontWeight="semibold">Your Item</Text>
+                                            <Box w="100%" h="100%" bg="gray.100" display="flex" alignItems="center" justifyContent="center">
+                                              <Icon as={FaHandshake} color="gray.300" boxSize={5} />
                                             </Box>
                                           )}
                                           <Badge position="absolute" top={1} left={1} bg="blue.500" color="white" fontSize="9px" fontWeight="700" px={2} py={0.5} borderRadius="md" shadow="sm">Your Item</Badge>
                                         </Box>
-
-                                        {/* Their Items */}
                                         <Box flex={1} position="relative" borderRadius="xl" overflow="hidden" shadow="sm" minW="0">
                                           {incomingProductImage ? (
-                                            <Image src={incomingProductImage} alt="Their Item" objectFit="cover" w="100%" h="100%" fallback={
-                                              <Box w="100%" h="100%" bg="gray.200" />
-                                            }/>
+                                            <Image src={incomingProductImage} alt="Their Item" objectFit="cover" w="100%" h="100%" />
                                           ) : (
-                                            <Box w="100%" h="100%" bg="gray.200" display="flex" alignItems="center" justifyContent="center">
-                                              <Text fontSize="xs" color="gray.600" fontWeight="semibold">{loopLabel}</Text>
+                                            <Box w="100%" h="100%" bg="gray.100" display="flex" alignItems="center" justifyContent="center">
+                                              <Icon as={FaHandshake} color="gray.300" boxSize={5} />
                                             </Box>
                                           )}
-                                          <Badge position="absolute" top={1} right={1} bg={loopLabel === 'Multi-Way' ? 'brand.500' : 'purple.500'} color="white" fontSize="9px" fontWeight="700" px={2} py={0.5} borderRadius="md" shadow="sm">{loopLabel}</Badge>
+                                          <Badge position="absolute" top={1} right={1} bg="purple.500" color="white" fontSize="9px" fontWeight="700" px={2} py={0.5} borderRadius="md" shadow="sm">{loopLabel}</Badge>
                                         </Box>
                                       </Box>
 
-                                      <CardHeader pb={3} pt={4} flex={1}>
-                                        <VStack spacing={3} align="stretch">
-                                          <Flex justify="space-between" align="start">
-                                            <HStack spacing={2}>
-                                              <Badge colorScheme="purple" bg="purple.100" color="purple.700" variant="solid" fontSize="10px" px={3} py={1} borderRadius="md" fontWeight="700" letterSpacing="wider" textTransform="uppercase">
-                                                Active Loop
-                                              </Badge>
-                                              <Badge colorScheme="purple" bg="purple.500" color="white" variant="solid" fontSize="10px" px={3} py={1} borderRadius="md" fontWeight="700" letterSpacing="wider" textTransform="uppercase">
-                                                {loopLabel}
-                                              </Badge>
-                                            </HStack>
-                                            {matchScore > 0 && (
-                                              <Badge colorScheme="purple" fontSize="10px" fontWeight="700" px={2} py={1} borderRadius="md">
-                                                {matchScore}% Fit
-                                              </Badge>
-                                            )}
-                                          </Flex>
+                                      <CardHeader pb={{ base: 2, md: 3 }} pt={{ base: 3, md: 4 }} px={{ base: 3, md: 5 }} flex={1}>
+                                        <VStack spacing={{ base: 2, md: 3 }} align="stretch">
+                                          <HStack spacing={1.5} flexWrap="wrap">
+                                            <Badge colorScheme="purple" variant="solid" fontSize="10px" px={2} py={0.5} borderRadius="md" fontWeight="700" letterSpacing="wider" textTransform="uppercase">
+                                              {loopLabel}
+                                            </Badge>
+                                            <Badge colorScheme="green" bg="green.100" color="green.700" variant="solid" fontSize="10px" px={2} py={0.5} borderRadius="md" fontWeight="700" letterSpacing="wider" textTransform="uppercase">
+                                              Active Loop
+                                            </Badge>
+                                          </HStack>
 
                                           <Box>
-                                            <HStack spacing={2} align="center" flexWrap="wrap">
-                                              <Heading fontSize="md" fontWeight="700" color="gray.800" noOfLines={2} lineHeight="1.3" letterSpacing="tight">
-                                                {summary.yourGive}
-                                              </Heading>
-                                              <Text fontSize="xs" fontWeight="700" color="gray.400">→</Text>
-                                              <Heading fontSize="md" fontWeight="700" color="gray.800" noOfLines={2} lineHeight="1.3" letterSpacing="tight">
-                                                {summary.yourGet}
-                                              </Heading>
-                                            </HStack>
+                                            <Heading fontSize={{ base: 'sm', md: 'md' }} fontWeight="700" color="gray.800" noOfLines={1} lineHeight="1.3" letterSpacing="tight">
+                                              {summary.yourGive}
+                                            </Heading>
+                                            <Text fontSize="xs" color="gray.500" mt={0.5} noOfLines={1}>→ for {summary.yourGet}</Text>
                                           </Box>
 
-                                          <SimpleGrid columns={participants.length > 3 ? 2 : 1} spacing={2}>
-                                            {participants.map((participant: any) => (
-                                              <HStack key={`${trade.id || trade.loop_id || trade.chain_id}-${participant.user_id || participant.id}`} spacing={2} minW={0} p={2} bg="purple.50" borderRadius="md">
-                                                <Avatar name={participant.user_name || 'User'} size="xs" bg="purple.500" color="white" />
-                                                <Box minW={0}>
-                                                  <Text fontSize="xs" fontWeight="700" noOfLines={1}>
-                                                    {participant.user_name || 'Unknown User'}
-                                                  </Text>
-                                                  <Text fontSize="10px" color="gray.500" noOfLines={1}>
-                                                    {participant.product_title || 'Trade item'}
-                                                  </Text>
-                                                </Box>
-                                              </HStack>
-                                            ))}
-                                          </SimpleGrid>
+                                          <HStack spacing={2}>
+                                            <HStack spacing={-2}>
+                                              {participants.slice(0, 3).map((p: any, i: number) => (
+                                                <Avatar
+                                                  key={p.user_id || p.id || i}
+                                                  name={p.user_name || 'User'}
+                                                  size="xs"
+                                                  bg="purple.500"
+                                                  color="white"
+                                                  boxShadow="0 0 0 2px white"
+                                                />
+                                              ))}
+                                            </HStack>
+                                            <Box flex={1} minW={0}>
+                                              <Text fontSize="xs" fontWeight="600" color="gray.700" noOfLines={1}>
+                                                {participants.length} traders in loop
+                                              </Text>
+                                              <Text fontSize="10px" color="gray.400" textTransform="uppercase" letterSpacing="wider">
+                                                {getTimeAgo(trade.updated_at || trade.created_at)}
+                                              </Text>
+                                            </Box>
+                                          </HStack>
                                         </VStack>
                                       </CardHeader>
 
-                                      <CardFooter pt={0} pb={4} px={4}>
+                                      <CardFooter pt={0} pb={{ base: 3, md: 4 }} px={{ base: 3, md: 4 }} borderTopWidth="1px" borderTopColor="gray.100">
                                         <Button
-                                          size="md"
+                                          size={{ base: 'sm', md: 'md' }}
                                           borderRadius="2xl"
                                           fontWeight="600"
                                           colorScheme="brand"
@@ -5216,10 +5362,10 @@ const Dashboard: React.FC = () => {
                                             e.stopPropagation()
                                             handleViewMultiWayTradeDetails(trade)
                                           }}
-                                          leftIcon={<Icon as={ViewIcon} />}
+                                          leftIcon={<Icon as={ViewIcon} boxSize={{ base: 3, md: 4 }} />}
                                           _hover={{ transform: 'translateY(-2px)' }}
                                           transition="all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1)"
-                                          shadow="md"
+                                          shadow="sm"
                                         >
                                           View Trade
                                         </Button>
