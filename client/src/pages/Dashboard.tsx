@@ -3691,6 +3691,7 @@ const Dashboard: React.FC = () => {
             </SimpleGrid>
           </VStack>
         </Container>
+        <FloatingTab showAddButton={false} />
       </Box>
     )
   }

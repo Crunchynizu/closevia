@@ -140,6 +140,7 @@ func main() {
 	// Middleware
 	app.Use(recover.New())
 	app.Use(middleware.SecurityHeaders())
+	app.Use(middleware.RequestTiming())
 	app.Use(logger.New())
 
 	corsOrigins := os.Getenv("CORS_ORIGINS")

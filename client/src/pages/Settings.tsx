@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import {
   Box,
   Container,
@@ -96,6 +96,7 @@ import {
   FaStar,
 } from 'react-icons/fa'
 import { FiSettings, FiSave, FiMapPin } from 'react-icons/fi'
+import { motion, useAnimation, useDragControls, AnimationControls, DragControls } from 'framer-motion'
 
 const NOTIFICATION_GROUPS: Array<{
   title: string
@@ -168,6 +169,92 @@ const HomeMapCenterUpdater = ({ lat, lng }: { lat: number; lng: number }) => {
   return null
 }
 
+interface SettingsSheetProps {
+  isMobile: boolean | undefined
+  sheetAnimation: AnimationControls
+  dragControls: DragControls
+  onClose: () => void
+  children: React.ReactNode
+}
+
+const SettingsSheet: React.FC<SettingsSheetProps> = ({ isMobile, sheetAnimation, dragControls, onClose, children }) => {
+  const pageBg = useColorModeValue('#FFFDF1', 'gray.900')
+  const pageBgRaw = useColorModeValue('#FFFDF1', '#171923')
+  const handleBg = useColorModeValue('gray.300', 'gray.600')
+
+  if (isMobile !== true) {
+    return (
+      <Box minH="100vh" bg={pageBg} pb={{ base: '100px', md: '80px' }}>
+        {children}
+      </Box>
+    )
+  }
+
+  return (
+    <>
+      <Box
+        position="fixed"
+        top={0}
+        left={0}
+        right={0}
+        bottom={0}
+        bg="blackAlpha.600"
+        zIndex={1000}
+        onClick={onClose}
+      />
+      <motion.div
+        initial={{ y: '100%' }}
+        animate={sheetAnimation}
+        drag="y"
+        dragControls={dragControls}
+        dragListener={false}
+        dragConstraints={{ top: 0 }}
+        dragElastic={{ top: 0.05, bottom: 0.3 }}
+        onDragEnd={(_: any, info: any) => {
+          if (info.offset.y > 120 || info.velocity.y > 400) {
+            onClose()
+          } else {
+            sheetAnimation.start({ y: 0, transition: { type: 'spring', damping: 30, stiffness: 300 } })
+          }
+        }}
+        style={{
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          zIndex: 1001,
+          maxHeight: '92dvh',
+          borderTopLeftRadius: '24px',
+          borderTopRightRadius: '24px',
+          backgroundColor: pageBgRaw,
+          display: 'flex',
+          flexDirection: 'column' as const,
+          overflow: 'hidden',
+          boxShadow: '0 -8px 40px rgba(0,0,0,0.15)',
+          willChange: 'transform',
+        }}
+      >
+        <Box
+          pt={3}
+          pb={2}
+          display="flex"
+          justifyContent="center"
+          alignItems="center"
+          cursor="grab"
+          userSelect="none"
+          onPointerDown={(e: React.PointerEvent) => dragControls.start(e)}
+          flexShrink={0}
+        >
+          <Box w="40px" h="5px" borderRadius="full" bg={handleBg} />
+        </Box>
+        <Box overflowY="auto" flex={1} overflowX="hidden" pb={{ base: '100px', md: '80px' }}>
+          {children}
+        </Box>
+      </motion.div>
+    </>
+  )
+}
+
 const SettingsPage: React.FC = () => {
   const toast = useToast()
   const navigate = useNavigate()
@@ -183,6 +270,8 @@ const SettingsPage: React.FC = () => {
   const notificationDisabledBg = useColorModeValue('white', 'gray.800')
   const notificationIconBg = useColorModeValue('white', 'gray.700')
   const isMobile = useBreakpointValue({ base: true, md: false })
+  const sheetAnimation = useAnimation()
+  const dragControls = useDragControls()
 
   // Account State
   const [username, setUsername] = useState(user?.name || '')
@@ -1194,8 +1283,22 @@ const SettingsPage: React.FC = () => {
     }
   }
 
+  const handleClose = useCallback(async () => {
+    await sheetAnimation.start({
+      y: '100%',
+      transition: { type: 'spring', damping: 30, stiffness: 300 },
+    })
+    navigate(-1)
+  }, [sheetAnimation, navigate])
+
+  useEffect(() => {
+    if (isMobile === true) {
+      sheetAnimation.start({ y: 0, transition: { type: 'spring', damping: 30, stiffness: 300 } })
+    }
+  }, [isMobile, sheetAnimation])
+
   return (
-    <Box minH="100vh" bg={pageBg} pb={{ base: '100px', md: '80px' }}>
+    <SettingsSheet isMobile={isMobile} sheetAnimation={sheetAnimation} dragControls={dragControls} onClose={handleClose}>
       <Container maxW="container.lg" py={{ base: 6, md: 8 }}>
         <VStack spacing={6} align="stretch">
 
@@ -2777,7 +2880,7 @@ const SettingsPage: React.FC = () => {
       </AlertDialog>
 
       <FloatingTab />
-    </Box>
+    </SettingsSheet>
   )
 }
 

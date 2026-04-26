@@ -81,6 +81,8 @@ export const api = axios.create({
   withCredentials: true,
 })
 
+const SLOW_API_THRESHOLD_MS = 500
+
 // Request interceptor to add auth token and log
 api.interceptors.request.use(
   (config) => {
@@ -98,6 +100,11 @@ api.interceptors.request.use(
       if (!config.headers['Content-Type']) {
         config.headers['Content-Type'] = 'application/json'
       }
+    }
+
+    // Stamp start time for response-duration tracking
+    if (import.meta.env.DEV) {
+      (config as any)._t0 = Date.now()
     }
 
     if (DEBUG_API) {
@@ -126,15 +133,24 @@ api.interceptors.request.use(
 // Response interceptor to log and handle auth
 api.interceptors.response.use(
   (response) => {
-    if (DEBUG_API) {
+    if (import.meta.env.DEV) {
       try {
-        const cfg = response.config
+        const cfg = response.config as any
+        const elapsed = cfg._t0 ? Date.now() - cfg._t0 : null
         const method = (cfg.method || 'get').toUpperCase()
-        const url = `${cfg.baseURL || ''}${cfg.url || ''}`
-        // eslint-disable-next-line no-console
-        console.groupCollapsed(`[API RESPONSE] ${method} ${url} -> ${response.status}`)
-        // eslint-disable-next-line no-console
-        console.groupEnd()
+        const url = cfg.url || ''
+        if (elapsed !== null && elapsed >= SLOW_API_THRESHOLD_MS) {
+          // eslint-disable-next-line no-console
+          console.warn(`[SLOW API] ${method} ${url} → ${response.status} (${elapsed}ms)`)
+        }
+        if (DEBUG_API) {
+          const fullUrl = `${cfg.baseURL || ''}${url}`
+          const label = elapsed !== null ? `${elapsed}ms` : '?ms'
+          // eslint-disable-next-line no-console
+          console.groupCollapsed(`[API RESPONSE] ${method} ${fullUrl} -> ${response.status} (${label})`)
+          // eslint-disable-next-line no-console
+          console.groupEnd()
+        }
       } catch { }
     }
     return response
@@ -149,14 +165,23 @@ api.interceptors.response.use(
     // Detect review submissions so we don't hard-redirect on 401; the UI can prompt login
     const isReviewEndpoint = typeof url === 'string' && /\/api\/users\/\d+\/reviews/i.test(url)
 
-    if (DEBUG_API) {
+    if (import.meta.env.DEV) {
       try {
-        const method = (cfg?.method || 'get').toUpperCase()
-        const url = `${cfg?.baseURL || ''}${cfg?.url || ''}`
-        // eslint-disable-next-line no-console
-        console.groupCollapsed(`[API ERROR] ${method} ${url} -> ${status}`)
-        // eslint-disable-next-line no-console
-        console.groupEnd()
+        const elapsed = (cfg as any)?._t0 ? Date.now() - (cfg as any)._t0 : null
+        const m = (cfg?.method || 'get').toUpperCase()
+        const u = cfg?.url || ''
+        if (elapsed !== null && elapsed >= SLOW_API_THRESHOLD_MS) {
+          // eslint-disable-next-line no-console
+          console.warn(`[SLOW API] ${m} ${u} → ${status ?? 'ERR'} (${elapsed}ms)`)
+        }
+        if (DEBUG_API) {
+          const fullUrl = `${cfg?.baseURL || ''}${u}`
+          const label = elapsed !== null ? `${elapsed}ms` : '?ms'
+          // eslint-disable-next-line no-console
+          console.groupCollapsed(`[API ERROR] ${m} ${fullUrl} -> ${status} (${label})`)
+          // eslint-disable-next-line no-console
+          console.groupEnd()
+        }
       } catch { }
     }
 
