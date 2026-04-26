@@ -101,6 +101,7 @@ export interface Product {
   brand?: string;
   max_items_per_offer?: number;
   view_count?: number;
+  is_saved?: boolean;
   boost_duration_hours?: number;
   organization_tags?: Array<{
     id: number;
@@ -153,6 +154,8 @@ export interface ProductUpdate {
   location?: string
   condition?: string
   category?: string
+  estimated_value_min?: number
+  estimated_value_max?: number
   show_estimated_value?: boolean
   bidding_type?: 'none' | 'blind' | 'open'
   max_items_per_offer?: number

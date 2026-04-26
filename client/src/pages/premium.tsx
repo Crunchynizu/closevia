@@ -73,6 +73,7 @@ const Premium: React.FC = () => {
   const [isYearly, setIsYearly] = useState(false)
   const [upgrading, setUpgrading] = useState<string | null>(null) // 'plus' | 'pro' | null
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null)
+  const [showCurrentPlanDetails, setShowCurrentPlanDetails] = useState(false)
   const [userProducts, setUserProducts] = useState<any[]>([])
   const [productsLoading, setProductsLoading] = useState(false)
   const [boostingProduct, setBoostingProduct] = useState<number | null>(null)
@@ -639,7 +640,13 @@ const Premium: React.FC = () => {
                 variant="ghost"
                 colorScheme={currentTier === 'pro' ? 'purple' : 'blue'}
                 fontSize="xs"
-                onClick={() => handleUpgrade(currentTier === 'plus' ? 'pro' : 'plus')}
+                onClick={() => {
+                  if (currentTier === 'plus') {
+                    handleUpgrade('pro')
+                    return
+                  }
+                  setShowCurrentPlanDetails((current) => !current)
+                }}
               >
                 {currentTier === 'pro' ? 'View Details' : 'Upgrade →'}
               </Button>
@@ -647,6 +654,51 @@ const Premium: React.FC = () => {
           </CardBody>
         </Card>
       </SimpleGrid>
+
+      <Collapse in={showCurrentPlanDetails} animateOpacity>
+        <Card
+          bg={cardBg}
+          borderWidth="1px"
+          borderColor={currentTier === 'pro' ? 'purple.200' : 'blue.200'}
+          borderRadius="2xl"
+        >
+          <CardBody>
+            <VStack align="stretch" spacing={5}>
+              <Flex justify="space-between" align={{ base: 'start', md: 'center' }} direction={{ base: 'column', md: 'row' }} gap={3}>
+                <Box>
+                  <Heading size="sm">
+                    {currentTier === 'pro' ? 'Your Pro features' : 'Your Plus features'}
+                  </Heading>
+                  <Text fontSize="sm" color={mutedText} mt={1}>
+                    Everything included in your current plan.
+                  </Text>
+                </Box>
+                <Button size="sm" variant="ghost" onClick={() => setShowCurrentPlanDetails(false)}>
+                  Hide details
+                </Button>
+              </Flex>
+
+              <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} spacing={5}>
+                <FeatureSection
+                  title="Listings"
+                  features={currentTier === 'pro' ? proFeatures.listings : plusFeatures.listings}
+                  color={currentTier === 'pro' ? 'purple' : 'blue'}
+                />
+                <FeatureSection
+                  title="Trading"
+                  features={currentTier === 'pro' ? proFeatures.trading : plusFeatures.trading}
+                  color={currentTier === 'pro' ? 'purple' : 'blue'}
+                />
+                <FeatureSection
+                  title="Profile"
+                  features={currentTier === 'pro' ? proFeatures.profile : plusFeatures.profile}
+                  color={currentTier === 'pro' ? 'purple' : 'blue'}
+                />
+              </SimpleGrid>
+            </VStack>
+          </CardBody>
+        </Card>
+      </Collapse>
 
       {/* Your Products - Boost Section */}
       {isPremiumUser && (
@@ -1090,4 +1142,3 @@ const Premium: React.FC = () => {
 }
 
 export default Premium
-

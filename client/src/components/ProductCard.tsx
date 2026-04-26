@@ -105,21 +105,6 @@ const ProductCard: React.FC<ProductCardProps> = ({
     if (!user) {
       const savedProducts = JSON.parse(localStorage.getItem('savedProducts') || '[]')
       setIsSaved(savedProducts.includes(product.id))
-      return
-    }
-
-    let cancelled = false
-    ;(async () => {
-      try {
-        const response = await api.get(`/api/users/saved-products/${product.id}`)
-        if (!cancelled) setIsSaved(Boolean(response.data?.data?.isSaved))
-      } catch {
-        if (!cancelled) setIsSaved(Boolean(product.is_saved))
-      }
-    })()
-
-    return () => {
-      cancelled = true
     }
   }, [product.id, product.is_saved, user])
 

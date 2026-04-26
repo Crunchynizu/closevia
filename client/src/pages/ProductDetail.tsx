@@ -622,26 +622,13 @@ const ProductDetail: React.FC = () => {
   // Check if product is saved on component mount
   useEffect(() => {
     if (product && user) {
-      checkSavedStatus()
+      setIsSaved(Boolean(product.is_saved))
     } else if (product && !user) {
       // Check localStorage for guest users
       const savedProducts = JSON.parse(localStorage.getItem('savedProducts') || '[]')
       setIsSaved(savedProducts.includes(product.id))
     }
   }, [product, user])
-
-  const checkSavedStatus = async () => {
-    if (!product || !user) return
-
-    try {
-      const response = await api.get(`/api/users/saved-products/${product.id}`)
-      setIsSaved(response.data.data.isSaved)
-    } catch (error) {
-      // If API fails, check localStorage as fallback
-      const savedProducts = JSON.parse(localStorage.getItem('savedProducts') || '[]')
-      setIsSaved(savedProducts.includes(product.id))
-    }
-  }
 
   const handleSaveToggle = async () => {
     if (!product) return
@@ -683,6 +670,7 @@ const ProductDetail: React.FC = () => {
       if (isSaved) {
         await api.delete(`/api/users/saved-products/${product.id}`)
         setIsSaved(false)
+        setProduct(prev => (prev ? { ...prev, is_saved: false } : prev))
         toast({
           id: 'removed-from-saved-api',
           title: 'Removed from saved',
@@ -694,6 +682,7 @@ const ProductDetail: React.FC = () => {
       } else {
         await api.post(`/api/users/saved-products`, { product_id: product.id })
         setIsSaved(true)
+        setProduct(prev => (prev ? { ...prev, is_saved: true } : prev))
         toast({
           id: 'saved-to-watchlist-api',
           title: 'Saved to watchlist',

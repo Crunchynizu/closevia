@@ -11,7 +11,7 @@
 [[headers]]
   for = "/*"
   [headers.values]
-    Cache-Control = "public, max-age=3600"
+    Cache-Control = "public, no-cache, must-revalidate"
 
 [[headers]]
   for = "/assets/*"

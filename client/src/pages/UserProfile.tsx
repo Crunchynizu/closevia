@@ -398,16 +398,22 @@ const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
         }
 
         setUser(finalizedUser)
+        setLoading(false)
 
         // Only fetch products if we have a valid ID
         if (apiUser.id) {
-          const page1 = await getUserProducts(apiUser.id as any, 1)
-          setProducts(page1.data || [])
+          try {
+            const page1 = await getUserProducts(apiUser.id as any, 1)
+            setProducts(page1.data || [])
+          } catch {
+            setProducts([])
+          }
         } else {
           setProducts([])
         }
       } catch (e: any) {
         setError(e?.message || 'Failed to load user')
+        setProducts([])
       } finally {
         setLoading(false)
       }
@@ -417,20 +423,12 @@ const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
 
   // Fetch which products are saved by current user
   useEffect(() => {
-    if (!currentUser || products.length === 0) return
-    const checkSaved = async () => {
-      const ids = new Set<number>()
-      await Promise.all(
-        products.map(async (p) => {
-          try {
-            const res = await api.get(`/api/users/saved-products/${p.id}`)
-            if (res.data?.data?.isSaved) ids.add(p.id)
-          } catch { /* ignore */ }
-        })
-      )
-      setSavedProductIds(ids)
+    if (!currentUser || products.length === 0) {
+      setSavedProductIds(new Set())
+      return
     }
-    checkSaved()
+
+    setSavedProductIds(new Set(products.filter((p) => Boolean(p.is_saved)).map((p) => p.id)))
   }, [currentUser, products])
 
   const handleToggleSave = async (productId: number) => {
@@ -449,10 +447,12 @@ const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
       if (isSaved) {
         await api.delete(`/api/users/saved-products/${productId}`)
         setSavedProductIds(prev => { const n = new Set(prev); n.delete(productId); return n })
+        setProducts(prev => prev.map(product => product.id === productId ? { ...product, is_saved: false } : product))
         toast({ id: 'removed-from-saved', title: 'Removed from saved', status: 'info', duration: 1500 })
       } else {
         await api.post(`/api/users/saved-products`, { product_id: productId })
         setSavedProductIds(prev => new Set(prev).add(productId))
+        setProducts(prev => prev.map(product => product.id === productId ? { ...product, is_saved: true } : product))
         toast({ id: 'saved', title: 'Saved!', status: 'success', duration: 1500 })
       }
     } catch {
@@ -2130,6 +2130,3 @@ const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
 }
 
 export default UserProfile
-
-
-
