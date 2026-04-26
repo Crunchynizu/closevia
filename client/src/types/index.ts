@@ -1,3 +1,10 @@
+export interface AvailabilitySlot {
+  id: string
+  date: string        // "YYYY-MM-DD"
+  start_time: string  // "HH:MM"
+  end_time: string    // "HH:MM"
+}
+
 export interface User {
   id: number
   slug?: string // Unique URL identifier
@@ -103,6 +110,8 @@ export interface Product {
     logo_url?: string;
     description?: string;
   }>;
+  availability_slots?: AvailabilitySlot[]
+  availability_type?: 'flexible' | 'strict'
 }
 
 export interface Order {
@@ -245,6 +254,7 @@ export interface Trade {
   meetup_status?: 'pending' | 'accepted' | 'declined' | 'disputed' | string
   meetup_confirmed?: boolean
   meetup_location?: string
+  meetup_date?: string
   meetup_time?: string
   buyer_meetup_confirmed?: boolean
   seller_meetup_confirmed?: boolean

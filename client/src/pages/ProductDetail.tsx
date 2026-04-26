@@ -67,6 +67,8 @@ import { api } from '../services/api'
 import { getFirstImage, getImageUrl } from '../utils/imageUtils';
 import { getProductUrl } from '../utils/productUtils'
 import TradeModal from '../components/TradeModal'
+import AvailabilitySlots from '../components/AvailabilitySlots'
+import { AvailabilitySlot } from '../types'
 import BuyoutModal from '../components/BuyoutModal'
 import CounterfeitWarning from '../components/CounterfeitWarning'
 import ProximityBadge from '../components/ProximityBadge'
@@ -1549,6 +1551,21 @@ const ProductDetail: React.FC = () => {
                       </Button>
                     )}
                   </Box>
+
+                  {/* Availability Schedule */}
+                  {(() => {
+                    const raw = (product as any).availability_slots
+                    if (!raw) return null
+                    try {
+                      const slots: AvailabilitySlot[] = typeof raw === 'string' ? JSON.parse(raw) : raw
+                      if (!Array.isArray(slots) || slots.length === 0) return null
+                      return (
+                        <Box p={{ base: 3, md: 4 }} bg="white" borderRadius={{ base: 'xl', md: '2xl' }} shadow="sm">
+                          <AvailabilitySlots slots={slots} availabilityType={(product as any).availability_type} />
+                        </Box>
+                      )
+                    } catch { return null }
+                  })()}
 
                 </VStack>
 

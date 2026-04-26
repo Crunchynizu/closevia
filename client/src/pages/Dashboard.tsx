@@ -260,7 +260,6 @@ const Dashboard: React.FC = () => {
   const [hoppingInto, setHoppingInto] = useState<string | null>(null)
   const [selectedMultiWayTrade, setSelectedMultiWayTrade] = useState<any>(null)
   const [multiWayTradeJoining, setMultiWayTradeJoining] = useState(false)
-  const [showPremiumModal, setShowPremiumModal] = useState(false)
   const [multiWayManagerOpen, setMultiWayManagerOpen] = useState(false)
   const [multiWayManagerLoading, setMultiWayManagerLoading] = useState(false)
   const selectedMultiWayTradeRef = useRef<any>(null)
@@ -307,20 +306,6 @@ const Dashboard: React.FC = () => {
     window.addEventListener('scroll', handleScroll, { passive: true })
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
-
-  useEffect(() => {
-    if (!loading && isAuthenticated && user && !user.is_premium) {
-      const hasShown = sessionStorage.getItem('clovia_premium_up_shown')
-      if (!hasShown) {
-        // Delay slightly for better UX after dashboard load
-        const timer = setTimeout(() => {
-          setShowPremiumModal(true)
-          sessionStorage.setItem('clovia_premium_up_shown', 'true')
-        }, 3000)
-        return () => clearTimeout(timer)
-      }
-    }
-  }, [isAuthenticated, user, loading])
 
   // Check if user is authenticated, redirect to login if not
   // Only redirect if not loading (to prevent race conditions after login)
@@ -3706,6 +3691,7 @@ const Dashboard: React.FC = () => {
             </SimpleGrid>
           </VStack>
         </Container>
+        <FloatingTab showAddButton={false} />
       </Box>
     )
   }
@@ -6461,71 +6447,6 @@ const Dashboard: React.FC = () => {
         altText={zoomAltText}
       />
 
-      {/* Premium Opportunity Modal */}
-      <Modal isOpen={showPremiumModal} onClose={() => setShowPremiumModal(false)} isCentered size="md">
-        <ModalOverlay backdropFilter="blur(8px)" />
-        <ModalContent borderRadius="2xl" overflow="hidden" boxShadow="2xl">
-          <ModalBody p={0}>
-            <Box position="relative">
-              <Box bg="purple.600" h="140px" display="flex" alignItems="center" justifyContent="center">
-                <Icon as={FaCrown} color="yellow.400" fontSize="60px" filter="drop-shadow(0 0 10px rgba(236, 201, 75, 0.4))" />
-              </Box>
-              <ModalCloseButton color="white" top={4} right={4} />
-              
-              <VStack spacing={6} p={8} textAlign="center">
-                <VStack spacing={2}>
-                  <Heading size="lg" fontWeight="extrabold">Level Up to Premium!</Heading>
-                  <Text color="gray.500" fontSize="md">
-                    Unlock exclusive features like unlimited trade offers, priority listing, and verified badge.
-                  </Text>
-                </VStack>
-
-                <SimpleGrid columns={2} spacing={3} w="full">
-                  {[
-                    'Unlimited Offers',
-                    'Priority Listing',
-                    'Can Sell (Buyout)',
-                    'Express Delivery',
-                    'Lower Fees',
-                    'Verified Badge'
-                  ].map((f, i) => (
-                    <HStack key={i} spacing={2}>
-                      <Icon as={CheckIcon} color="green.500" boxSize={3} />
-                      <Text fontSize="xs" fontWeight="bold" color="gray.600">{f}</Text>
-                    </HStack>
-                  ))}
-                </SimpleGrid>
-
-                <VStack spacing={3} w="full">
-                  <Button 
-                    colorScheme="purple" 
-                    w="full" 
-                    size="lg" 
-                    h="56px"
-                    fontSize="lg"
-                    borderRadius="xl"
-                    leftIcon={<FaCrown />}
-                    onClick={() => {
-                      setShowPremiumModal(false)
-                      navigate('/premium')
-                    }}
-                    _hover={{ transform: 'translateY(-2px)', boxShadow: 'lg' }}
-                  >
-                    Take Me There
-                  </Button>
-                  <Button 
-                    variant="ghost" 
-                    w="full"
-                    onClick={() => setShowPremiumModal(false)}
-                  >
-                    Maybe Later
-                  </Button>
-                </VStack>
-              </VStack>
-            </Box>
-          </ModalBody>
-        </ModalContent>
-      </Modal>
     </Box>
   )
 }
