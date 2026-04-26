@@ -78,6 +78,18 @@ func hideEstimatedValueIfNeeded(product *models.Product) {
 	}
 }
 
+func savedProductSelectExpr(viewerID int) string {
+	if viewerID <= 0 {
+		return "FALSE AS is_saved"
+	}
+
+	return fmt.Sprintf(`EXISTS(
+		SELECT 1
+		FROM saved_products sp
+		WHERE sp.user_id = %d AND sp.product_id = p.id AND sp.deleted_at IS NULL
+	) AS is_saved`, viewerID)
+}
+
 // Condition multipliers for calculating suggested value
 var conditionMultipliers = map[string]float64{
 	"New":      1.0,
@@ -805,6 +817,7 @@ func (h *ProductHandler) GetProducts(c *fiber.Ctx) error {
 	allowBuyingStr := c.Query("allow_buying", "")
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	limit, _ := strconv.Atoi(c.Query("limit", "20"))
+	viewerID, viewerOK := middleware.GetUserIDFromContext(c)
 
 	fmt.Printf("🔍 [DEBUG] Query params - keyword: %s, sortBy: %s, page: %d, limit: %d\n", keyword, sortBy, page, limit)
 
@@ -862,7 +875,7 @@ func (h *ProductHandler) GetProducts(c *fiber.Ctx) error {
 	} else {
 		// For the general public feed, default to 'available' status
 		whereClause += " AND p.status = 'available'"
-		if viewerID, ok := middleware.GetUserIDFromContext(c); ok && !h.showOwnProductsOnHome() {
+		if viewerOK && !h.showOwnProductsOnHome() {
 			whereClause += " AND p.seller_id != ?"
 			args = append(args, viewerID)
 		}
@@ -980,6 +993,7 @@ func (h *ProductHandler) GetProducts(c *fiber.Ctx) error {
 		       u.latitude as seller_latitude, u.longitude as seller_longitude,
 		   (SELECT COUNT(*) FROM wishlists w WHERE w.product_id = p.id) as want_count,
 		   (SELECT COUNT(*) FROM trades t WHERE t.target_product_id = p.id AND t.status = 'pending') as offer_count,
+		   ` + savedProductSelectExpr(viewerID) + `,
 		   ` + haversineExpr + ` AS distance_km
 	FROM products p
 	LEFT JOIN users u ON p.seller_id = u.id
@@ -1053,6 +1067,7 @@ func (h *ProductHandler) GetProducts(c *fiber.Ctx) error {
 			&locationTypeNull, &pickupLatNull, &pickupLonNull, &pickupAddressNull,
 			&latNull, &lonNull, &product.CreatedAt, &product.UpdatedAt, &boostedAtNull, &product.BoostDurationHours,
 			&product.SellerName, &sellerProfile, &product.SellerPremiumTier, &sLatNull, &sLonNull, &product.WantCount, &product.OfferCount,
+			&product.IsSaved,
 			&distKmNull)
 
 		if wantsNull.Valid {
@@ -1590,6 +1605,7 @@ func (h *ProductHandler) GetBoostCandidates(c *fiber.Ctx) error {
 
 func (h *ProductHandler) GetSuggestedTrades(c *fiber.Ctx) error {
 	productID, err := strconv.Atoi(c.Params("id"))
+	viewerID, _ := middleware.GetUserIDFromContext(c)
 	if err != nil {
 		return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Invalid product ID"})
 	}
@@ -1663,7 +1679,8 @@ func (h *ProductHandler) GetSuggestedTrades(c *fiber.Ctx) error {
 		       u.name as seller_name, u.profile_picture as seller_profile_picture,
 		       u.latitude as seller_latitude, u.longitude as seller_longitude,
 		   (SELECT COUNT(*) FROM wishlists w WHERE w.product_id = p.id) as want_count,
-		   (SELECT COUNT(*) FROM trades t WHERE t.target_product_id = p.id AND t.status = 'pending') as offer_count
+		   (SELECT COUNT(*) FROM trades t WHERE t.target_product_id = p.id AND t.status = 'pending') as offer_count,
+		   ` + savedProductSelectExpr(viewerID) + `
 	FROM products p
 	JOIN users u ON p.seller_id = u.id
 	WHERE p.status = 'available' AND p.seller_id != ?
@@ -1725,7 +1742,7 @@ func (h *ProductHandler) GetSuggestedTrades(c *fiber.Ctx) error {
 			&conditionNull, &product.SuggestedValue, &product.Category,
 			&locationTypeNull, &pickupLatNull, &pickupLonNull, &pickupAddressNull,
 			&latNull, &lonNull, &product.CreatedAt, &product.UpdatedAt, &boostedAtNull,
-			&product.SellerName, &sellerProfile, &sLatNull, &sLonNull, &product.WantCount, &product.OfferCount)
+			&product.SellerName, &sellerProfile, &sLatNull, &sLonNull, &product.WantCount, &product.OfferCount, &product.IsSaved)
 
 		if err != nil {
 			fmt.Printf("GetSuggestedTrades scan error: %v\n", err)
@@ -1791,6 +1808,8 @@ func (h *ProductHandler) GetProduct(c *fiber.Ctx) error {
 	h.ensureProductEstimateVisibilityColumn()
 
 	idOrSlug := c.Params("id")
+	viewerID, _ := middleware.GetUserIDFromContext(c)
+	savedExpr := savedProductSelectExpr(viewerID)
 
 	// Try to parse as integer first (ID)
 	var product models.Product
@@ -1812,52 +1831,53 @@ func (h *ProductHandler) GetProduct(c *fiber.Ctx) error {
 	productID, parseErr := strconv.Atoi(idOrSlug)
 	if parseErr == nil {
 		// It's a numeric ID
-		err = h.db.QueryRow(`
+		err = h.db.QueryRow(fmt.Sprintf(`
 			SELECT p.id, p.slug, p.title, p.description, p.price, p.image_urls, p.video_url, p.seller_id, 
 			       p.premium, p.status, p.allow_buying, p.barter_only, p.location, p.`+"condition"+`, 
 			       p.suggested_value, p.category, p.estimated_value_min, p.estimated_value_max, COALESCE(p.show_estimated_value, TRUE), p.`+"`value`"+`, p.wants, p.wanted_categories,
 			       p.location_type, p.pickup_latitude, p.pickup_longitude, p.pickup_address,
 			       p.price_reasoning, p.created_at, p.updated_at,
 			       u.name as seller_name, u.profile_picture as seller_profile_picture,
-			       (SELECT COUNT(*) FROM wishlists w WHERE w.product_id = p.id) as want_count
+			       (SELECT COUNT(*) FROM wishlists w WHERE w.product_id = p.id) as want_count,
+			       %s
 			FROM products p
 			LEFT JOIN users u ON p.seller_id = u.id
 			WHERE p.id = ?
-		`, productID).Scan(&product.ID, &slugNull, &product.Title, &product.Description, &priceNull,
+		`, savedExpr), productID).Scan(&product.ID, &slugNull, &product.Title, &product.Description, &priceNull,
 			&imageURLsJSON, &videoURLNull, &product.SellerID, &product.Premium, &product.Status,
 			&product.AllowBuying, &product.BarterOnly, &product.Location,
 			&product.Condition, &product.SuggestedValue, &product.Category,
 			&product.EstimatedValueMin, &product.EstimatedValueMax, &product.ShowEstimatedValue, &product.Value,
 			&wantsNull, &wantedCategoriesRaw, &locationTypeNull, &pickupLatNull, &pickupLonNull, &pickupAddressNull, &priceReasoningNull,
 			&product.CreatedAt, &product.UpdatedAt,
-			&sellerNameNull, &sellerProfilePictureNull, &product.WantCount)
+			&sellerNameNull, &sellerProfilePictureNull, &product.WantCount, &product.IsSaved)
 	} else {
-		err = h.db.QueryRow(`
+		err = h.db.QueryRow(fmt.Sprintf(`
 			SELECT p.id, p.slug, p.title, p.description, p.price, p.image_urls, p.video_url, p.seller_id, 
 			       p.premium, p.status, p.allow_buying, p.barter_only, p.location, p.`+"condition"+`, 
 			       p.suggested_value, p.category, p.estimated_value_min, p.estimated_value_max, COALESCE(p.show_estimated_value, TRUE), p.`+"`value`"+`, p.wants, p.wanted_categories,
 			       p.location_type, p.pickup_latitude, p.pickup_longitude, p.pickup_address,
 			       p.price_reasoning, p.created_at, p.updated_at,
 			       u.name as seller_name, u.profile_picture as seller_profile_picture,
-			       (SELECT COUNT(*) FROM wishlists w WHERE w.product_id = p.id) as want_count
+			       (SELECT COUNT(*) FROM wishlists w WHERE w.product_id = p.id) as want_count,
+			       %s
 			FROM products p
 			LEFT JOIN users u ON p.seller_id = u.id
 			WHERE p.slug = ?
-		`, idOrSlug).Scan(&product.ID, &slugNull, &product.Title, &product.Description, &priceNull,
+		`, savedExpr), idOrSlug).Scan(&product.ID, &slugNull, &product.Title, &product.Description, &priceNull,
 			&imageURLsJSON, &videoURLNull, &product.SellerID, &product.Premium, &product.Status,
 			&product.AllowBuying, &product.BarterOnly, &product.Location,
 			&product.Condition, &product.SuggestedValue, &product.Category,
 			&product.EstimatedValueMin, &product.EstimatedValueMax, &product.ShowEstimatedValue, &product.Value,
 			&wantsNull, &wantedCategoriesRaw, &locationTypeNull, &pickupLatNull, &pickupLonNull, &pickupAddressNull, &priceReasoningNull,
 			&product.CreatedAt, &product.UpdatedAt,
-			&sellerNameNull, &sellerProfilePictureNull, &product.WantCount)
+			&sellerNameNull, &sellerProfilePictureNull, &product.WantCount, &product.IsSaved)
 	}
 
 	if err == nil {
 		hideEstimatedValueIfNeeded(&product)
 
 		// Log product view
-		viewerID, _ := middleware.GetUserIDFromContext(c)
 		if viewerID != product.SellerID { // Don't log self-views
 			h.db.Exec("INSERT INTO product_views (product_id, viewer_user_id) VALUES (?, ?)", product.ID, viewerID)
 		}
@@ -2572,6 +2592,7 @@ func (h *ProductHandler) DeleteProductAdmin(c *fiber.Ctx) error {
 // GetUserProducts gets all products for a specific user
 func (h *ProductHandler) GetUserProducts(c *fiber.Ctx) error {
 	fmt.Println("🔍 [DEBUG] GetUserProducts called")
+	viewerID, _ := middleware.GetUserIDFromContext(c)
 
 	userID, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
@@ -2626,7 +2647,8 @@ func (h *ProductHandler) GetUserProducts(c *fiber.Ctx) error {
 		       p.premium, p.status, p.allow_buying, p.barter_only, p.category, p.created_at, p.updated_at, p.boosted_at,
 		       p.featured_order,
 		       u.name as seller_name, u.profile_picture as seller_profile_picture,
-		       (SELECT COUNT(*) FROM trades t WHERE t.target_product_id = p.id AND t.status = 'pending') as offer_count
+		       (SELECT COUNT(*) FROM trades t WHERE t.target_product_id = p.id AND t.status = 'pending') as offer_count,
+		       `+savedProductSelectExpr(viewerID)+`
 		FROM products p
 		JOIN users u ON p.seller_id = u.id
 		`+where+`
@@ -2656,7 +2678,7 @@ func (h *ProductHandler) GetUserProducts(c *fiber.Ctx) error {
 		err := rows.Scan(&product.ID, &slugNull, &product.Title, &product.Description, &priceNull,
 			&imageURLsJSONStr, &product.SellerID, &product.Premium, &product.Status,
 			&product.AllowBuying, &product.BarterOnly, &product.Category, &product.CreatedAt, &product.UpdatedAt, &boostedAtNull, &featuredOrderNull,
-			&product.SellerName, &sellerProfile, &product.OfferCount)
+			&product.SellerName, &sellerProfile, &product.OfferCount, &product.IsSaved)
 		if slugNull.Valid {
 			product.Slug = slugNull.String
 		}
@@ -3340,6 +3362,7 @@ func (h *ProductHandler) SmartSearch(c *fiber.Ctx) error {
 	viewerLatStr := c.Query("lat", "")
 	viewerLngStr := c.Query("lng", "")
 	hasLocation := viewerLatStr != "" && viewerLngStr != ""
+	viewerID, _ := middleware.GetUserIDFromContext(c)
 
 	// Parse query with AI
 	parsed, err := services.ParseSearchQuery(q, hasLocation)
@@ -3400,7 +3423,8 @@ func (h *ProductHandler) SmartSearch(c *fiber.Ctx) error {
 		       u.name as seller_name, u.profile_picture as seller_profile_picture,
 		       u.latitude as seller_latitude, u.longitude as seller_longitude,
 		   (SELECT COUNT(*) FROM wishlists w WHERE w.product_id = p.id) as want_count,
-		   (SELECT COUNT(*) FROM trades t WHERE t.target_product_id = p.id AND t.status = 'pending') as offer_count
+		   (SELECT COUNT(*) FROM trades t WHERE t.target_product_id = p.id AND t.status = 'pending') as offer_count,
+		   ` + savedProductSelectExpr(viewerID) + `
 	FROM products p
 	LEFT JOIN users u ON p.seller_id = u.id
 	` + whereClause
@@ -3456,7 +3480,7 @@ func (h *ProductHandler) SmartSearch(c *fiber.Ctx) error {
 			&wantsNull, &wantedCategoriesRaw,
 			&locationTypeNull, &pickupLatNull, &pickupLonNull, &pickupAddressNull,
 			&latNull, &lonNull, &product.CreatedAt, &product.UpdatedAt, &boostedAtNull,
-			&product.SellerName, &sellerProfile, &sLatNull, &sLonNull, &product.WantCount, &product.OfferCount)
+			&product.SellerName, &sellerProfile, &sLatNull, &sLonNull, &product.WantCount, &product.OfferCount, &product.IsSaved)
 		if err != nil {
 			log.Printf("[SmartSearch] Row scan error: %v", err)
 			continue

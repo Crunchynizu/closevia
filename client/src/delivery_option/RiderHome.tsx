@@ -725,6 +725,7 @@ const RiderHome: React.FC = () => {
   const [availableDeliveries, setAvailableDeliveries] = useState<DeliveryWithBatch[]>([])
   const [activeDeliveries, setActiveDeliveries] = useState<DeliveryWithBatch[]>([])
   const [completedDeliveries, setCompletedDeliveries] = useState<DeliveryWithBatch[]>([])
+  const [completedLoaded, setCompletedLoaded] = useState(false)
   const [loading, setLoading] = useState(true)
   const [accepting, setAccepting] = useState<number | null>(null)
   // Task 14: Express job lock message
@@ -746,15 +747,20 @@ const RiderHome: React.FC = () => {
     if (!riderState?.permissions?.can_view_jobs) return
 
     try {
-      const [availableRes, activeRes, completedRes] = await Promise.all([
+      const shouldLoadCompleted = deliveryTab === 2 || completedLoaded
+      const requests = [
         api.get('/api/deliveries/available'),
         api.get('/api/deliveries/my-jobs?status=active'),
-        api.get('/api/deliveries/my-jobs?status=completed'),
-      ])
+        shouldLoadCompleted ? api.get('/api/deliveries/my-jobs?status=completed') : Promise.resolve(null),
+      ] as const
+      const [availableRes, activeRes, completedRes] = await Promise.all(requests)
 
       setAvailableDeliveries(availableRes.data?.data || [])
       setActiveDeliveries(activeRes.data?.data || [])
-      setCompletedDeliveries(completedRes.data?.data || [])
+      if (completedRes) {
+        setCompletedDeliveries(completedRes.data?.data || [])
+        setCompletedLoaded(true)
+      }
 
       // Task 14: Show message if rider is locked on express job
       if (availableRes.data?.message) {
@@ -769,11 +775,15 @@ const RiderHome: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [riderState?.permissions?.can_view_jobs, toast])
+  }, [completedLoaded, deliveryTab, riderState?.permissions?.can_view_jobs, toast])
 
   useEffect(() => {
     fetchDeliveries()
-    const interval = setInterval(fetchDeliveries, 15000)
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchDeliveries()
+      }
+    }, 15000)
     return () => clearInterval(interval)
   }, [fetchDeliveries])
 

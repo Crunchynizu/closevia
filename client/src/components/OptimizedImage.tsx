@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Box, Image as ChakraImage, Skeleton, ImageProps } from '@chakra-ui/react'
-import { getOptimizedImageWithFallback } from '../utils/imageUtils'
+import { generateCloudinarySrcSet, getOptimizedImageWithFallback } from '../utils/imageUtils'
 
 interface OptimizedImageProps extends Omit<ImageProps, 'src' | 'alt' | 'objectFit'> {
   src?: string
@@ -13,6 +13,7 @@ interface OptimizedImageProps extends Omit<ImageProps, 'src' | 'alt' | 'objectFi
   borderRadius?: string
   fallbackSrc?: string
   loading?: 'lazy' | 'eager'
+  sizes?: string
   onClick?: (e: React.MouseEvent) => void
   cursor?: string
 }
@@ -47,6 +48,7 @@ const OptimizedImage: React.FC<OptimizedImageProps> = ({
   borderRadius = '0px',
   fallbackSrc = '/placeholder.svg',
   loading = 'lazy',
+  sizes,
   onClick,
   cursor = 'default',
   ...restProps
@@ -64,6 +66,10 @@ const OptimizedImage: React.FC<OptimizedImageProps> = ({
   }, [src, width, fallbackSrc])
 
   const originalSrc = useMemo(() => src || fallbackSrc, [src, fallbackSrc])
+  const srcSet = useMemo(() => {
+    if (!src || !src.includes('cloudinary.com')) return undefined
+    return generateCloudinarySrcSet(src, width)
+  }, [src, width])
   const [imageSrc, setImageSrc] = useState<string>(primarySrc)
 
   useEffect(() => {
@@ -93,6 +99,8 @@ const OptimizedImage: React.FC<OptimizedImageProps> = ({
       )}
       <ChakraImage
         src={imageSrc}
+        srcSet={srcSet}
+        sizes={srcSet ? (sizes || `(max-width: 480px) 50vw, (max-width: 768px) 33vw, ${width}px`) : undefined}
         alt={alt}
         w="100%"
         h="100%"

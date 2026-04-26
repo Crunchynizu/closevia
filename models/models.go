@@ -234,6 +234,7 @@ type Product struct {
 	VideoURL             string            `json:"video_url,omitempty"`
 	Analytics            *ProductAnalytics `json:"analytics,omitempty"`
 	Distance             string            `json:"distance,omitempty"` // Computed distance from viewer (e.g. "3.2 KM")
+	IsSaved              bool              `json:"is_saved,omitempty"`
 	CreatedAt            time.Time         `json:"created_at"`
 	UpdatedAt            time.Time         `json:"updated_at"`
 	WishlistCount        int               `json:"wishlist_count,omitempty"`
