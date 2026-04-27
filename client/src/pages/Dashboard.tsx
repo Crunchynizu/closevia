@@ -2510,7 +2510,7 @@ const Dashboard: React.FC = () => {
                         </MenuItem>
                       </MenuList>
                     </Menu>
-                    {/* Desktop: plain edit icon */}
+                    {/* Desktop: edit + trash icon buttons */}
                     <IconButton
                       as={RouterLink}
                       to={`/edit-product/${product.id}`}
@@ -2521,6 +2521,19 @@ const Dashboard: React.FC = () => {
                       size="sm"
                       display={{ base: 'none', md: 'flex' }}
                     />
+                    <Tooltip label="Delete" placement="top" hasArrow>
+                      <IconButton
+                        aria-label="Delete"
+                        icon={<DeleteIcon />}
+                        variant="ghost"
+                        size="sm"
+                        display={{ base: 'none', md: 'flex' }}
+                        isDisabled={isLocked}
+                        onClick={() => handleDeleteProductClick(product)}
+                        color="red.400"
+                        _hover={{ bg: 'red.50', color: 'red.500' }}
+                      />
+                    </Tooltip>
                   </>
                 )}
               </HStack>
@@ -2585,42 +2598,23 @@ const Dashboard: React.FC = () => {
               </HStack>
               </VStack>
           </CardBody>
-          {shouldShowActions && (isAvailable || !isLocked) && (
+          {shouldShowActions && isAvailable && (
             <CardFooter pt={0} pb={3} px={3}>
-              <VStack spacing={1.5} w="full">
-                {isAvailable && (
-                  <Button
-                    h={{ base: '44px', md: '38px' }}
-                    colorScheme="brand"
-                    variant="solid"
-                    leftIcon={<Icon as={FaHandshake} boxSize={3.5} />}
-                    onClick={() => handleFindTradesClick(product)}
-                    w="full"
-                    fontWeight="700"
-                    fontSize="sm"
-                    borderRadius="xl"
-                    _hover={{ opacity: 0.9 }}
-                    transition="opacity 0.15s"
-                  >
-                    Find Trades
-                  </Button>
-                )}
-                {/* Desktop-only Delete — mobile uses ⋮ menu */}
-                <Button
-                  display={{ base: 'none', md: 'flex' }}
-                  leftIcon={<DeleteIcon />}
-                  variant="ghost"
-                  colorScheme="red"
-                  size="xs"
-                  w="full"
-                  fontSize="xs"
-                  onClick={() => handleDeleteProductClick(product)}
-                  isDisabled={isLocked}
-                  _hover={{ bg: 'red.50' }}
-                >
-                  Delete
-                </Button>
-              </VStack>
+              <Button
+                h={{ base: '44px', md: '38px' }}
+                colorScheme="brand"
+                variant="solid"
+                leftIcon={<Icon as={FaHandshake} boxSize={3.5} />}
+                onClick={() => handleFindTradesClick(product)}
+                w="full"
+                fontWeight="700"
+                fontSize="sm"
+                borderRadius="xl"
+                _hover={{ opacity: 0.9 }}
+                transition="opacity 0.15s"
+              >
+                Find Trades
+              </Button>
             </CardFooter>
           )}
         </Card>
@@ -3179,150 +3173,112 @@ const Dashboard: React.FC = () => {
     const timeAgo = getTimeAgo(trade.updated_at || trade.created_at)
     const borderColor = trade.trade_option === 'delivery' ? 'blue.400' : 'orange.400'
 
+    const targetItem = { product_id: trade.target_product_id, product_title: trade.product_title, product_image_url: trade.product_image_url }
+    const thumbItems = [targetItem, offeredItems[0]].filter(Boolean)
+
     return (
-      <Card
-          variant="outline"
-          h="100%"
-          display="flex"
-          flexDirection="column"
-          borderRadius="2xl"
-          overflow="hidden"
-          borderWidth="0"
-          borderLeftWidth="4px"
-          borderLeftColor={borderColor}
-          shadow="sm"
-          _hover={{
-            shadow: 'md',
-            transform: 'translateY(-3px)',
-            transition: 'all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)',
-          }}
-          transition="all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)"
-          role="article"
-          bg="white"
-        >
-          <Box position="relative" w="full" h={{ base: '96px', md: '130px' }} display="flex" gap={1} p={2} bg="gray.50" flexWrap="nowrap" alignContent="flex-start" overflow="hidden">
-            {/* Requested seller items: primary target plus optional multi-product bundle items */}
-            <Box flex={1} display="flex" gap={1} minW="0" position="relative">
-              {[{ product_id: trade.target_product_id, product_title: trade.product_title, product_image_url: trade.product_image_url }, ...requestedItems].slice(0, 3).map((item: any, idx: number) => (
-                <Box key={`requested-${item.product_id || idx}`} flex={1} position="relative" borderRadius="xl" overflow="hidden" minW="0" shadow="sm">
-                  <ProductThumb
-                    pid={Number(item.product_id)}
-                    src={item.product_image_url}
-                    alt={getProductTitle(Number(item.product_id), item.product_title)}
-                    size="100%"
-                  />
-                  {idx === 2 && requestedCount > 3 && (
-                    <Box position="absolute" inset={0} bg="blackAlpha.600" display="flex" alignItems="center" justifyContent="center">
-                      <Text fontSize="xs" color="white" fontWeight="bold">
-                        +{requestedCount - 3}
-                      </Text>
-                    </Box>
-                  )}
-                </Box>
-              ))}
-              <Badge position="absolute" top={1} left={1} bg={isIncoming ? 'blue.500' : 'brand.500'} color="white" fontSize="9px" fontWeight="700" px={2} py={0.5} borderRadius="md" shadow="sm">
-                {leftLabel}
-              </Badge>
-            </Box>
-
-            {/* Their Items - Always flex=1 */}
-            <Box flex={1} display="flex" gap={1} minW="0">
-              {offeredItems.length > 0 ? (
-                <>
-                  {offeredItems.slice(0, 3).map((item: any, idx: number) => (
-                    <Box
-                      key={item.id || idx}
-                      flex={1}
-                      position="relative"
-                      borderRadius="xl"
-                      overflow="hidden"
-                      minW="0"
-                      h="100%"
-                      shadow="sm"
-                    >
-                      <ProductThumb
-                        pid={Number(item.product_id)}
-                        src={item.product_image_url}
-                        alt={getProductTitle(Number(item.product_id), item.product_title)}
-                        size="100%"
-                      />
-                      {idx === 2 && offeredItems.length > 3 && (
-                        <Box position="absolute" inset={0} bg="blackAlpha.600" display="flex" alignItems="center" justifyContent="center">
-                          <Text fontSize="xs" color="white" fontWeight="bold">
-                            +{offeredItems.length - 3}
-                          </Text>
-                        </Box>
-                      )}
-                    </Box>
-                  ))}
-                  <Badge position="absolute" top={1} right={1} bg={!isIncoming ? 'brand.500' : 'blue.500'} color="white" fontWeight="700" fontSize="9px" px={2} py={0.5} borderRadius="md" shadow="sm">
-                    {rightLabel}{offeredItems.length > 1 ? 's' : ''}
-                  </Badge>
-                </>
-              ) : (
-                <Box flex={1} position="relative" borderRadius="xl" overflow="hidden" bg="white" shadow="sm" minW="0">
-                  <Box w="full" h="full" bg="gray.100" display="flex" alignItems="center" justifyContent="center">
-                    <Text fontSize="xs" fontWeight="600" color="gray.500">No items</Text>
-                  </Box>
-                  <Badge position="absolute" top={1} right={1} bg="gray.500" color="white" fontWeight="700" fontSize="9px" px={2} py={0.5} borderRadius="md" shadow="sm">
-                    {rightLabel}
-                  </Badge>
-                </Box>
-              )}
-            </Box>
-          </Box>
-
-          <CardHeader pb={{ base: 2, md: 3 }} pt={{ base: 3, md: 4 }} px={{ base: 3, md: 5 }} flex={1}>
-            <VStack spacing={{ base: 2, md: 3 }} align="stretch">
-              <HStack spacing={1.5} flexWrap="wrap">
-                <Badge colorScheme={tradeKind === 'Buyout' ? 'orange' : 'brand'} variant="solid" fontSize="10px" px={2} py={0.5} borderRadius="md" fontWeight="700" letterSpacing="wider" textTransform="uppercase">
-                  {tradeKind}
-                </Badge>
-                <Badge colorScheme={statusBadge.color} bg={`${statusBadge.color}.100`} color={`${statusBadge.color}.700`} variant="solid" fontSize="10px" px={2} py={0.5} borderRadius="md" fontWeight="700" letterSpacing="wider" textTransform="uppercase">
-                  {statusBadge.text}
-                </Badge>
-              </HStack>
-
-              <Heading fontSize={{ base: 'sm', md: 'md' }} fontWeight="700" color="gray.800" noOfLines={2} lineHeight="1.3" letterSpacing="tight">
-                {getRequestedBundleTitle(trade)}
-              </Heading>
-
-              <HStack spacing={2}>
-                <Avatar
-                  name={userName}
-                  size="xs"
-                  bg={isIncoming ? 'green.500' : 'blue.500'}
-                  color="white"
+      <Box
+        bg="white"
+        borderWidth="1px"
+        borderColor="gray.200"
+        borderLeftWidth="4px"
+        borderLeftColor={borderColor}
+        borderRadius="xl"
+        p={{ base: 2.5, md: 3 }}
+        cursor="pointer"
+        transition="all 0.2s ease"
+        _hover={{ bg: 'gray.50', shadow: 'sm', transform: 'translateY(-1px)' }}
+        onClick={() => onView(trade)}
+        role="article"
+      >
+        <Flex align="center" gap={{ base: 2.5, md: 3 }} minW={0}>
+          {/* Left: product thumbnails */}
+          <HStack spacing={1} flexShrink={0}>
+            {thumbItems.slice(0, 2).map((item: any, idx: number) => (
+              <Box
+                key={idx}
+                w={{ base: '44px', md: '52px' }}
+                h={{ base: '44px', md: '52px' }}
+                borderRadius="md"
+                overflow="hidden"
+                bg="gray.100"
+                flexShrink={0}
+              >
+                <ProductThumb
+                  pid={Number(item.product_id)}
+                  src={item.product_image_url}
+                  alt={getProductTitle(Number(item.product_id), item.product_title)}
+                  size="100%"
                 />
-                <Box flex={1} minW={0}>
-                  <Text fontSize="xs" fontWeight="600" color="gray.700" noOfLines={1}>
-                    {userName}
-                  </Text>
-                  <Text fontSize="10px" color="gray.400" textTransform="uppercase" letterSpacing="wider">
-                    {timeAgo}
-                  </Text>
-                </Box>
-              </HStack>
-            </VStack>
-          </CardHeader>
+              </Box>
+            ))}
+          </HStack>
 
-          <CardFooter pt={0} pb={{ base: 3, md: 4 }} px={{ base: 3, md: 4 }} borderTopWidth="1px" borderTopColor="gray.100">
-            <Button
-              size={{ base: 'sm', md: 'md' }}
-              borderRadius="2xl"
-              fontWeight="600"
-              colorScheme="brand"
-              w="full"
-              onClick={() => onView(trade)}
-              leftIcon={<Icon as={ViewIcon} boxSize={{ base: 3, md: 4 }} />}
-              _hover={{ transform: 'translateY(-2px)' }}
-              transition="all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1)"
-              shadow="sm"
-            >
-              View Trade
-            </Button>
-          </CardFooter>
-        </Card>
+          {/* Center: badges + title + user + time */}
+          <VStack align="start" spacing={0.5} minW={0} flex={1}>
+            <HStack spacing={1} flexWrap="wrap">
+              <Badge
+                colorScheme={tradeKind === 'Buyout' ? 'orange' : 'brand'}
+                variant="solid"
+                fontSize="9px"
+                px={1.5}
+                py={0.5}
+                borderRadius="md"
+                fontWeight="700"
+                textTransform="uppercase"
+                letterSpacing="wider"
+              >
+                {tradeKind}
+              </Badge>
+              <Badge
+                colorScheme={statusBadge.color}
+                bg={`${statusBadge.color}.100`}
+                color={`${statusBadge.color}.700`}
+                variant="solid"
+                fontSize="9px"
+                px={1.5}
+                py={0.5}
+                borderRadius="md"
+                fontWeight="700"
+                textTransform="uppercase"
+                letterSpacing="wider"
+              >
+                {statusBadge.text}
+              </Badge>
+            </HStack>
+            <Text fontWeight="700" fontSize={{ base: 'xs', md: 'sm' }} noOfLines={1} color="gray.800" lineHeight="1.3">
+              {getRequestedBundleTitle(trade)}
+            </Text>
+            <Text fontSize={{ base: '10px', md: 'xs' }} color="gray.500" noOfLines={1}>
+              {userName}
+            </Text>
+            <Text fontSize="9px" color="gray.400" textTransform="uppercase" letterSpacing="wider">
+              {timeAgo}
+            </Text>
+          </VStack>
+
+          {/* Right: View button */}
+          <Button
+            size="sm"
+            colorScheme="brand"
+            variant="outline"
+            flexShrink={0}
+            borderRadius="xl"
+            fontWeight="600"
+            fontSize={{ base: 'xs', md: 'sm' }}
+            px={{ base: 3, md: 4 }}
+            leftIcon={<Icon as={ViewIcon} boxSize={3} />}
+            onClick={(e) => {
+              e.stopPropagation()
+              onView(trade)
+            }}
+            _hover={{ transform: 'translateY(-1px)', shadow: 'sm' }}
+            transition="all 0.2s"
+          >
+            View
+          </Button>
+        </Flex>
+      </Box>
     )
   })
 
@@ -3346,98 +3302,116 @@ const Dashboard: React.FC = () => {
     return (
       <Box
         bg="white"
-        border="1px"
-        borderColor={borderColor}
+        borderWidth="1px"
+        borderColor="gray.200"
         borderLeftWidth="4px"
         borderLeftColor="brand.400"
-        borderRadius="lg"
-        p={{ base: 3, md: 3.5 }}
+        borderRadius="xl"
+        p={{ base: 2.5, md: 3 }}
         cursor="pointer"
         transition="all 0.2s ease"
         _hover={{ bg: 'gray.50', shadow: 'sm', transform: 'translateY(-1px)' }}
         onClick={() => onView(trade)}
       >
-        <Flex
-          align={{ base: 'stretch', md: 'center' }}
-          direction={{ base: 'column', md: 'row' }}
-          gap={{ base: 3, md: 4 }}
-          minW={0}
-        >
-          <HStack spacing={3} flex={1} minW={0} align="center">
-            <HStack spacing={1} flexShrink={0}>
-              {[yourProductImage, incomingProductImage].map((src, index) => (
-                <Box
-                  key={`${trade.id || trade.loop_id || trade.chain_id}-${index}`}
-                  w={{ base: '46px', md: '52px' }}
-                  h={{ base: '46px', md: '52px' }}
-                  borderRadius="md"
-                  overflow="hidden"
-                  bg="gray.100"
-                >
-                  {src ? (
-                    <Image src={src} alt={index === 0 ? 'Your item' : 'Matched item'} w="100%" h="100%" objectFit="cover" />
-                  ) : (
-                    <Center w="100%" h="100%">
-                      <Icon as={FaHandshake} color="gray.300" boxSize={4} />
-                    </Center>
-                  )}
-                </Box>
-              ))}
-            </HStack>
-
-            <VStack align="start" spacing={1} minW={0} flex={1}>
-              <HStack spacing={1.5} flexWrap="wrap">
-                <Badge colorScheme="brand" variant="solid" fontSize="2xs" px={1.5} py={0.5}>
-                  {loopLabel}
-                </Badge>
-                <Badge colorScheme="green" variant="subtle" fontSize="2xs" px={1.5} py={0.5}>
-                  Ongoing
-                </Badge>
-              </HStack>
-              <Text fontWeight="semibold" fontSize={{ base: 'sm', md: 'md' }} noOfLines={1} color="gray.800">
-                {summary.yourGive}
-              </Text>
-              <Text fontSize="xs" color="gray.500" noOfLines={1}>
-                for {summary.yourGet}
-              </Text>
-              <HStack spacing={2} color="gray.500">
-                <HStack spacing={-2}>
-                  {participants.slice(0, 3).map((p: any, i: number) => (
-                    <Avatar
-                      key={p.user_id || p.id || i}
-                      name={p.user_name || 'User'}
-                      size="2xs"
-                      bg="brand.500"
-                      color="white"
-                      boxShadow="0 0 0 2px white"
-                    />
-                  ))}
-                </HStack>
-                <Text fontSize="xs" noOfLines={1}>
-                  {participants.length} participant{participants.length === 1 ? '' : 's'}
-                </Text>
-              </HStack>
-            </VStack>
+        <Flex align="center" gap={{ base: 2.5, md: 3 }} minW={0}>
+          {/* Left: product images */}
+          <HStack spacing={1} flexShrink={0}>
+            {[yourProductImage, incomingProductImage].map((src, index) => (
+              <Box
+                key={`${trade.id || trade.loop_id || trade.chain_id}-${index}`}
+                w={{ base: '40px', md: '48px' }}
+                h={{ base: '40px', md: '48px' }}
+                borderRadius="md"
+                overflow="hidden"
+                bg="gray.100"
+                flexShrink={0}
+              >
+                {src ? (
+                  <Image src={src} alt={index === 0 ? 'Your item' : 'Matched item'} w="100%" h="100%" objectFit="cover" />
+                ) : (
+                  <Center w="100%" h="100%">
+                    <Icon as={FaHandshake} color="gray.300" boxSize={4} />
+                  </Center>
+                )}
+              </Box>
+            ))}
           </HStack>
 
-          <VStack align={{ base: 'stretch', md: 'end' }} spacing={2} flexShrink={0}>
-            <Text fontSize="xs" color="gray.500" noOfLines={1}>
-              {updatedLabel}
+          {/* Center: badges + title + subtitle + meta */}
+          <VStack align="start" spacing={0.5} minW={0} flex={1}>
+            <HStack spacing={1} flexWrap="wrap">
+              <Badge
+                colorScheme="brand"
+                variant="solid"
+                fontSize="9px"
+                px={1.5}
+                py={0.5}
+                borderRadius="md"
+                fontWeight="700"
+                textTransform="uppercase"
+                letterSpacing="wider"
+              >
+                {loopLabel}
+              </Badge>
+              <Badge
+                colorScheme="green"
+                variant="subtle"
+                fontSize="9px"
+                px={1.5}
+                py={0.5}
+                borderRadius="md"
+                fontWeight="700"
+                textTransform="uppercase"
+                letterSpacing="wider"
+              >
+                Ongoing
+              </Badge>
+            </HStack>
+            <Text fontWeight="700" fontSize={{ base: 'xs', md: 'sm' }} noOfLines={1} color="gray.800" lineHeight="1.3">
+              {summary.yourGive}
             </Text>
-            <Button
-              size="sm"
-              colorScheme="brand"
-              variant="outline"
-              minW={{ base: 'full', md: '88px' }}
-              leftIcon={<Icon as={ViewIcon} boxSize={3} />}
-              onClick={(e) => {
-                e.stopPropagation()
-                onView(trade)
-              }}
-            >
-              View
-            </Button>
+            <Text fontSize={{ base: '10px', md: 'xs' }} color="gray.500" noOfLines={1}>
+              for {summary.yourGet}
+            </Text>
+            <HStack spacing={1.5}>
+              <HStack spacing={-2}>
+                {participants.slice(0, 3).map((p: any, i: number) => (
+                  <Avatar
+                    key={p.user_id || p.id || i}
+                    name={p.user_name || 'User'}
+                    size="2xs"
+                    bg="brand.500"
+                    color="white"
+                    boxShadow="0 0 0 2px white"
+                  />
+                ))}
+              </HStack>
+              <Text fontSize="9px" color="gray.400" textTransform="uppercase" letterSpacing="wider">
+                {participants.length} participant{participants.length === 1 ? '' : 's'} · {updatedLabel}
+              </Text>
+            </HStack>
           </VStack>
+
+          {/* Right: View button */}
+          <Button
+            size="sm"
+            colorScheme="brand"
+            variant="outline"
+            flexShrink={0}
+            borderRadius="xl"
+            fontWeight="600"
+            fontSize={{ base: 'xs', md: 'sm' }}
+            px={{ base: 3, md: 4 }}
+            leftIcon={<Icon as={ViewIcon} boxSize={3} />}
+            onClick={(e) => {
+              e.stopPropagation()
+              onView(trade)
+            }}
+            _hover={{ transform: 'translateY(-1px)', shadow: 'sm' }}
+            transition="all 0.2s"
+          >
+            View
+          </Button>
         </Flex>
       </Box>
     )
@@ -5272,58 +5246,21 @@ const Dashboard: React.FC = () => {
                                 </Box>
                                 {paginatedTrades.map((trade) => {
                                   const isIncoming = user?.id === trade.seller_id
-                                  const userName = isIncoming ? (trade.seller_name || 'Anonymous') : (trade.buyer_name || 'Anonymous')
                                   return (
-                                    <Flex
+                                    <Box
                                       key={trade.id}
-                                      align="center"
-                                      gap={{ base: 2, md: 4 }}
-                                      p={3}
+                                      px={2}
+                                      py={1.5}
                                       borderBottom="1px"
                                       borderColor={borderColor}
-                                      _hover={{ bg: 'gray.50' }}
-                                      minW={0}
-                                      flexWrap="wrap"
                                     >
-                                      <Box
-                                        w="60px"
-                                        h="60px"
-                                        flexShrink={0}
-                                        borderRadius="md"
-                                        overflow="hidden"
-                                        bg="gray.100"
-                                      >
-                                        <ProductThumb
-                                          pid={trade.target_product_id}
-                                          alt={getRequestedBundleTitle(trade)}
-                                          size="100%"
-                                        />
-                                      </Box>
-                                      <VStack align="start" spacing={0} flex={1} minW={0}>
-                                        <Text fontWeight="semibold" noOfLines={1} fontSize={{ base: 'sm', md: 'md' }}>
-                                          {getRequestedBundleTitle(trade)}
-                                        </Text>
-                                        {getRequestedBundleCount(trade) > 1 && (
-                                          <Badge colorScheme="blue" variant="subtle" fontSize="2xs" px={1.5} py={0.5}>
-                                            {getRequestedBundleCount(trade)} requested items
-                                          </Badge>
-                                        )}
-                                        <Text fontSize="xs" color="gray.600">{userName}</Text>
-                                      </VStack>
-                                      <Badge colorScheme="green" variant="subtle" fontSize="2xs" px={2} py={1}>
-                                        Active
-                                      </Badge>
-                                      <Button
-                                        size="sm"
-                                        colorScheme="brand"
-                                        variant="outline"
-                                        fontSize={{ base: 'xs', md: 'sm' }}
-                                        px={{ base: 2, md: 3 }}
-                                        onClick={() => handleViewOngoingTrade(trade)}
-                                      >
-                                        View
-                                      </Button>
-                                    </Flex>
+                                      <OngoingTradeCard
+                                        trade={trade}
+                                        isIncoming={isIncoming}
+                                        onView={handleViewOngoingTrade}
+                                        onComplete={handleCompleteTradeClick}
+                                      />
+                                    </Box>
                                   )
                                 })}
                                 {visibleOngoingMultiWayTrades.map((trade: any) => {
@@ -5334,7 +5271,8 @@ const Dashboard: React.FC = () => {
                                   return (
                                     <Box
                                       key={`ongoing-loop-list-${loopId}`}
-                                      p={3}
+                                      px={2}
+                                      py={1.5}
                                       borderBottom="1px"
                                       borderColor={borderColor}
                                     >

@@ -170,41 +170,48 @@ export const StudentAdCard: React.FC<{ ad: StudentAd }> = ({ ad }) => {
       </Box>
 
       {/* Content */}
-      <Flex p={{ base: 3, md: 4 }} direction="column" flex={1} justify="space-between">
-        <Box>
-          <Heading
-            size="sm"
-            fontSize={{ base: '12px', md: '13px' }}
-            fontWeight="700"
-            color="gray.800"
-            noOfLines={2}
-            lineHeight="1.3"
-            mb={2}
-          >
-            {ad.title}
-          </Heading>
-          
-          <HStack spacing={2} justify="space-between" w="100%" mb={3}>
-            {ad.category && (
-              <Badge colorScheme="blue" variant="subtle" fontSize={{ base: '9px', md: '10px' }} px={2} borderRadius="sm">
-                {ad.category}
-              </Badge>
-            )}
-            {ad.price && (
-              <Text fontSize={{ base: 'sm', md: 'md' }} fontWeight="800" color="orange.600">
-                {ad.price}
-              </Text>
-            )}
-          </HStack>
-        </Box>
+      <Flex
+        px={{ base: 2.5, md: 4 }}
+        pt={{ base: 1.5, md: 3 }}
+        pb={{ base: 2, md: 4 }}
+        direction="column"
+        flex={1}
+      >
+        <Heading
+          size="sm"
+          fontSize={{ base: '12px', md: '13px' }}
+          fontWeight="700"
+          color="gray.800"
+          noOfLines={1}
+          lineHeight="1.3"
+          mb={{ base: 0.5, md: 1 }}
+        >
+          {ad.title}
+        </Heading>
+
+        <HStack spacing={2} justify="space-between" w="100%" mb={{ base: 0.5, md: 1 }}>
+          {ad.category && (
+            <Badge colorScheme="blue" variant="subtle" fontSize={{ base: '9px', md: '10px' }} px={2} borderRadius="sm">
+              {ad.category}
+            </Badge>
+          )}
+          {ad.price && (
+            <Text fontSize={{ base: '11px', md: 'sm' }} fontWeight="800" color="orange.600">
+              {ad.price}
+            </Text>
+          )}
+        </HStack>
 
         {/* CTA Button */}
         <Button
-          size={{ base: 'xs', md: 'sm' }}
+          size="sm"
+          h={{ base: '30px', md: '36px' }}
           colorScheme="orange"
           w="100%"
+          mt="auto"
+          pt={{ base: 1, md: 2 }}
           rightIcon={<ExternalLinkIcon />}
-          fontSize={{ base: '11px', md: '12px' }}
+          fontSize={{ base: '10px', md: '12px' }}
           fontWeight="800"
           borderRadius="xl"
           onClick={(e) => {
@@ -213,7 +220,6 @@ export const StudentAdCard: React.FC<{ ad: StudentAd }> = ({ ad }) => {
           }}
           _hover={{ bg: 'orange.500', transform: 'translateY(-1px)' }}
           transition="all 0.2s"
-          h={{ base: '32px', md: '36px' }}
         >
           View on Shopee
         </Button>

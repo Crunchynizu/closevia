@@ -191,7 +191,6 @@ api.interceptors.response.use(
       const shouldInvalidateAuthenticatedSession = !isReviewEndpoint
         && !isAuthRecoveryApiUrl(url)
         && hasStoredAuthenticatedSession()
-        && (isProtectedApiUrl(url) || isUnsafeApiRequest)
 
       if (shouldInvalidateAuthenticatedSession) {
         clearStoredAuth()

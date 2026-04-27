@@ -171,6 +171,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   useEffect(() => {
     return onAuthInvalid(() => {
+      setStoredAuthenticatedSession(false)
       void api.post('/api/auth/logout').catch(() => undefined)
       clearAuthState()
       broadcastAuthSync('logout')

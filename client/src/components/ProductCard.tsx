@@ -39,12 +39,9 @@ interface ProductCardProps {
   onBoostClick?: (productId: number) => void
   isStagnant?: boolean
   imageLoading?: 'lazy' | 'eager'
+  showAvailability?: boolean
 }
 
-/**
- * ProductCard - Memoized product card component to prevent unnecessary re-renders
- * Displays product image, seller info, title, description, wishlist count, and action buttons
- */
 const ProductCard: React.FC<ProductCardProps> = ({
   product,
   onTradeClick,
@@ -55,6 +52,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
   onBoostClick,
   isStagnant = false,
   imageLoading = 'lazy',
+  showAvailability = false,
 }) => {
   const navigate = useNavigate()
   const toast = useToast()
@@ -452,23 +450,55 @@ const ProductCard: React.FC<ProductCardProps> = ({
             prefetchedDistanceLabel={product.distance}
           />
         </Box>
+
+        {/* Mobile-only condition badge overlay — bottom right of image */}
+        {product.condition && product.status !== 'sold' && (
+          <Badge
+            display={{ base: 'flex', md: 'none' }}
+            position="absolute"
+            bottom={2}
+            right={2}
+            colorScheme={
+              (() => {
+                const c = (product.condition || '').toLowerCase().trim()
+                if (c === 'new') return 'green'
+                if (c === 'like new') return 'teal'
+                if (c === 'good') return 'blue'
+                if (c === 'fair') return 'orange'
+                return 'gray'
+              })()
+            }
+            variant="solid"
+            borderRadius="md"
+            fontSize="9px"
+            fontWeight="700"
+            px={1.5}
+            py={0.5}
+            zIndex={2}
+            opacity={0.9}
+          >
+            {product.condition}
+          </Badge>
+        )}
       </Box>
 
       {/* Info section */}
       <Box
-        p={{ base: 3, md: 4 }}
+        px={{ base: 2.5, md: 4 }}
+        pt={{ base: 1.5, md: 3 }}
+        pb={{ base: 2, md: 4 }}
         display="flex"
         flexDirection="column"
         flex={1}
         overflow="hidden"
       >
-        {/* Seller, condition, and save row */}
-        <Flex justify="space-between" align="center" gap={2} mb={1}>
+        {/* Seller row — desktop only */}
+        <Flex display={{ base: 'none', md: 'flex' }} justify="space-between" align="center" gap={2} mb={1}>
           <HStack spacing={1} align="center" minW={0} flex={1}>
             {((product as any).seller_slug || product.seller_id) ? (
               <RouterLink to={`/users/${(product as any).seller_slug || product.seller_id}`} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                 <VerifiedAvatar
-                  size={{ base: 'xs', md: 'sm' } as any}
+                  size="sm"
                   src={sellerAvatar}
                   name={product.seller_name || 'U'}
                   bg="brand.500"
@@ -480,7 +510,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
               </RouterLink>
             ) : (
               <VerifiedAvatar
-                size={{ base: 'xs', md: 'sm' } as any}
+                size="sm"
                 src={sellerAvatar}
                 name={product.seller_name || 'U'}
                 bg="brand.500"
@@ -488,16 +518,16 @@ const ProductCard: React.FC<ProductCardProps> = ({
                 isVerified={product.seller_verified || false}
               />
             )}
-            <Text fontSize={{ base: 'xs', md: 'xs' }} color="black" fontWeight="medium" noOfLines={1}>
+            <Text fontSize="xs" color="black" fontWeight="medium" noOfLines={1}>
               {product.seller_name || 'Unknown'}
             </Text>
           </HStack>
-          <HStack spacing={{ base: 1, md: 1.5 }} flexShrink={0}>
-            <Badge fontSize={{ base: '10px', md: '2xs' }} colorScheme="blue" flexShrink={0} borderWidth="1px" borderRadius="md" px={1.5}>
+          <HStack spacing={1.5} flexShrink={0}>
+            <Badge fontSize="2xs" colorScheme="blue" flexShrink={0} borderWidth="1px" borderRadius="md" px={1.5}>
               {product.condition || 'Used'}
             </Badge>
             {isOwnProduct ? (
-              <Badge colorScheme="gray" variant="subtle" borderRadius="full" fontSize={{ base: '10px', md: '2xs' }} px={2}>
+              <Badge colorScheme="gray" variant="subtle" borderRadius="full" fontSize="2xs" px={2}>
                 Your item
               </Badge>
             ) : (
@@ -506,8 +536,8 @@ const ProductCard: React.FC<ProductCardProps> = ({
                   aria-label={isSaved ? 'Remove from saved' : 'Save product'}
                   icon={isSaved ? <FaHeart /> : <FaRegHeart />}
                   size="xs"
-                  minW={{ base: '30px', md: '28px' }}
-                  h={{ base: '30px', md: '28px' }}
+                  minW="28px"
+                  h="28px"
                   borderRadius="full"
                   variant="ghost"
                   color={isSaved ? 'red.500' : 'gray.600'}
@@ -521,25 +551,54 @@ const ProductCard: React.FC<ProductCardProps> = ({
           </HStack>
         </Flex>
 
-        {/* Title */}
-        <Heading
-          size="sm"
-          noOfLines={1}
-          mb={1}
-          color="gray.800"
-          flexShrink={0}
-          textAlign="left"
-          fontSize={{ base: '12px', md: '13px' }}
-          lineHeight="1.3"
-        >
-          {product.title}
-        </Heading>
+        {/* Title + save button on same row (mobile) / title alone (desktop) */}
+        <Flex align="center" gap={1} mb={{ base: 0.5, md: 1 }} minW={0} overflow="hidden">
+          <Heading
+            size="sm"
+            noOfLines={1}
+            flex={1}
+            minW={0}
+            color="gray.800"
+            flexShrink={1}
+            textAlign="left"
+            fontSize={{ base: '12px', md: '13px' }}
+            lineHeight="1.3"
+            overflow="hidden"
+          >
+            {product.title}
+          </Heading>
+          {/* Save / Your-item — mobile only; desktop version lives in seller row above */}
+          {isOwnProduct ? (
+            <Badge display={{ base: 'flex', md: 'none' }} colorScheme="gray" variant="subtle" borderRadius="full" fontSize="10px" px={1.5} flexShrink={0}>
+              Yours
+            </Badge>
+          ) : (
+            <Tooltip label={isSaved ? 'Remove from saved' : 'Save'} placement="top" hasArrow>
+              <IconButton
+                display={{ base: 'flex', md: 'none' }}
+                aria-label={isSaved ? 'Remove from saved' : 'Save product'}
+                icon={isSaved ? <FaHeart /> : <FaRegHeart />}
+                size="xs"
+                minW="24px"
+                h="24px"
+                borderRadius="full"
+                variant="ghost"
+                flexShrink={0}
+                color={isSaved ? 'red.500' : 'gray.400'}
+                isLoading={isSaving}
+                onClick={handleSaveToggle}
+                _hover={{ bg: 'red.50', color: isSaved ? 'red.600' : 'red.500' }}
+                _active={{ transform: 'scale(0.96)' }}
+              />
+            </Tooltip>
+          )}
+        </Flex>
 
         {/* Description */}
         <Text
           color="gray.600"
           noOfLines={1}
-          mb={1}
+          mb={{ base: 0.5, md: 1 }}
           fontSize={{ base: '11px', md: '12px' }}
           flexShrink={0}
           textAlign="left"
@@ -558,14 +617,14 @@ const ProductCard: React.FC<ProductCardProps> = ({
             fontSize="xs"
             fontWeight="bold"
             color="green.600"
-            mb={0.5}
+            mb={{ base: 0, md: 0.5 }}
           >
             ₱{(product.value as number).toLocaleString()}
           </Text>
         )}
 
         {/* Wishlist badge */}
-        <Flex mb={1} align="center" gap={1} minH={{ base: '16px', md: '18px' }}>
+        <Flex mb={{ base: 0.5, md: 1 }} align="center" gap={1} minH={{ base: 0, md: '18px' }}>
           {isBoosted && (
             <Tooltip label={boostTimeRemaining ? `Boosted for ${boostTimeRemaining} more` : 'Boosted'} placement="top" hasArrow>
               <Badge
@@ -598,15 +657,15 @@ const ProductCard: React.FC<ProductCardProps> = ({
           )}
         </Flex>
 
-        {/* Availability Slots (compact) */}
-        {(() => {
+        {/* Availability Slots (compact) — only when explicitly enabled */}
+        {showAvailability && (() => {
           const raw = (product as any).availability_slots
           if (!raw) return null
           try {
             const slots: AvailabilitySlot[] = typeof raw === 'string' ? JSON.parse(raw) : raw
             if (!Array.isArray(slots) || slots.length === 0) return null
             return (
-              <Box mb={1}>
+              <Box mb={{ base: 0.5, md: 1 }}>
                 <AvailabilitySlots slots={slots} availabilityType={(product as any).availability_type} compact />
               </Box>
             )
@@ -615,7 +674,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
 
         {/* Organization Tags */}
         {product.organization_tags && product.organization_tags.length > 0 && (
-          <Flex mb={1.5} align="center" gap={1} flexWrap="wrap">
+          <Flex mb={{ base: 0.5, md: 1.5 }} align="center" gap={1} flexWrap="wrap">
             {product.organization_tags.map((org: any) => (
               <Tooltip key={org.id} label={org.description || org.name} placement="top" hasArrow>
                 <Badge
@@ -657,13 +716,14 @@ const ProductCard: React.FC<ProductCardProps> = ({
 
         {/* Action buttons */}
         {isOwnProduct ? (
-          <VStack spacing={2} align="stretch" mt="auto" pt={2} w="full">
+          <VStack spacing={{ base: 1, md: 2 }} align="stretch" mt="auto" pt={{ base: 1, md: 2 }} w="full">
             <Badge alignSelf="flex-start" colorScheme="gray" variant="subtle" borderRadius="full" px={2.5} py={0.5}>
               This is your item
             </Badge>
-            <HStack spacing={{ base: 1.5, md: 2 }} w="full">
+            <HStack spacing={{ base: 1, md: 2 }} w="full">
               <Button
                 size="sm"
+                h={{ base: '30px', md: '36px' }}
                 leftIcon={<EditIcon />}
                 flex={1}
                 px={{ base: 1, md: 3 }}
@@ -678,6 +738,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
               </Button>
               <Button
                 size="sm"
+                h={{ base: '30px', md: '36px' }}
                 leftIcon={<ViewIcon />}
                 flex={1}
                 px={{ base: 1, md: 3 }}
@@ -692,10 +753,11 @@ const ProductCard: React.FC<ProductCardProps> = ({
             </HStack>
           </VStack>
         ) : (
-          <HStack spacing={{ base: 1.5, md: 2 }} mt="auto" pt={2} w="full">
+          <HStack spacing={{ base: 1, md: 2 }} mt="auto" pt={{ base: 1, md: 2 }} w="full">
             <Tooltip label="Trade" placement="top">
               <Button
                 size="sm"
+                h={{ base: '30px', md: '36px' }}
                 bg={useColorModeValue('brand.50', 'brand.900')}
                 color={useColorModeValue('brand.600', 'brand.200')}
                 leftIcon={<Icon as={FaExchangeAlt} />}
@@ -716,6 +778,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
 
             <Button
               size="sm"
+              h={{ base: '30px', md: '36px' }}
               bg={useColorModeValue('orange.50', 'orange.900')}
               color={useColorModeValue('orange.600', 'orange.200')}
               leftIcon={<Icon as={FaMoneyBillWave} />}
@@ -738,6 +801,9 @@ const ProductCard: React.FC<ProductCardProps> = ({
                 aria-label="View offers"
                 icon={<FaHandshake />}
                 size="sm"
+                h={{ base: '30px', md: '36px' }}
+                w={{ base: '30px', md: '36px' }}
+                minW={{ base: '30px', md: '36px' }}
                 bg={useColorModeValue('blue.50', 'blue.900')}
                 color={useColorModeValue('blue.600', 'blue.200')}
                 borderRadius="xl"
