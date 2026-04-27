@@ -14,25 +14,9 @@ import Register from './pages/Register'
 import VerifyEmail from './pages/VerifyEmail'
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
-import Dashboard from './pages/Dashboard'
-import ProductDetail from './pages/ProductDetail'
-import AddProduct from './pages/AddProduct'
 import GlobalPopup from './components/GlobalPopup';
-import EditProduct from './pages/EditProduct'
-import Notifications from './pages/Notifications'
-import Settings from './pages/Settings'
-import Trades from './pages/Trades'
-import Offers from './pages/Offers'
-import Profile from './pages/Profile'
-import UserProfile from './pages/UserProfile'
-import CreateOrganization from './pages/CreateOrganization'
-import OrganizationProfile from './pages/OrganizationProfile'
-import Organizations from './pages/Organizations'
-import ProductsList from './pages/ProductsList'
-import SavedProducts from './pages/SavedProducts'
-import Premium from './pages/premium'
-import DeliveryOption from './delivery_option/delivery'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { setStoredToken } from './utils/authStorage'
 import { ProductProvider } from './contexts/ProductContext'
 import { RealtimeProvider } from './contexts/RealtimeContext'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -42,6 +26,7 @@ import { MobileNavProvider } from './contexts/MobileNavContext'
 import { NotificationProvider } from './contexts/NotificationContext'
 import ErrorBoundary from './components/ErrorBoundary'
 import ToastNotification from './components/ToastNotification'
+import SessionTimeoutManager from './components/SessionTimeoutManager'
 
 // Theme applier component - loads and applies saved theme preference
 const ThemeApplier: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -66,14 +51,44 @@ const ThemeApplier: React.FC<{ children: React.ReactNode }> = ({ children }) => 
 
   return <>{children}</>
 }
+const RouteFallback: React.FC = () => (
+  <Center h="100vh">
+    <Spinner />
+  </Center>
+)
+
+const lazyWithFallback = (importer: () => Promise<{ default: React.ComponentType<any> }>, label: string) =>
+  lazy(() =>
+    importer().catch(() => ({
+      default: () => <Box p={4}><Text>{`Failed to load ${label}`}</Text></Box>,
+    }))
+  )
+
 // Lazy load delivery option components with error handling
-const RiderHome = lazy(() => import('./delivery_option/RiderHome').catch(() => ({ default: () => <Box p={4}><Text>Failed to load Rider Home</Text></Box> })))
-const RiderApplication = lazy(() => import('./delivery_option/rider').catch(() => ({ default: () => <Box p={4}><Text>Failed to load Rider Application</Text></Box> })))
-const BatchPreview = lazy(() => import('./delivery_option/BatchPreview').catch(() => ({ default: () => <Box p={4}><Text>Failed to load Batch Preview</Text></Box> })))
-const BatchStatus = lazy(() => import('./delivery_option/BatchStatus').catch(() => ({ default: () => <Box p={4}><Text>Failed to load Batch Status</Text></Box> })))
-const RemittanceLedger = lazy(() => import('./delivery_option/RemittanceLedger').catch(() => ({ default: () => <Box p={4}><Text>Failed to load Remittance Ledger</Text></Box> })))
-const TaskStepper = lazy(() => import('./delivery_option/TaskStepper').catch(() => ({ default: () => <Box p={4}><Text>Failed to load Task Stepper</Text></Box> })))
-const AdminDashboard = lazy(() => import('./pages/AdminDashboard').catch(() => ({ default: () => <Box p={4}><Text>Failed to load Admin Dashboard</Text></Box> })))
+const Dashboard = lazyWithFallback(() => import('./pages/Dashboard'), 'Dashboard')
+const ProductDetail = lazyWithFallback(() => import('./pages/ProductDetail'), 'Product Detail')
+const AddProduct = lazyWithFallback(() => import('./pages/AddProduct'), 'Add Product')
+const EditProduct = lazyWithFallback(() => import('./pages/EditProduct'), 'Edit Product')
+const Notifications = lazyWithFallback(() => import('./pages/Notifications'), 'Notifications')
+const Settings = lazyWithFallback(() => import('./pages/Settings'), 'Settings')
+const Trades = lazyWithFallback(() => import('./pages/Trades'), 'Trades')
+const Offers = lazyWithFallback(() => import('./pages/Offers'), 'Offers')
+const Profile = lazyWithFallback(() => import('./pages/Profile'), 'Profile')
+const UserProfile = lazyWithFallback(() => import('./pages/UserProfile'), 'User Profile')
+const CreateOrganization = lazyWithFallback(() => import('./pages/CreateOrganization'), 'Create Organization')
+const OrganizationProfile = lazyWithFallback(() => import('./pages/OrganizationProfile'), 'Organization Profile')
+const Organizations = lazyWithFallback(() => import('./pages/Organizations'), 'Organizations')
+const ProductsList = lazyWithFallback(() => import('./pages/ProductsList'), 'Products List')
+const SavedProducts = lazyWithFallback(() => import('./pages/SavedProducts'), 'Saved Products')
+const Premium = lazyWithFallback(() => import('./pages/premium'), 'Premium')
+const DeliveryOption = lazyWithFallback(() => import('./delivery_option/delivery'), 'Delivery')
+const RiderHome = lazyWithFallback(() => import('./delivery_option/RiderHome'), 'Rider Home')
+const RiderApplication = lazyWithFallback(() => import('./delivery_option/rider'), 'Rider Application')
+const BatchPreview = lazyWithFallback(() => import('./delivery_option/BatchPreview'), 'Batch Preview')
+const BatchStatus = lazyWithFallback(() => import('./delivery_option/BatchStatus'), 'Batch Status')
+const RemittanceLedger = lazyWithFallback(() => import('./delivery_option/RemittanceLedger'), 'Remittance Ledger')
+const TaskStepper = lazyWithFallback(() => import('./delivery_option/TaskStepper'), 'Task Stepper')
+const AdminDashboard = lazyWithFallback(() => import('./pages/AdminDashboard'), 'Admin Dashboard')
 
 // Loading overlay component
 const LoadingOverlay: React.FC = () => {
@@ -82,7 +97,7 @@ const LoadingOverlay: React.FC = () => {
   const handleSkip = () => {
     // Enable development mode and reload
     localStorage.setItem('skip_auth', 'true')
-    localStorage.removeItem('clovia_token')
+    setStoredToken(null)
     window.location.reload()
   }
 
@@ -128,19 +143,17 @@ const LoadingOverlay: React.FC = () => {
 
 // Main app content component that uses the auth context
 const AppContent: React.FC = () => {
-  const { loading } = useAuth()
-
-  if (loading) {
-    return <LoadingOverlay />
-  }
+  const { user, loading } = useAuth()
 
   return (
-    <AnimatePresence mode="wait">
-      <Routes>
+    <>
+      {loading && !user ? <LoadingOverlay /> : null}
+      <AnimatePresence mode="wait">
+        <Routes>
         {/* Landing page route - no sidebar or app layout */}
         <Route path="/" element={
           <PageTransition>
-            {localStorage.getItem('has_visited') === 'true' ? <Navigate to="/home" replace /> : <LandingPage />}
+            {localStorage.getItem('has_visited') === 'true' ? <Navigate to="/home" replace /> : <Home />}
           </PageTransition>
         } />
         {/* Always-accessible landing page route (for logo clicks) */}
@@ -160,37 +173,37 @@ const AppContent: React.FC = () => {
         <Route path="/rider-queue" element={<Navigate to="/rider-home" replace />} />
         <Route path="/rider-home" element={
           <PageTransition>
-            <Suspense fallback={<Center h="100vh"><Spinner /></Center>}><RiderHome /></Suspense>
+            <Suspense fallback={<RouteFallback />}><RiderHome /></Suspense>
           </PageTransition>
         } />
         <Route path="/rider-application" element={
           <PageTransition>
-            <Suspense fallback={<Center h="100vh"><Spinner /></Center>}><RiderApplication /></Suspense>
+            <Suspense fallback={<RouteFallback />}><RiderApplication /></Suspense>
           </PageTransition>
         } />
         <Route path="/batch-preview/:batchId" element={
           <PageTransition>
-            <Suspense fallback={<Center h="100vh"><Spinner /></Center>}><BatchPreview /></Suspense>
+            <Suspense fallback={<RouteFallback />}><BatchPreview /></Suspense>
           </PageTransition>
         } />
         <Route path="/batch-status/:batchId" element={
           <PageTransition>
-            <Suspense fallback={<Center h="100vh"><Spinner /></Center>}><BatchStatus /></Suspense>
+            <Suspense fallback={<RouteFallback />}><BatchStatus /></Suspense>
           </PageTransition>
         } />
         <Route path="/remittance-ledger" element={
           <PageTransition>
-            <Suspense fallback={<Center h="100vh"><Spinner /></Center>}><RemittanceLedger /></Suspense>
+            <Suspense fallback={<RouteFallback />}><RemittanceLedger /></Suspense>
           </PageTransition>
         } />
         <Route path="/task-stepper/:batchId" element={
           <PageTransition>
-            <Suspense fallback={<Center h="100vh"><Spinner /></Center>}><TaskStepper /></Suspense>
+            <Suspense fallback={<RouteFallback />}><TaskStepper /></Suspense>
           </PageTransition>
         } />
         <Route path="/delivery" element={
           <PageTransition>
-            <DeliveryOption />
+            <Suspense fallback={<RouteFallback />}><DeliveryOption /></Suspense>
           </PageTransition>
         } />
 
@@ -232,94 +245,94 @@ const AppContent: React.FC = () => {
                 } />
                 <Route path="/products/:id" element={
                   <PageTransition>
-                    <ProductDetail />
+                    <Suspense fallback={<RouteFallback />}><ProductDetail /></Suspense>
                   </PageTransition>
                 } />
                 <Route path="/products" element={
                   <PageTransition>
-                    <ProductsList />
+                    <Suspense fallback={<RouteFallback />}><ProductsList /></Suspense>
                   </PageTransition>
                 } />
                 <Route path="/dashboard" element={
                   <PageTransition>
-                    <Dashboard key="dashboard-route" />
+                    <Suspense fallback={<RouteFallback />}><Dashboard key="dashboard-route" /></Suspense>
                   </PageTransition>
                 } />
                 <Route path="/add-product" element={
                   <PageTransition>
-                    <ProtectedRoute><AddProduct /></ProtectedRoute>
+                    <ProtectedRoute><Suspense fallback={<RouteFallback />}><AddProduct /></Suspense></ProtectedRoute>
                   </PageTransition>
                 } />
                 <Route path="/edit-product/:id" element={
                   <PageTransition>
-                    <ProtectedRoute><EditProduct /></ProtectedRoute>
+                    <ProtectedRoute><Suspense fallback={<RouteFallback />}><EditProduct /></Suspense></ProtectedRoute>
                   </PageTransition>
                 } />
                 <Route path="/notifications" element={
                   <PageTransition>
-                    <ProtectedRoute><Notifications /></ProtectedRoute>
+                    <ProtectedRoute><Suspense fallback={<RouteFallback />}><Notifications /></Suspense></ProtectedRoute>
                   </PageTransition>
                 } />
                 <Route path="/profile" element={
                   <PageTransition>
-                    <ProtectedRoute><Profile /></ProtectedRoute>
+                    <ProtectedRoute><Suspense fallback={<RouteFallback />}><Profile /></Suspense></ProtectedRoute>
                   </PageTransition>
                 } />
                 <Route path="/UserProfile" element={
                   <PageTransition>
-                    <ProtectedRoute><UserProfile /></ProtectedRoute>
+                    <ProtectedRoute><Suspense fallback={<RouteFallback />}><UserProfile /></Suspense></ProtectedRoute>
                   </PageTransition>
                 } />
                 <Route path="/users/:id" element={
                   <PageTransition>
-                    <UserProfile />
+                    <Suspense fallback={<RouteFallback />}><UserProfile /></Suspense>
                   </PageTransition>
                 } />
                 <Route path="/organizations/new" element={
                   <PageTransition>
-                    <ProtectedRoute><CreateOrganization /></ProtectedRoute>
+                    <ProtectedRoute><Suspense fallback={<RouteFallback />}><CreateOrganization /></Suspense></ProtectedRoute>
                   </PageTransition>
                 } />
                 <Route path="/organizations" element={
                   <PageTransition>
-                    <Organizations />
+                    <Suspense fallback={<RouteFallback />}><Organizations /></Suspense>
                   </PageTransition>
                 } />
                 <Route path="/org/:handle" element={
                   <PageTransition>
-                    <OrganizationProfile />
+                    <Suspense fallback={<RouteFallback />}><OrganizationProfile /></Suspense>
                   </PageTransition>
                 } />
                 <Route path="/settings" element={
                   <PageTransition>
-                    <ProtectedRoute><Settings /></ProtectedRoute>
+                    <ProtectedRoute><Suspense fallback={<RouteFallback />}><Settings /></Suspense></ProtectedRoute>
                   </PageTransition>
                 } />
                 <Route path="/trades" element={
                   <PageTransition>
-                    <ProtectedRoute><Trades /></ProtectedRoute>
+                    <ProtectedRoute><Suspense fallback={<RouteFallback />}><Trades /></Suspense></ProtectedRoute>
                   </PageTransition>
                 } />
                 <Route path="/offers" element={
                   <PageTransition>
-                    <ProtectedRoute><Offers /></ProtectedRoute>
+                    <ProtectedRoute><Suspense fallback={<RouteFallback />}><Offers /></Suspense></ProtectedRoute>
                   </PageTransition>
                 } />
                 <Route path="/saved-products" element={
                   <PageTransition>
-                    <PrivateRoute><SavedProducts /></PrivateRoute>
+                    <PrivateRoute><Suspense fallback={<RouteFallback />}><SavedProducts /></Suspense></PrivateRoute>
                   </PageTransition>
                 } />
                 <Route path="/admin" element={
                   <PageTransition>
-                    <Suspense fallback={<Center h="100vh"><Spinner /></Center>}>
+                    <Suspense fallback={<RouteFallback />}>
                       <AdminRoute><AdminDashboard /></AdminRoute>
                     </Suspense>
                   </PageTransition>
                 } />
                 <Route path="/premium" element={
                   <PageTransition>
-                    <ProtectedRoute><Premium /></ProtectedRoute>
+                    <ProtectedRoute><Suspense fallback={<RouteFallback />}><Premium /></Suspense></ProtectedRoute>
                   </PageTransition>
                 } />
 
@@ -332,8 +345,9 @@ const AppContent: React.FC = () => {
             </Box>
           </Box>
         } />
-      </Routes>
-    </AnimatePresence>
+        </Routes>
+      </AnimatePresence>
+    </>
   )
 }
 
@@ -346,8 +360,9 @@ function App() {
             <MobileNavProvider>
               <NotificationProvider>
                 <RealtimeProvider>
-                  <Router>
+                  <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
                     <ErrorBoundary>
+                      <SessionTimeoutManager />
                       <AppContent />
                     </ErrorBoundary>
                     <GlobalPopup />

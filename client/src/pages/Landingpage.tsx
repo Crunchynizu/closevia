@@ -8,6 +8,7 @@ import {
 } from '@chakra-ui/react'
 import { HamburgerIcon } from '@chakra-ui/icons'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 
 import { FiArrowRight, FiPhone, FiPlay, FiStar, FiRefreshCw, FiShield, FiArrowUpRight, FiTruck, FiDownload } from 'react-icons/fi'
 import { FaHandshake, FaBoxOpen, FaLeaf, FaExchangeAlt } from 'react-icons/fa'
@@ -30,7 +31,7 @@ const C = {
 }
 
 /* ─── Navbar ─── */
-const Navbar = ({ navigate, onGetStarted }: { navigate: ReturnType<typeof useNavigate>; onGetStarted: () => void }) => {
+const Navbar = ({ navigate, onGetStarted, isLoggedIn }: { navigate: ReturnType<typeof useNavigate>; onGetStarted: () => void; isLoggedIn: boolean }) => {
   const { isOpen, onOpen, onClose } = useDisclosure()
 
   const navItems = ['Home', 'About', 'How It Works', 'Features', 'Contact Us']
@@ -92,10 +93,10 @@ const Navbar = ({ navigate, onGetStarted }: { navigate: ReturnType<typeof useNav
             fontWeight="600"
             _hover={{ bg: C.accentDark, transform: 'translateY(-2px)', boxShadow: 'lg' }}
             transition="all 0.3s"
-            onClick={onGetStarted}
+            onClick={isLoggedIn ? () => navigate('/dashboard') : onGetStarted}
             rightIcon={<Icon as={FiArrowUpRight} />}
           >
-            Sign Up
+            {isLoggedIn ? 'Home' : 'Sign Up'}
           </Button>
           <IconButton
             display={{ base: 'flex', md: 'none' }}
@@ -130,8 +131,8 @@ const Navbar = ({ navigate, onGetStarted }: { navigate: ReturnType<typeof useNav
                     {item}
                   </Link>
                 ))}
-                <Button bg={C.accent} color={C.white} w="full" borderRadius="full" onClick={() => { onClose(); onGetStarted() }} fontWeight="600">
-                  Sign Up
+                <Button bg={C.accent} color={C.white} w="full" borderRadius="full" onClick={() => { onClose(); isLoggedIn ? navigate('/dashboard') : onGetStarted() }} fontWeight="600">
+                  {isLoggedIn ? 'Home' : 'Sign Up'}
                 </Button>
               </Stack>
             </DrawerBody>
@@ -286,8 +287,12 @@ const LandingProductCard = ({ image, name, desc }: { image: string; name: string
    ═══════════════════════════════════════════ */
 const LandingPage: React.FC = () => {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const handleGetStarted = () => {
     navigate('/login')
+  }
+  const handleBrowseProducts = () => {
+    navigate('/home')
   }
 
   return (
@@ -306,7 +311,7 @@ const LandingPage: React.FC = () => {
       }}
     >
       <style>{`html { scroll-behavior: smooth; scroll-padding-top: 80px; }`}</style>
-      <Navbar navigate={navigate} onGetStarted={handleGetStarted} />
+      <Navbar navigate={navigate} onGetStarted={handleGetStarted} isLoggedIn={!!user} />
 
       {/* ══════════ HERO SECTION ══════════ */}
       <Box
@@ -429,6 +434,21 @@ const LandingPage: React.FC = () => {
                 rightIcon={<Icon as={FiDownload} boxSize={5} />}
               >
                 Download Now
+              </Button>
+              <Button
+                size="lg"
+                variant="ghost"
+                color={C.accentDark}
+                borderRadius="full"
+                px={9}
+                fontWeight="800"
+                fontSize="md"
+                _hover={{ bg: `${C.accent}12`, transform: 'translateY(-4px)' }}
+                transition="all 0.3s"
+                onClick={handleBrowseProducts}
+                rightIcon={<Icon as={FiArrowRight} boxSize={5} />}
+              >
+                Browse Products
               </Button>
             </HStack>
 
@@ -698,6 +718,21 @@ const LandingPage: React.FC = () => {
               >
                 Get Started Now
               </Button>
+              <Button
+                variant="outline"
+                borderColor={C.accent}
+                color={C.accent}
+                borderRadius="full"
+                px={8}
+                size="lg"
+                fontWeight="700"
+                rightIcon={<Icon as={FiArrowRight} boxSize={5} />}
+                _hover={{ bg: `${C.accent}10`, transform: 'translateY(-3px)' }}
+                transition="all 0.3s"
+                onClick={handleBrowseProducts}
+              >
+                Browse Products
+              </Button>
             </VStack>
           </Flex>
         </Container>
@@ -813,6 +848,20 @@ const LandingPage: React.FC = () => {
                 rightIcon={<Icon as={FiArrowRight} boxSize={5} />}
               >
                 Download App
+              </Button>
+              <Button
+                size="lg"
+                variant="ghost"
+                color={C.accentDark}
+                borderRadius="full"
+                px={8}
+                fontWeight="700"
+                _hover={{ bg: `${C.accent}12`, transform: 'translateY(-3px)' }}
+                transition="all 0.3s"
+                onClick={handleBrowseProducts}
+                rightIcon={<Icon as={FiArrowRight} boxSize={5} />}
+              >
+                Browse Products
               </Button>
             </HStack>
           </VStack>

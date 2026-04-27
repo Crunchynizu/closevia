@@ -332,7 +332,7 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 		fmt.Printf("❌ Error creating user: %v\n", err)
 		return c.Status(500).JSON(models.APIResponse{
 			Success: false,
-			Error:   "Failed to create user: " + err.Error(),
+			Error:   "Failed to create user",
 		})
 	}
 
@@ -462,6 +462,7 @@ func (h *UserHandler) VerifyEmail(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to generate token"})
 	}
+	utils.SetAuthCookie(c, token)
 
 	return c.JSON(models.APIResponse{
 		Success: true,
@@ -734,6 +735,7 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 			Error:   "Failed to generate token",
 		})
 	}
+	utils.SetAuthCookie(c, token)
 
 	return c.JSON(models.APIResponse{
 		Success: true,
@@ -741,6 +743,51 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 		Data: fiber.Map{
 			"user":  user,
 			"token": token,
+		},
+	})
+}
+
+func (h *UserHandler) Logout(c *fiber.Ctx) error {
+	utils.ClearAuthCookie(c)
+	return c.JSON(models.APIResponse{
+		Success: true,
+		Message: "Logged out",
+	})
+}
+
+func (h *UserHandler) RefreshSession(c *fiber.Ctx) error {
+	token := ""
+	authHeader := c.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		token = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	}
+	if token == "" {
+		for _, cookieName := range utils.AuthCookieNames() {
+			token = strings.TrimSpace(c.Cookies(cookieName))
+			if token != "" {
+				break
+			}
+		}
+	}
+	if token == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(models.APIResponse{
+			Success: false,
+			Error:   "Authentication required",
+		})
+	}
+	if _, err := utils.ValidateJWT(token); err != nil {
+		utils.ClearAuthCookie(c)
+		return c.Status(fiber.StatusUnauthorized).JSON(models.APIResponse{
+			Success: false,
+			Error:   "Invalid or expired token",
+		})
+	}
+	utils.SetAuthCookie(c, token)
+	return c.JSON(models.APIResponse{
+		Success: true,
+		Message: "Session refreshed",
+		Data: fiber.Map{
+			"idle_timeout_seconds": int(utils.SessionIdleTimeout().Seconds()),
 		},
 	})
 }
@@ -871,6 +918,7 @@ func (h *UserHandler) GoogleLogin(c *fiber.Ctx) error {
 			Error:   "Failed to generate token",
 		})
 	}
+	utils.SetAuthCookie(c, token)
 
 	return c.JSON(models.APIResponse{
 		Success: true,
@@ -1006,7 +1054,7 @@ func (h *UserHandler) GetProfile(c *fiber.Ctx) error {
 		}
 		return c.Status(500).JSON(models.APIResponse{
 			Success: false,
-			Error:   "Failed to fetch user profile: " + err.Error(),
+			Error:   "Failed to fetch user profile",
 		})
 	}
 
@@ -1445,7 +1493,7 @@ func (h *UserHandler) UploadProfilePicture(c *fiber.Ctx) error {
 			return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to save file"})
 		}
 
-		finalURL = buildAbsoluteURL(c, publicPath)
+		finalURL = publicPath
 		fmt.Printf("🖼️  [UploadProfilePicture] Local storage URL: %s\n", finalURL)
 	}
 
@@ -1466,30 +1514,6 @@ func (h *UserHandler) UploadProfilePicture(c *fiber.Ctx) error {
 
 	fmt.Printf("🖼️  [UploadProfilePicture] Successfully updated user %d with profile picture: %s\n", userID, finalURL)
 	return c.JSON(models.APIResponse{Success: true, Data: finalURL, Message: "Uploaded"})
-}
-
-func buildAbsoluteURL(c *fiber.Ctx, path string) string {
-	if path == "" {
-		return ""
-	}
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return path
-	}
-	scheme := c.Protocol()
-	if scheme == "" {
-		scheme = "http"
-	}
-	host := c.Hostname()
-	if host == "" {
-		host = c.Get("Host")
-	}
-	if host == "" {
-		host = "localhost:4000"
-	}
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
-	return fmt.Sprintf("%s://%s%s", scheme, host, path)
 }
 
 // ChangePassword allows an authenticated user to change their password.
@@ -1735,14 +1759,14 @@ func (h *UserHandler) GetUserByID(c *fiber.Ctx) error {
 
 	var user models.User
 	var slugNull, profilePicture, backgroundImage, backgroundPosition, department, bio sql.NullString
-	var verificationStatus, schoolName, schoolEmail, rejectionReason sql.NullString
-	var emailVerifiedAt sql.NullTime
+	var verificationStatus, schoolName sql.NullString
 	var lastLogin sql.NullTime
 	err = h.db.QueryRow(
 		`SELECT id, slug, name, email, role, verified, COALESCE(is_organization, FALSE) AS is_organization, COALESCE(org_verified, FALSE) AS org_verified, COALESCE(org_name, '') as org_name, COALESCE(org_handle, '') as org_handle, COALESCE(org_logo_url, '') as org_logo_url,
 		        COALESCE(org_cover_url, '') as org_cover_url, COALESCE(org_category, '') as org_category, COALESCE(org_website, '') as org_website, COALESCE(org_location, '') as org_location, COALESCE(org_contact_email, '') as org_contact_email,
 		        COALESCE(profile_picture, '') as profile_picture, COALESCE(background_image, '') as background_image, COALESCE(background_position, '') as background_position, COALESCE(department, '') as department, COALESCE(bio, '') as bio, COALESCE(badges, '[]') as badges,
-		        COALESCE(verification_status, 'not_verified') as verification_status, COALESCE(school_name, '') as school_name, COALESCE(school_email, '') as school_email, COALESCE(school_email_verified_at, NULL) as school_email_verified_at, COALESCE(verification_rejection_reason, '') as verification_rejection_reason,
+		        COALESCE(is_premium, FALSE) as is_premium, COALESCE(premium_tier, 'free') as premium_tier,
+		        COALESCE(verification_status, 'not_verified') as verification_status, COALESCE(school_name, '') as school_name,
 		        COALESCE(created_at, NOW()) as created_at, COALESCE(updated_at, NOW()) as updated_at, COALESCE(last_login, NULL) as last_login
 		   FROM users WHERE id = ?`,
 		userID,
@@ -1751,14 +1775,11 @@ func (h *UserHandler) GetUserByID(c *fiber.Ctx) error {
 		&user.IsOrganization, &user.OrgVerified, &user.OrgName, &user.OrgHandle, &user.OrgLogoURL,
 		&user.OrgCoverURL, &user.OrgCategory, &user.OrgWebsite, &user.OrgLocation, &user.OrgContactEmail,
 		&profilePicture, &backgroundImage, &backgroundPosition, &department, &bio, &user.Badges,
-		&verificationStatus, &schoolName, &schoolEmail, &emailVerifiedAt, &rejectionReason,
+		&user.IsPremium, &user.PremiumTier, &verificationStatus, &schoolName,
 		&user.CreatedAt, &user.UpdatedAt, &lastLogin,
 	)
 
-	fmt.Printf("🔍 GetUserByID(%d) query result - error: %v\n", userID, err)
 	if err != nil {
-		fmt.Printf("❌ Database error for user %d: %v\n", userID, err)
-		// Return proper error response so we can debug the actual database issue
 		if err == sql.ErrNoRows {
 			return c.Status(404).JSON(models.APIResponse{
 				Success: false,
@@ -1767,10 +1788,13 @@ func (h *UserHandler) GetUserByID(c *fiber.Ctx) error {
 		}
 		return c.Status(500).JSON(models.APIResponse{
 			Success: false,
-			Error:   "Database error: " + err.Error(),
+			Error:   "Failed to load user",
 		})
 	}
 
+	if slugNull.Valid {
+		user.Slug = slugNull.String
+	}
 	// Log profile view (with timeout to prevent hanging)
 	viewerID, _ := middleware.GetUserIDFromContext(c)
 	if viewerID > 0 && viewerID != userID { // Don't log self-views or anonymous views without ID
@@ -1787,9 +1811,6 @@ func (h *UserHandler) GetUserByID(c *fiber.Ctx) error {
 	// Convert sql.NullString to regular strings AFTER error check
 	if profilePicture.Valid {
 		user.ProfilePicture = profilePicture.String
-		fmt.Printf("✅ Setting profile_picture for user %d: '%s'\n", userID, profilePicture.String)
-	} else {
-		fmt.Printf("⚠️ profile_picture for user %d is NULL/invalid\n", userID)
 	}
 	if backgroundImage.Valid {
 		user.BackgroundImage = backgroundImage.String
@@ -1809,27 +1830,48 @@ func (h *UserHandler) GetUserByID(c *fiber.Ctx) error {
 	if schoolName.Valid {
 		user.SchoolName = schoolName.String
 	}
-	if schoolEmail.Valid {
-		user.SchoolEmail = schoolEmail.String
-	}
-	if emailVerifiedAt.Valid {
-		t := emailVerifiedAt.Time
-		user.SchoolEmailVerifiedAt = &t
-	}
-	if rejectionReason.Valid {
-		user.VerificationRejectionReason = rejectionReason.String
+	if user.IsPremium && (user.PremiumTier == "" || user.PremiumTier == "free") {
+		user.PremiumTier = "plus"
 	}
 	if lastLogin.Valid {
 		user.LastLogin = &lastLogin.Time
 	}
 	user.ActivityStatus = computeActivityStatus(user.LastLogin)
+	h.applyPremiumExpiry(&user)
+	h.ensureWmsuPlus(&user)
 
-	// SECURITY: Strip sensitive fields from public profile payload
-	user.Email = ""
+	publicUser := fiber.Map{
+		"id":                  user.ID,
+		"slug":                user.Slug,
+		"name":                user.Name,
+		"verified":            user.Verified,
+		"is_organization":     user.IsOrganization,
+		"org_verified":        user.OrgVerified,
+		"org_name":            user.OrgName,
+		"org_handle":          user.OrgHandle,
+		"org_logo_url":        user.OrgLogoURL,
+		"org_cover_url":       user.OrgCoverURL,
+		"org_category":        user.OrgCategory,
+		"org_website":         user.OrgWebsite,
+		"org_location":        user.OrgLocation,
+		"profile_picture":     user.ProfilePicture,
+		"background_image":    user.BackgroundImage,
+		"background_position": user.BackgroundPosition,
+		"department":          user.Department,
+		"bio":                 user.Bio,
+		"badges":              user.Badges,
+		"verification_status": user.VerificationStatus,
+		"school_name":         user.SchoolName,
+		"created_at":          user.CreatedAt,
+		"updated_at":          user.UpdatedAt,
+		"activity_status":     user.ActivityStatus,
+		"is_premium":          user.IsPremium,
+		"premium_tier":        user.PremiumTier,
+	}
 
 	return c.JSON(models.APIResponse{
 		Success: true,
-		Data:    user,
+		Data:    publicUser,
 	})
 }
 
@@ -2265,7 +2307,10 @@ func (h *UserHandler) GetSavedProducts(c *fiber.Ctx) error {
 		SELECT 
 			p.id, p.title, p.description, p.price, p.image_urls, p.seller_id,
 			p.premium, p.status, p.allow_buying, p.barter_only, p.location,
-			p.condition, p.suggested_value, p.category, p.created_at, p.updated_at,
+			p.condition, p.suggested_value, p.category,
+			COALESCE(p.location_type, 'no_location') AS location_type,
+			p.pickup_latitude, p.pickup_longitude, COALESCE(p.pickup_address, '') AS pickup_address,
+			p.created_at, p.updated_at,
 			u.name as seller_name,
 			sp.created_at as saved_at
 		FROM saved_products sp
@@ -2287,15 +2332,31 @@ func (h *UserHandler) GetSavedProducts(c *fiber.Ctx) error {
 	for rows.Next() {
 		var product models.Product
 		var savedAt string
+		var locationType sql.NullString
+		var pickupLat, pickupLon sql.NullFloat64
+		var pickupAddress sql.NullString
 		err := rows.Scan(
 			&product.ID, &product.Title, &product.Description, &product.Price,
 			&product.ImageURLs, &product.SellerID, &product.Premium, &product.Status,
 			&product.AllowBuying, &product.BarterOnly, &product.Location,
 			&product.Condition, &product.SuggestedValue, &product.Category,
+			&locationType, &pickupLat, &pickupLon, &pickupAddress,
 			&product.CreatedAt, &product.UpdatedAt, &product.SellerName, &savedAt,
 		)
 		if err != nil {
 			continue
+		}
+		if locationType.Valid {
+			product.LocationType = locationType.String
+		}
+		if pickupLat.Valid {
+			product.PickupLatitude = &pickupLat.Float64
+		}
+		if pickupLon.Valid {
+			product.PickupLongitude = &pickupLon.Float64
+		}
+		if pickupAddress.Valid {
+			product.PickupAddress = pickupAddress.String
 		}
 		products = append(products, product)
 	}
@@ -2351,60 +2412,61 @@ func (h *UserHandler) GetSellerStats(c *fiber.Ctx) error {
 		MemberSinceYear: userCreatedAt.Year(),
 	}
 
-	// Calculate total trades (all completed trades involving this user)
+	// Count each trade row once and keep lifecycle buckets mutually exclusive.
+	// Total trades is the sum of completed, pending/ongoing, and cancelled/closed attempts.
 	err = h.db.QueryRow(`
-		SELECT COUNT(*) FROM trades 
-		WHERE (seller_id = ? OR buyer_id = ?) AND status IN ('completed', 'auto_completed')
-	`, userID, userID).Scan(&stats.TotalTrades)
-	if err != nil {
-		stats.TotalTrades = 0
-	}
-
-	// Calculate completed trades (synonymous with TotalTrades in this context, but explicitly checks completion criteria)
-	err = h.db.QueryRow(`
-		SELECT COUNT(*) FROM trades 
-		WHERE (seller_id = ? OR buyer_id = ?) AND status IN ('completed', 'auto_completed')
-	`, userID, userID).Scan(&stats.CompletedTrades)
+		SELECT
+			COUNT(DISTINCT CASE WHEN status IN ('completed', 'auto_completed') THEN id END) AS completed_trades,
+			COUNT(DISTINCT CASE WHEN status IN ('pending', 'pending_multiway', 'accepted', 'accepted_by_one', 'accepted_by_both', 'countered', 'active', 'ongoing', 'awaiting_confirmation', 'multiway_active') THEN id END) AS pending_trades,
+			COUNT(DISTINCT CASE WHEN status IN ('cancelled', 'cancelled_due_to_conflict', 'declined', 'rejected', 'expired', 'broken') THEN id END) AS cancelled_trades
+		FROM trades
+		WHERE seller_id = ? OR buyer_id = ?
+	`, userID, userID).Scan(&stats.CompletedTrades, &stats.PendingTrades, &stats.CancelledTrades)
 	if err != nil {
 		stats.CompletedTrades = 0
-	}
-
-	// Calculate cancelled trades
-	err = h.db.QueryRow(`
-		SELECT COUNT(*) FROM trades 
-		WHERE (seller_id = ? OR buyer_id = ?) AND status = 'cancelled'
-	`, userID, userID).Scan(&stats.CancelledTrades)
-	if err != nil {
+		stats.PendingTrades = 0
 		stats.CancelledTrades = 0
 	}
+	stats.TotalTrades = stats.CompletedTrades + stats.PendingTrades + stats.CancelledTrades
 
-	// Calculate pending trades
-	err = h.db.QueryRow(`
-		SELECT COUNT(*) FROM trades 
-		WHERE (seller_id = ? OR buyer_id = ?) AND status IN ('pending', 'accepted', 'active', 'awaiting_confirmation')
-	`, userID, userID).Scan(&stats.PendingTrades)
-	if err != nil {
-		stats.PendingTrades = 0
-	}
-
-	// Calculate average rating and positive feedback percentage from reviews table
+	// Calculate average rating and positive feedback percentage from actual user
+	// reviews, including the newer post-trade review records.
 	var avgRating sql.NullFloat64
 	var totalReviews sql.NullInt64
 	var positivePercent sql.NullFloat64
 
 	err = h.db.QueryRow(`
 		SELECT 
-			COALESCE(AVG(rating), 0) AS avg_rating,
+			AVG(rating) AS avg_rating,
 			COUNT(*) AS total_reviews,
-			COALESCE(SUM(CASE WHEN rating >= 4 THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0), 0) AS positive_feedback
-		FROM reviews
-		WHERE reviewed_user_id = ?
-	`, userID).Scan(&avgRating, &totalReviews, &positivePercent)
+			SUM(CASE WHEN rating >= 4 THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0) AS positive_feedback
+		FROM (
+			SELECT r.rating
+			FROM reviews r
+			WHERE r.reviewed_user_id = ?
 
-	if err == nil && avgRating.Valid {
-		stats.AvgRating = avgRating.Float64
+			UNION ALL
+
+			SELECT tr.rating
+			FROM trade_reviews tr
+			JOIN trades t ON t.id = tr.trade_id
+			WHERE tr.is_followup = FALSE
+			  AND tr.reviewer_id <> ?
+			  AND t.status IN ('completed', 'auto_completed', 'history')
+			  AND (
+				(tr.reviewer_id = t.buyer_id AND t.seller_id = ?)
+				OR
+				(tr.reviewer_id = t.seller_id AND t.buyer_id = ?)
+			  )
+		) user_reviews
+	`, userID, userID, userID, userID).Scan(&avgRating, &totalReviews, &positivePercent)
+
+	if err == nil && totalReviews.Valid {
 		stats.TotalFeedback = int(totalReviews.Int64)
-		if positivePercent.Valid {
+		if stats.TotalFeedback > 0 && avgRating.Valid {
+			stats.AvgRating = avgRating.Float64
+		}
+		if stats.TotalFeedback > 0 && positivePercent.Valid {
 			stats.PositivePercent = positivePercent.Float64
 		}
 	}
@@ -2420,19 +2482,38 @@ func (h *UserHandler) GetSellerStats(c *fiber.Ctx) error {
 		stats.ResponseMetric = "poor"
 	}
 
-	// Calculate average response time (estimated as minutes from trade creation to first completion activity)
+	// Calculate average response time from actual chat replies. If there are no
+	// replied-to incoming messages, keep the public label explicit instead of
+	// guessing from trade update timestamps.
 	var avgResponseTimeMinutes sql.NullFloat64
+	var responseSampleSize sql.NullInt64
 	err = h.db.QueryRow(`
-		SELECT AVG(TIMESTAMPDIFF(MINUTE, created_at, CASE 
-			WHEN seller_completed THEN COALESCE(updated_at, NOW())
-			ELSE NOW()
-		END)) as avg_response_minutes
-		FROM trades
-		WHERE seller_id = ? AND created_at > DATE_SUB(NOW(), INTERVAL 90 DAY)
-		LIMIT 100
-	`, userID).Scan(&avgResponseTimeMinutes)
+		SELECT AVG(TIMESTAMPDIFF(MINUTE, replies.first_incoming_at, replies.first_reply_at)) AS avg_response_minutes,
+		       COUNT(*) AS response_samples
+		FROM (
+			SELECT incoming.conversation_id,
+			       incoming.first_incoming_at,
+			       (
+			         SELECT MIN(m2.created_at)
+			         FROM messages m2
+			         WHERE m2.conversation_id = incoming.conversation_id
+			           AND m2.sender_id = ?
+			           AND m2.created_at > incoming.first_incoming_at
+			       ) AS first_reply_at
+			FROM (
+				SELECT c.id AS conversation_id, MIN(m.created_at) AS first_incoming_at
+				FROM conversations c
+				JOIN messages m ON m.conversation_id = c.id AND m.sender_id <> ?
+				WHERE (c.buyer_id = ? OR c.seller_id = ?)
+				  AND c.created_at > DATE_SUB(NOW(), INTERVAL 90 DAY)
+				GROUP BY c.id
+			) incoming
+		) replies
+		WHERE replies.first_reply_at IS NOT NULL
+	`, userID, userID, userID, userID).Scan(&avgResponseTimeMinutes, &responseSampleSize)
 
-	if err == nil && avgResponseTimeMinutes.Valid {
+	if err == nil && avgResponseTimeMinutes.Valid && responseSampleSize.Valid && responseSampleSize.Int64 > 0 {
+		stats.ResponseSampleSize = int(responseSampleSize.Int64)
 		minutes := int(avgResponseTimeMinutes.Float64)
 		if minutes < 60 {
 			stats.AvgResponseTime = fmt.Sprintf("%dm", minutes)
@@ -2444,7 +2525,7 @@ func (h *UserHandler) GetSellerStats(c *fiber.Ctx) error {
 			stats.AvgResponseTime = fmt.Sprintf("%dd", days)
 		}
 	} else {
-		stats.AvgResponseTime = "N/A"
+		stats.AvgResponseTime = "Not enough data"
 	}
 
 	// --- Trust Score Computation (0-100) with detailed breakdown ---
@@ -2526,7 +2607,7 @@ func (h *UserHandler) GetSellerStats(c *fiber.Ctx) error {
 	// responding to messages/offers)
 	responsePoints := 0
 	responseStatus := "warn"
-	if avgResponseTimeMinutes.Valid {
+	if avgResponseTimeMinutes.Valid && responseSampleSize.Valid && responseSampleSize.Int64 > 0 {
 		minutes := int(avgResponseTimeMinutes.Float64)
 		if minutes <= 360 { // Fast (within hours)
 			responsePoints = 15
@@ -2546,15 +2627,13 @@ func (h *UserHandler) GetSellerStats(c *fiber.Ctx) error {
 
 	// 6. Trade Success Rate: 10 points
 	var totalAttempted int
-	_ = h.db.QueryRow("SELECT COUNT(*) FROM trades WHERE (seller_id = ? OR buyer_id = ?) AND status IN ('completed', 'auto_completed', 'cancelled')", userID, userID).Scan(&totalAttempted)
+	totalAttempted = stats.CompletedTrades + stats.CancelledTrades
 
 	successPoints := 0 // New users start at 0 — earned only after trade attempts
 	successStatus := "warn"
 	if totalAttempted > 0 {
 		successStatus = "pass"
-		var successCount int
-		_ = h.db.QueryRow("SELECT COUNT(*) FROM trades WHERE (seller_id = ? OR buyer_id = ?) AND status IN ('completed', 'auto_completed')", userID, userID).Scan(&successCount)
-		successRate := (float64(successCount) / float64(totalAttempted)) * 100
+		successRate := (float64(stats.CompletedTrades) / float64(totalAttempted)) * 100
 		if successRate >= 90 {
 			successPoints = 10
 		} else if successRate >= 70 {
@@ -2570,27 +2649,8 @@ func (h *UserHandler) GetSellerStats(c *fiber.Ctx) error {
 	}
 	trustFactors = append(trustFactors, models.TrustFactor{Label: "Trade success", Status: successStatus, Points: successPoints, Max: 10})
 
-	// Cancellation penalty: deduct points for recent cancellations. A cancel
-	// made while the trade was ongoing (accepted/active) is weighted heavier
-	// than one made while still pending.
-	var recentActiveCancels, recentPendingCancels int
-	_ = h.db.QueryRow(`
-		SELECT COUNT(*) FROM trades
-		WHERE cancelled_by = ? AND cancelled_while_active = TRUE
-		  AND cancelled_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 30 DAY)
-	`, userID).Scan(&recentActiveCancels)
-	_ = h.db.QueryRow(`
-		SELECT COUNT(*) FROM trades
-		WHERE cancelled_by = ? AND (cancelled_while_active = FALSE OR cancelled_while_active IS NULL)
-		  AND cancelled_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 30 DAY)
-	`, userID).Scan(&recentPendingCancels)
-	cancelPenalty := recentActiveCancels*5 + recentPendingCancels*2
-	if cancelPenalty > 30 {
-		cancelPenalty = 30
-	}
-
-	// Sum all factors
-	totalScore := verifiedPoints + tradePoints + ratingPoints + reportPoints + responsePoints + successPoints - cancelPenalty
+	// Sum displayed factors exactly so the visible breakdown reconciles with the final score.
+	totalScore := verifiedPoints + tradePoints + ratingPoints + reportPoints + responsePoints + successPoints
 	if totalScore > 100 {
 		totalScore = 100
 	}

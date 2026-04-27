@@ -27,8 +27,8 @@ export const theme = extendTheme({
     },
   },
   fonts: {
-    heading: 'Inter, system-ui, sans-serif',
-    body: 'Inter, system-ui, sans-serif',
+    heading: "'Poppins', system-ui, sans-serif",
+    body: "'Poppins', system-ui, sans-serif",
   },
   components: {
     Button: {

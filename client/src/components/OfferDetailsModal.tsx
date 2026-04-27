@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, VStack, HStack, Box, Image, Text, Badge, Button, Divider, Grid, useToast, ModalFooter, AlertDialog, AlertDialogOverlay, AlertDialogContent, AlertDialogHeader, AlertDialogBody, AlertDialogFooter, useDisclosure, Icon, Card, CardBody, useColorModeValue, FormControl, FormLabel, Textarea } from '@chakra-ui/react'
-import { FaMapMarkerAlt, FaTruck, FaHandshake, FaChevronLeft, FaChevronRight } from 'react-icons/fa'
+import { Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, VStack, HStack, Box, Image, Text, Badge, Button, Divider, Grid, useToast, ModalFooter, AlertDialog, AlertDialogOverlay, AlertDialogContent, AlertDialogHeader, AlertDialogBody, AlertDialogFooter, useDisclosure, Icon, Card, CardBody, useColorModeValue, FormControl, FormLabel, Textarea, Input } from '@chakra-ui/react'
+import { FaMapMarkerAlt, FaTruck, FaHandshake, FaChevronLeft, FaChevronRight, FaClock, FaCalendarAlt, FaCheckCircle } from 'react-icons/fa'
 import { formatPHP } from '../utils/currency'
 import { Trade, Product, TradeAction, TradeOption } from '../types'
 import { useProducts } from '../contexts/ProductContext'
@@ -21,7 +21,8 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
   const toast = useToast()
   const { getProduct } = useProducts()
   const { user } = useAuth()
-  const [requested, setRequested] = useState<Product | null>(null)
+  const [requestedProducts, setRequestedProducts] = useState<Product[]>([])
+  const [additionalRequested, setAdditionalRequested] = useState<Product[]>([])
   const [offered, setOffered] = useState<Product[]>([])
   const [loading, setLoading] = useState(false)
   const [counterOpen, setCounterOpen] = useState(false)
@@ -36,12 +37,11 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
   const [isAccepting, setIsAccepting] = useState(false)
   const [isDeclining, setIsDeclining] = useState(false)
   const [isCountering, setIsCountering] = useState(false)
-
-  // Deep debug logs for data structure analysis
-  useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log('🔍 [DEEP DEBUG] FULL TRADE OBJECT:', JSON.stringify(trade, null, 2))
-  }, [trade])
+  const [showSuggestTime, setShowSuggestTime] = useState(false)
+  const [suggestDate, setSuggestDate] = useState('')
+  const [suggestTime, setSuggestTime] = useState('')
+  const [isSuggestingTime, setIsSuggestingTime] = useState(false)
+  const [isAcceptingTime, setIsAcceptingTime] = useState(false)
 
   // Build instant placeholder products from trade data to avoid blink
   const buildPlaceholderProduct = (id: number, title?: string, imageUrl?: string): Product => ({
@@ -58,10 +58,11 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
   // If incoming trade from list lacks items, fetch detailed trade
   useEffect(() => {
     if (!isOpen || !trade) return
-    if (!trade.items || trade.items.length === 0) {
+    const tradeId = Number(trade.id)
+    if ((!trade.items || trade.items.length === 0) && Number.isInteger(tradeId) && tradeId > 0) {
       ;(async () => {
         try {
-          const res = await api.get(`/api/trades/${trade.id}`)
+          const res = await api.get(`/api/trades/${tradeId}`)
           const dt: Trade | null = res.data?.data || null
           setDetailedTrade(dt)
         } catch (e) {
@@ -86,55 +87,87 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
     (effectiveTrade?.status === 'countered' && effectiveTrade?.countered_by !== user?.id)
   )
 
-  // Resilient extraction of buyer-offered items and their product IDs
-  const buyerItems = useMemo(() => {
+  const activeOfferRole = useMemo(() => {
+    if (!effectiveTrade) return 'buyer'
+    if (effectiveTrade.status === 'countered') {
+      return effectiveTrade.countered_by === effectiveTrade.seller_id ? 'seller' : 'buyer'
+    }
+    return 'buyer'
+  }, [effectiveTrade])
+
+  // Resilient extraction of the items that belong to the currently active offer.
+  const activeOfferItems = useMemo(() => {
     const items = (effectiveTrade?.items || []) as Array<any>
-    // eslint-disable-next-line no-console
-    console.log('🔍 [MODAL] Extracting buyer items from trade items:', items)
     const filtered = items.filter((i: any) => {
-      // Log each item's offered_by value
       const offeredBy = (i?.offered_by ?? i?.offeredBy ?? i?.sender ?? i?.from_user_role)
-      // eslint-disable-next-line no-console
-      console.log(`  Item ${i.id}: offered_by=${offeredBy}`)
       if (typeof offeredBy === 'string') {
         const v = offeredBy.toLowerCase().trim()
+        if (activeOfferRole === 'seller') {
+          return v === 'seller' || v === 'from_seller'
+        }
         return v === 'buyer' || v === 'from_buyer' || v === 'sender'
       }
       return false
     })
-    // eslint-disable-next-line no-console
-    console.log('🔍 [MODAL] Filtered buyer items count:', filtered.length)
     return filtered
+  }, [effectiveTrade, activeOfferRole])
+  const requestedTradeItems = useMemo(() => {
+    const items = (effectiveTrade?.items || []) as Array<any>
+    return items.filter((i: any) => {
+      const offeredBy = (i?.offered_by ?? i?.offeredBy ?? i?.sender ?? i?.from_user_role)
+      if (typeof offeredBy !== 'string') return false
+      const v = offeredBy.toLowerCase().trim()
+      return v === 'seller' || v === 'from_seller'
+    })
   }, [effectiveTrade])
   const offeredItemIds = useMemo(() => {
-    const ids = buyerItems.map((i: any) => {
+    const ids = activeOfferItems.map((i: any) => {
       const pid = (i?.product_id ?? i?.productId)
       return typeof pid === 'string' ? Number(pid) : pid
     })
     const filtered = ids
       .filter((x: any) => typeof x === 'number' && !Number.isNaN(x)) as number[]
-    // eslint-disable-next-line no-console
-    console.log('🔍 [MODAL] Offered item IDs:', filtered)
     return filtered
-  }, [buyerItems])
+  }, [activeOfferItems])
+  const requestedItemIds = useMemo(() => {
+    const ids: number[] = []
+    const seen = new Set<number>()
+    const targetId = Number(effectiveTrade?.target_product_id || 0)
+    if (targetId > 0) {
+      ids.push(targetId)
+      seen.add(targetId)
+    }
+    requestedTradeItems.forEach((item: any) => {
+      const pid = Number(item?.product_id ?? item?.productId)
+      if (pid > 0 && !seen.has(pid)) {
+        seen.add(pid)
+        ids.push(pid)
+      }
+    })
+    return ids
+  }, [effectiveTrade, requestedTradeItems])
+  const requested = requestedProducts[0] || null
 
   // Immediately set placeholder data from trade object (no API call needed)
   useEffect(() => {
     if (!isOpen || !effectiveTrade) return
 
-    // Instant placeholder for requested (target) product
+    // Instant placeholders for requested (target + seller-side bundle) products
     const tradeAny = effectiveTrade as any
     const targetImg = tradeAny.product_image_url || tradeAny.productImageUrl || ''
     const targetTitle = effectiveTrade.product_title || ''
-    if (effectiveTrade.target_product_id) {
-      setRequested(prev => prev?.id === effectiveTrade.target_product_id ? prev :
-        buildPlaceholderProduct(effectiveTrade.target_product_id, targetTitle, targetImg)
-      )
-    }
+    const requestedPlaceholders = requestedItemIds.map((pid) => {
+      if (pid === effectiveTrade.target_product_id) {
+        return buildPlaceholderProduct(pid, targetTitle, targetImg)
+      }
+      const match = requestedTradeItems.find((item: any) => Number(item.product_id ?? item.productId) === pid)
+      return buildPlaceholderProduct(pid, match?.product_title ?? match?.productTitle, match?.product_image_url ?? match?.productImageUrl)
+    })
+    setRequestedProducts(requestedPlaceholders.filter((p) => p.id > 0))
 
     // Instant placeholders for offered items
-    if (buyerItems.length > 0) {
-      const placeholders = buyerItems.map((item: any) => {
+    if (activeOfferItems.length > 0) {
+      const placeholders = activeOfferItems.map((item: any) => {
         const pid = item.product_id ?? item.productId
         const pTitle = item.product_title ?? item.productTitle ?? ''
         const pImg = item.product_image_url ?? item.productImageUrl ?? ''
@@ -144,7 +177,26 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
         setOffered(placeholders)
       }
     }
-  }, [isOpen, effectiveTrade, buyerItems])
+
+    // Instant placeholders for additional seller-side target products (multi-target mode)
+    const sellerSideItems = (effectiveTrade.items || []).filter((i: any) => {
+      const ob = (i?.offered_by ?? i?.offeredBy ?? '').toLowerCase()
+      return ob === 'seller'
+    })
+    if (sellerSideItems.length > 0) {
+      const sellerPlaceholders = sellerSideItems.map((item: any) => {
+        const pid = item.product_id ?? item.productId
+        const pTitle = item.product_title ?? item.productTitle ?? ''
+        const pImg = item.product_image_url ?? item.productImageUrl ?? ''
+        return buildPlaceholderProduct(Number(pid), pTitle, pImg)
+      }).filter((p: Product) => p.id > 0)
+      if (sellerPlaceholders.length > 0) {
+        setAdditionalRequested(sellerPlaceholders)
+      }
+    } else {
+      setAdditionalRequested([])
+    }
+  }, [isOpen, effectiveTrade, activeOfferItems])
 
   // Then fetch full product details in background (upgrades placeholder data)
   useEffect(() => {
@@ -152,33 +204,34 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
     ;(async () => {
       try {
         setLoading(true)
-        // eslint-disable-next-line no-console
-        console.log('🔍 [MODAL] Loading product details for trade', effectiveTrade.id)
-        // eslint-disable-next-line no-console
-        console.log('🔍 [MODAL] Target product ID:', effectiveTrade.target_product_id)
-        // eslint-disable-next-line no-console
-        console.log('🔍 [MODAL] Offered item IDs:', offeredItemIds)
-        const req = await getProduct(effectiveTrade.target_product_id)
-        // eslint-disable-next-line no-console
-        console.log('🔍 [MODAL] Loaded requested product:', req)
-        setRequested(req)
+        const requestedDetails = await Promise.all(requestedItemIds.map((pid) => getProduct(pid)))
+        setRequestedProducts(requestedDetails.filter(Boolean) as Product[])
         const details: Product[] = []
         for (const pid of offeredItemIds) {
-          // eslint-disable-next-line no-console
-          console.log(`🔍 [MODAL] Loading product ${pid}`)
           const p = await getProduct(pid)
-          // eslint-disable-next-line no-console
-          console.log(`🔍 [MODAL] Loaded product ${pid}:`, p)
           if (p) details.push(p)
         }
-        // eslint-disable-next-line no-console
-        console.log('🔍 [MODAL] Final loaded products:', details.length)
         setOffered(details)
+
+        // Fetch full details for additional seller-side target products (multi-target mode)
+        const sellerSideItems = (effectiveTrade.items || []).filter((i: any) => {
+          const ob = (i?.offered_by ?? i?.offeredBy ?? '').toLowerCase()
+          return ob === 'seller'
+        })
+        const sellerDetails: Product[] = []
+        for (const item of sellerSideItems) {
+          const pid = item.product_id ?? (item as any).productId
+          if (pid && Number(pid) !== effectiveTrade.target_product_id) {
+            const p = await getProduct(Number(pid))
+            if (p) sellerDetails.push(p)
+          }
+        }
+        setAdditionalRequested(sellerDetails)
       } finally {
         setLoading(false)
       }
     })()
-  }, [isOpen, effectiveTrade, getProduct, offeredItemIds])
+  }, [isOpen, effectiveTrade, getProduct, offeredItemIds, requestedItemIds])
 
   const accept = async () => {
     if (!effectiveTrade || isAccepting) return
@@ -194,6 +247,44 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
         id: "offerdetailsmodal-failed-to-accept", title: 'Failed to accept', description: e?.response?.data?.error || 'Try again', status: 'error' })
     } finally {
       setIsAccepting(false)
+    }
+  }
+
+  const acceptMeetupTime = async () => {
+    if (!effectiveTrade || isAcceptingTime) return
+    try {
+      setIsAcceptingTime(true)
+      await api.post(`/api/trades/${effectiveTrade.id}/meetup/propose`, {
+        proposed_time: `${effectiveTrade.meetup_date || ''}T${effectiveTrade.meetup_time || ''}:00`,
+        proposed_location: effectiveTrade.meetup_location || '',
+      })
+      toast({ id: 'odm-time-accepted', title: 'Meetup time accepted', description: 'Both parties agreed — trade is now ongoing!', status: 'success' })
+      onAccepted()
+      onClose()
+    } catch (e: any) {
+      toast({ id: 'odm-time-accept-fail', title: 'Failed to confirm time', description: e?.response?.data?.error || 'Try again', status: 'error' })
+    } finally {
+      setIsAcceptingTime(false)
+    }
+  }
+
+  const suggestAnotherTime = async () => {
+    if (!effectiveTrade || !suggestDate || !suggestTime || isSuggestingTime) return
+    try {
+      setIsSuggestingTime(true)
+      await api.post(`/api/trades/${effectiveTrade.id}/meetup/propose`, {
+        proposed_time: `${suggestDate}T${suggestTime}:00`,
+        proposed_location: effectiveTrade.meetup_location || '',
+      })
+      toast({ id: 'odm-time-suggested', title: 'New time suggested', description: 'The other trader will be notified.', status: 'success' })
+      setShowSuggestTime(false)
+      setSuggestDate('')
+      setSuggestTime('')
+      onAccepted()
+    } catch (e: any) {
+      toast({ id: 'odm-time-suggest-fail', title: 'Failed to suggest time', description: e?.response?.data?.error || 'Try again', status: 'error' })
+    } finally {
+      setIsSuggestingTime(false)
     }
   }
 
@@ -405,10 +496,6 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
     const titleFontWeight = 'semibold'
 
     const imgSrc = resolveImage(p)
-    if (!imgSrc) {
-      // eslint-disable-next-line no-console
-      console.log(`OfferDetailsModal: product ${p.id} (${p.title}) has no image source`)
-    }
 
     return (
       <Box borderWidth="1px" borderColor="gray.100" rounded="lg" overflow="hidden" bg="white" height="100%" display="flex" flexDirection="column" shadow="sm" transition="all 0.2s" _hover={{ shadow: 'md' }}>
@@ -443,7 +530,7 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
             <Text mb={compact ? 1 : 2} fontWeight="bold" fontSize="xs" color="brand.600">{formatPHP(p.price as number)}</Text>
           )}
 
-          {!compact && <Text mt="auto" mb={2} fontSize="10px" color="gray.500" fontWeight="medium">Seller: {p.seller_name || `#${p.seller_id}`}</Text>}
+          {!compact && <Text mt="auto" mb={2} fontSize="10px" color="gray.500" fontWeight="medium">Trader: {p.seller_name || `#${p.seller_id}`}</Text>}
 
           <Button as={'a'} href={getProductUrl(p)} variant="outline" colorScheme="brand" mt="auto" size="xs" w="full" borderRadius="md">View Listing</Button>
         </Box>
@@ -509,6 +596,113 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
                 </VStack>
               </HStack>
             </Box>
+
+            {/* Proposed Meetup Section */}
+            {(effectiveTrade?.meetup_date || effectiveTrade?.meetup_time) && (
+              <Box p={3} bg="teal.50" borderRadius="lg" borderWidth="1px" borderColor="teal.200">
+                <HStack mb={2} spacing={2}>
+                  <Icon as={FaCalendarAlt} color="teal.600" boxSize={3.5} />
+                  <Text fontSize="10px" fontWeight="bold" color="teal.700" textTransform="uppercase" letterSpacing="wider">
+                    Proposed Meetup
+                  </Text>
+                  <Badge colorScheme="teal" fontSize="8px">
+                    {effectiveTrade.buyer_id === user?.id ? 'You proposed' : `${effectiveTrade.buyer_name || 'Buyer'} proposed`}
+                  </Badge>
+                </HStack>
+
+                <Grid templateColumns="1fr 1fr" gap={2} mb={2}>
+                  {effectiveTrade.meetup_date && (
+                    <VStack align="start" spacing={0}>
+                      <Text fontSize="9px" fontWeight="bold" color="teal.600" textTransform="uppercase">Date</Text>
+                      <Text fontSize="12px" fontWeight="semibold" color="teal.900">
+                        {new Date(`${effectiveTrade.meetup_date}T00:00:00`).toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' })}
+                      </Text>
+                    </VStack>
+                  )}
+                  {effectiveTrade.meetup_time && (
+                    <VStack align="start" spacing={0}>
+                      <Text fontSize="9px" fontWeight="bold" color="teal.600" textTransform="uppercase">Time</Text>
+                      <Text fontSize="12px" fontWeight="semibold" color="teal.900">
+                        {(() => {
+                          const [h, m] = effectiveTrade.meetup_time.split(':').map(Number)
+                          const ampm = h >= 12 ? 'PM' : 'AM'
+                          const hour = h % 12 || 12
+                          return `${hour}:${String(m || 0).padStart(2, '0')} ${ampm}`
+                        })()}
+                      </Text>
+                    </VStack>
+                  )}
+                  {effectiveTrade.meetup_location && (
+                    <VStack align="start" spacing={0} gridColumn="span 2">
+                      <Text fontSize="9px" fontWeight="bold" color="teal.600" textTransform="uppercase">Location</Text>
+                      <Text fontSize="11px" color="teal.800" noOfLines={2}>
+                        📍 {effectiveTrade.meetup_location}
+                      </Text>
+                    </VStack>
+                  )}
+                </Grid>
+
+                {/* Accept / Suggest Another Time */}
+                {effectiveTrade.buyer_id !== user?.id && !showSuggestTime && (
+                  <HStack spacing={2} mt={1}>
+                    <Button
+                      size="xs"
+                      colorScheme="teal"
+                      leftIcon={<Icon as={FaCheckCircle} boxSize={3} />}
+                      fontSize="11px"
+                      isLoading={isAcceptingTime}
+                      onClick={acceptMeetupTime}
+                    >
+                      Accept This Time
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      colorScheme="teal"
+                      leftIcon={<Icon as={FaClock} boxSize={3} />}
+                      fontSize="11px"
+                      onClick={() => setShowSuggestTime(true)}
+                    >
+                      Suggest Another Time
+                    </Button>
+                  </HStack>
+                )}
+
+                {/* Suggest Another Time form */}
+                {showSuggestTime && (
+                  <VStack align="stretch" spacing={2} mt={2} p={2} bg="white" borderRadius="md" borderWidth="1px" borderColor="teal.200">
+                    <Text fontSize="10px" fontWeight="semibold" color="teal.700">Propose a different time:</Text>
+                    <HStack spacing={2}>
+                      <Input
+                        type="date"
+                        value={suggestDate}
+                        onChange={e => setSuggestDate(e.target.value)}
+                        min={new Date().toISOString().split('T')[0]}
+                        size="xs"
+                        fontSize="11px"
+                        flex={1}
+                      />
+                      <Input
+                        type="time"
+                        value={suggestTime}
+                        onChange={e => setSuggestTime(e.target.value)}
+                        size="xs"
+                        fontSize="11px"
+                        flex={1}
+                      />
+                    </HStack>
+                    <HStack spacing={2}>
+                      <Button size="xs" colorScheme="teal" fontSize="10px" isLoading={isSuggestingTime} isDisabled={!suggestDate || !suggestTime} onClick={suggestAnotherTime}>
+                        Send Suggestion
+                      </Button>
+                      <Button size="xs" variant="ghost" fontSize="10px" onClick={() => { setShowSuggestTime(false); setSuggestDate(''); setSuggestTime('') }}>
+                        Cancel
+                      </Button>
+                    </HStack>
+                  </VStack>
+                )}
+              </Box>
+            )}
 
             {/* Offer Details Section - Compact 2-Column Info Grid */}
             <Box p={2.5} bg="orange.50" borderRadius="md" borderWidth="1px" borderColor="orange.200">
@@ -634,24 +828,29 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
             <Box>
               <Text fontSize="10px" fontWeight="bold" color="gray.700" mb={1.5} textTransform="uppercase">Items</Text>
               <Grid templateColumns={{ base: '1fr', md: '1fr 1fr' }} gap={1.5}>
-                {/* Your Requested Item */}
+                {/* Requested Items */}
                 <Box borderWidth="1px" borderColor="gray.200" borderRadius="md" overflow="hidden" bg="gray.50" display="flex" flexDirection="column" h="100%">
                   {loading ? (
                     <Box p={2} textAlign="center">
                       <Text fontSize="11px" color="gray.500">Loading...</Text>
                     </Box>
                   ) : (
-                    <>
-                      {renderProductCard(requested, { compact: true })}
-                    </>
+                    <VStack spacing={1.5} align="stretch" h="100%">
+                      {requestedProducts.map((product) => (
+                        <Box key={`requested-${product.id}`} h="100%">
+                          {renderProductCard(product, { compact: true })}
+                        </Box>
+                      ))}
+                      {requestedProducts.length === 0 && <Box p={2}><Text fontSize="11px" color="gray.500">No item</Text></Box>}
+                    </VStack>
                   )}
                 </Box>
 
                 {/* Their Offered Items */}
                 <Box>
-                  {buyerItems.length > 0 ? (
+                  {activeOfferItems.length > 0 ? (
                     <VStack spacing={1.5} align="stretch" h="100%">
-                      {buyerItems.map((item: any, idx: number) => {
+                      {activeOfferItems.map((item: any, idx: number) => {
                         const product = offered.find(p => p.id === (item.product_id ?? item.productId));
                         const itemId = item.product_id ?? item.productId
                         
@@ -719,20 +918,20 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
                       <Text fontWeight="semibold" color="gray.900">{new Date(effectiveTrade.completed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
                     </HStack>
                   )}
-                  {/* Show buyer/seller ratings if available */}
+                  {/* Show role-aware ratings if available */}
                   {(effectiveTrade.buyer_rating || effectiveTrade.seller_rating) && (
                     <HStack justify="space-between">
                       <Text color="gray.700">Ratings:</Text>
                       <HStack spacing={2}>
                         {effectiveTrade.buyer_rating && (
                           <HStack spacing={0.5}>
-                            <Text fontSize="10px" color="gray.600">Buyer:</Text>
+                            <Text fontSize="10px" color="gray.600">{isBuyout ? 'Buyer' : 'Trader 1'}:</Text>
                             <Text fontWeight="bold" color="yellow.500">⭐ {effectiveTrade.buyer_rating}/5</Text>
                           </HStack>
                         )}
                         {effectiveTrade.seller_rating && (
                           <HStack spacing={0.5}>
-                            <Text fontSize="10px" color="gray.600">Seller:</Text>
+                            <Text fontSize="10px" color="gray.600">{isBuyout ? 'Seller' : 'Trader 2'}:</Text>
                             <Text fontWeight="bold" color="yellow.500">⭐ {effectiveTrade.seller_rating}/5</Text>
                           </HStack>
                         )}
@@ -784,7 +983,7 @@ const OfferDetailsModal: React.FC<OfferDetailsModalProps> = ({ trade, isOpen, on
                         <Button size="xs" colorScheme="red" variant="outline" onClick={rejectOptionChange}>Reject</Button>
                       </HStack>
                     ) : (
-                      <Text fontSize="xs" color="gray.600" fontStyle="italic">Waiting for seller...</Text>
+                      <Text fontSize="xs" color="gray.600" fontStyle="italic">{isBuyout ? 'Waiting for seller...' : 'Waiting for the other trader...'}</Text>
                     )}
                   </Box>
                 )}

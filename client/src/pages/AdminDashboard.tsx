@@ -159,7 +159,7 @@ const DATA_EXPLORER_GROUPS = [
       { key: 'products', label: 'Products' },
       { key: 'trades', label: 'Trades' },
       { key: 'multiway_trades', label: 'Multiway Trades' },
-      { key: 'trade_matches', label: 'Trade Matches' },
+      { key: 'trade_matches', label: 'Trade Connects' },
       { key: 'categories', label: 'Categories' },
       { key: 'reviews', label: 'Reviews' },
       { key: 'reports', label: 'Reports / Flags' },
@@ -574,6 +574,8 @@ const AdminDashboard: React.FC = () => {
   const [premiumUserTargetId, setPremiumUserTargetId] = useState('');
   const [premiumUserTier, setPremiumUserTier] = useState('plus');
   const [premiumUserDays, setPremiumUserDays] = useState(30);
+  const [showOwnProductsOnHome, setShowOwnProductsOnHome] = useState(true);
+  const [marketplaceSettingsLoading, setMarketplaceSettingsLoading] = useState(false);
 
   const { isOpen: isDayModalOpen, onOpen: openDayModal, onClose: closeDayModal } = useDisclosure();
   const {
@@ -1473,6 +1475,42 @@ const AdminDashboard: React.FC = () => {
     }
   }, [toast]);
 
+  const fetchMarketplaceSettings = useCallback(async () => {
+    try {
+      setMarketplaceSettingsLoading(true);
+      const response = await api.get('/api/admin/marketplace-settings');
+      if (response.data?.success) {
+        setShowOwnProductsOnHome(response.data.data?.show_own_products_on_home !== false);
+      }
+    } catch (err: any) {
+      toast({ id: 'marketplace-settings-load-failed', title: 'Failed to load marketplace settings', description: err?.response?.data?.error || err.message, status: 'error', duration: 4000, isClosable: true });
+    } finally {
+      setMarketplaceSettingsLoading(false);
+    }
+  }, [toast]);
+
+  const saveShowOwnProductsOnHome = useCallback(async (visible: boolean) => {
+    const previous = showOwnProductsOnHome;
+    if (previous === visible) return;
+
+    try {
+      setShowOwnProductsOnHome(visible);
+      setMarketplaceSettingsLoading(true);
+      const response = await api.put('/api/admin/marketplace-settings', {
+        show_own_products_on_home: visible,
+      });
+      if (response.data?.success) {
+        setShowOwnProductsOnHome(response.data.data?.show_own_products_on_home !== false);
+        toast({ title: visible ? 'Own products visible' : 'Own products hidden', status: 'success', duration: 2500 });
+      }
+    } catch (err: any) {
+      setShowOwnProductsOnHome(previous);
+      toast({ title: 'Failed to save marketplace setting', description: err?.response?.data?.error || err.message, status: 'error', duration: 3000 });
+    } finally {
+      setMarketplaceSettingsLoading(false);
+    }
+  }, [showOwnProductsOnHome, toast]);
+
   const savePremiumManagement = useCallback(async () => {
     try {
       setPremiumSaving(true);
@@ -1780,6 +1818,7 @@ const AdminDashboard: React.FC = () => {
       fetchRemittancePayments(),
       fetchMultiwayDisputes(),
       fetchPremiumManagement(),
+      fetchMarketplaceSettings(),
     ]);
   }, [
     stats,
@@ -1792,6 +1831,7 @@ const AdminDashboard: React.FC = () => {
     fetchRemittancePayments,
     fetchMultiwayDisputes,
     fetchPremiumManagement,
+    fetchMarketplaceSettings,
   ]);
 
   // Separate effect for rider filter changes - doesn't trigger full dashboard refresh
@@ -2026,7 +2066,7 @@ const AdminDashboard: React.FC = () => {
 
   // â"€â"€ SECTION: Overview â"€â"€
   const OverviewSection = () => (
-    <VStack spacing={8} pr={20} align="stretch" w="full">
+    <VStack spacing={8} pr={{ base: 0, md: 6, xl: 16 }} align="stretch" w="full">
       <Card bg={cardBg} border="1px solid" borderColor={borderColor} borderRadius="xl">
         <CardHeader pb={2}>
           <Flex justify="space-between" gap={3} wrap="wrap" align="center">
@@ -2231,7 +2271,7 @@ const AdminDashboard: React.FC = () => {
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                     <XAxis dataKey="period" stroke="#94a3b8" style={{ fontSize: '11px' }} />
                     <YAxis stroke="#94a3b8" style={{ fontSize: '11px' }} tickFormatter={v => `â‚±${(v / 1000).toFixed(0)}k`} />
-                    <RechartsTooltip contentStyle={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px' }} formatter={(value: number) => [formatCurrency(value), 'Revenue']} />
+                    <RechartsTooltip contentStyle={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px' }} formatter={(value) => [formatCurrency(Number(value) || 0), 'Revenue']} />
                     <Area type="monotone" dataKey="amount" stroke="#10b981" strokeWidth={2.5} fillOpacity={1} fill="url(#colorRevenue)" />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -2320,7 +2360,7 @@ const AdminDashboard: React.FC = () => {
     const [expandedReportId, setExpandedReportId] = React.useState<number | null>(null);
     const toggleExpand = (id: number) => setExpandedReportId(prev => prev === id ? null : id);
     return (
-      <VStack spacing={8} pr={20} align="stretch" w="full">
+      <VStack spacing={8} pr={{ base: 0, md: 6, xl: 16 }} align="stretch" w="full">
         {/* Report Summary Cards */}
         <Box w="full">
           <HStack mb={3} spacing={2}>
@@ -3071,7 +3111,7 @@ const AdminDashboard: React.FC = () => {
 
   // â"€â"€ SECTION: Management â"€â"€
   const ManagementSection = () => (
-    <VStack spacing={8} pr={20} align="stretch" w="full">
+    <VStack spacing={8} pr={{ base: 0, md: 6, xl: 16 }} align="stretch" w="full">
       {/* Users */}
       <Card bg={cardBg} border="1px solid" borderColor={borderColor} borderRadius="xl" w="full">
         <CardHeader pb={0}>
@@ -3203,7 +3243,7 @@ const AdminDashboard: React.FC = () => {
                           <Td textAlign="right" pl={6}>
                             <HStack spacing={1} justify="flex-end">
                               <Tooltip label="View Details" hasArrow>
-                                <IconButton as="a" href={`/product/${product.id}`} target="_blank" aria-label="View Details" size="sm" colorScheme="blue" variant="ghost" icon={<FiEye />} />
+                                <IconButton as="a" href={product.slug ? `/product/${product.slug}` : `/product/${product.id}`} target="_blank" aria-label="View Details" size="sm" colorScheme="blue" variant="ghost" icon={<FiEye />} />
                               </Tooltip>
                               <Tooltip label={isSuspended ? "Unsuspend listing" : "Suspend listing"} hasArrow>
                                 <IconButton
@@ -3303,15 +3343,15 @@ const AdminDashboard: React.FC = () => {
     const updateSetting = (key: string, value: string) => setPremiumData((prev: any) => ({ ...prev, settings: { ...(prev.settings || {}), [key]: value } }));
     const updatePlan = (index: number, key: string, value: any) => setPremiumData((prev: any) => ({ ...prev, plans: (prev.plans || []).map((p: any, i: number) => i === index ? { ...p, [key]: value } : p) }));
     const updateCapability = (index: number, key: string, value: any) => setPremiumData((prev: any) => ({ ...prev, plans: (prev.plans || []).map((p: any, i: number) => i === index ? { ...p, capabilities: { ...(p.capabilities || {}), [key]: value } } : p) }));
-    const addPlan = () => setPremiumData((prev: any) => ({ ...prev, plans: [...(prev.plans || []), { plan_key: `custom_${Date.now()}`, name: 'Custom Plan', description: '', tier: 'promo', billing_type: 'promo', duration_days: 30, price: 0, badge_label: 'Promo', access_scope: 'basic', capabilities: { listing_limit: 10, active_trade_limit: 5, monthly_boost_limit: 0, free_boost_enabled: false, premium_badge_enabled: false, featured_listing_enabled: false, wider_visibility_enabled: false, analytics_enabled: false, priority_support_enabled: false, advanced_trade_tools_enabled: false }, is_active: true, sort_order: (prev.plans || []).length * 10 } ] }));
+    const addPlan = () => setPremiumData((prev: any) => ({ ...prev, plans: [...(prev.plans || []), { plan_key: `custom_${Date.now()}`, name: 'Custom Plan', description: '', tier: 'promo', billing_type: 'promo', duration_days: 30, price: 0, badge_label: 'Promo', access_scope: 'basic', capabilities: { listing_limit: 10, active_trade_limit: 5, monthly_boost_limit: 0, boost_duration_hours: 3, free_boost_enabled: false, premium_badge_enabled: false, featured_listing_enabled: false, wider_visibility_enabled: false, analytics_enabled: false, priority_support_enabled: false, advanced_trade_tools_enabled: false }, is_active: true, sort_order: (prev.plans || []).length * 10 } ] }));
     const duplicatePlan = (plan: any) => setPremiumData((prev: any) => ({ ...prev, plans: [...(prev.plans || []), { ...plan, id: undefined, plan_key: `${plan.plan_key}_copy_${Date.now()}`, name: `${plan.name} Copy`, sort_order: (prev.plans || []).length * 10 }] }));
     const updateFeature = (index: number, key: string, value: any) => setPremiumData((prev: any) => ({ ...prev, features: (prev.features || []).map((f: any, i: number) => i === index ? { ...f, [key]: value } : f) }));
     const updatePromo = (index: number, key: string, value: any) => setPremiumData((prev: any) => ({ ...prev, promotions: (prev.promotions || []).map((p: any, i: number) => i === index ? { ...p, [key]: value } : p) }));
     const updatePromoCapability = (index: number, key: string, value: any) => setPremiumData((prev: any) => ({ ...prev, promotions: (prev.promotions || []).map((p: any, i: number) => i === index ? { ...p, capabilities: { ...(p.capabilities || {}), [key]: value } } : p) }));
-    const addPromo = () => setPremiumData((prev: any) => ({ ...prev, promotions: [{ title: 'New Premium Promo', plan_key: '', discounted_price: 49, start_at: '', end_at: '', capabilities: { monthly_boost_limit: 1, free_boost_enabled: true }, overrides_capabilities: false, is_active: true }, ...(prev.promotions || [])] }));
+    const addPromo = () => setPremiumData((prev: any) => ({ ...prev, promotions: [{ title: 'New Premium Promo', plan_key: '', discounted_price: 49, start_at: '', end_at: '', capabilities: { monthly_boost_limit: 1, boost_duration_hours: 3, free_boost_enabled: true }, overrides_capabilities: false, is_active: true }, ...(prev.promotions || [])] }));
 
     return (
-      <VStack spacing={6} pr={20} align="stretch" w="full">
+      <VStack spacing={6} pr={{ base: 0, md: 6, xl: 16 }} align="stretch" w="full">
         <Card bg={cardBg} border="1px solid" borderColor={borderColor} borderRadius="xl">
           <CardHeader>
             <Flex justify="space-between" gap={3} wrap="wrap" align="center">
@@ -3353,10 +3393,11 @@ const AdminDashboard: React.FC = () => {
                     </SimpleGrid>
                     <Divider my={4} />
                     <Text fontWeight="800" fontSize="xs" color={mutedTextColor} mb={3}>Limits</Text>
-                    <SimpleGrid columns={{ base: 1, md: 3 }} spacing={3}>
+                    <SimpleGrid columns={{ base: 1, md: 4 }} spacing={3}>
                       <Box><FormLabel fontSize="xs">Listing limit</FormLabel><Input size="sm" type="number" value={plan.capabilities?.listing_limit ?? 10} onChange={(e) => updateCapability(index, 'listing_limit', Number(e.target.value))} /></Box>
                       <Box><FormLabel fontSize="xs">Active trade limit</FormLabel><Input size="sm" type="number" value={plan.capabilities?.active_trade_limit ?? 5} onChange={(e) => updateCapability(index, 'active_trade_limit', Number(e.target.value))} /></Box>
                       <Box><FormLabel fontSize="xs">Monthly boost limit</FormLabel><Input size="sm" type="number" value={plan.capabilities?.monthly_boost_limit ?? 0} onChange={(e) => updateCapability(index, 'monthly_boost_limit', Number(e.target.value))} /></Box>
+                      <Box><FormLabel fontSize="xs">Boost duration (hours)</FormLabel><Input size="sm" type="number" min={0} value={plan.capabilities?.boost_duration_hours ?? 0} onChange={(e) => updateCapability(index, 'boost_duration_hours', Number(e.target.value))} /></Box>
                     </SimpleGrid>
                     <Text fontWeight="800" fontSize="xs" color={mutedTextColor} mt={4} mb={3}>Capabilities</Text>
                     <SimpleGrid columns={{ base: 1, md: 2 }} spacing={2}>
@@ -3392,11 +3433,12 @@ const AdminDashboard: React.FC = () => {
                     <Box><FormLabel fontSize="xs">Active</FormLabel><Switch colorScheme="purple" isChecked={!!promo.is_active} onChange={(e) => updatePromo(index, 'is_active', e.target.checked)} /></Box>
                   </SimpleGrid>
                   <Divider my={3} />
-                  <SimpleGrid columns={{ base: 1, md: 4 }} spacing={3} alignItems="end">
+                  <SimpleGrid columns={{ base: 1, md: 5 }} spacing={3} alignItems="end">
                     <Box><FormLabel fontSize="xs">Override base plan</FormLabel><Switch colorScheme="purple" isChecked={!!promo.overrides_capabilities} onChange={(e) => updatePromo(index, 'overrides_capabilities', e.target.checked)} /></Box>
                     <Box><FormLabel fontSize="xs">Listing limit</FormLabel><Input size="sm" type="number" value={promo.capabilities?.listing_limit ?? ''} onChange={(e) => updatePromoCapability(index, 'listing_limit', e.target.value === '' ? '' : Number(e.target.value))} placeholder="No change" /></Box>
                     <Box><FormLabel fontSize="xs">Active trades</FormLabel><Input size="sm" type="number" value={promo.capabilities?.active_trade_limit ?? ''} onChange={(e) => updatePromoCapability(index, 'active_trade_limit', e.target.value === '' ? '' : Number(e.target.value))} placeholder="No change" /></Box>
                     <Box><FormLabel fontSize="xs">Monthly boosts</FormLabel><Input size="sm" type="number" value={promo.capabilities?.monthly_boost_limit ?? ''} onChange={(e) => updatePromoCapability(index, 'monthly_boost_limit', e.target.value === '' ? '' : Number(e.target.value))} placeholder="No change" /></Box>
+                    <Box><FormLabel fontSize="xs">Boost duration (hours)</FormLabel><Input size="sm" type="number" min={0} value={promo.capabilities?.boost_duration_hours ?? ''} onChange={(e) => updatePromoCapability(index, 'boost_duration_hours', e.target.value === '' ? '' : Number(e.target.value))} placeholder="No change" /></Box>
                   </SimpleGrid>
                   <SimpleGrid columns={{ base: 1, md: 3 }} spacing={2} mt={3}>
                     {[['free_boost_enabled', 'Free boosts'], ['featured_listing_enabled', 'Featured placement'], ['wider_visibility_enabled', 'Wider visibility']].map(([key, label]) => <HStack key={key} justify="space-between" p={2} bg={cardBg} borderRadius="md"><Text fontSize="xs" fontWeight="700">{label}</Text><Switch size="sm" colorScheme="purple" isChecked={!!promo.capabilities?.[key]} onChange={(e) => updatePromoCapability(index, key, e.target.checked)} /></HStack>)}
@@ -3414,13 +3456,37 @@ const AdminDashboard: React.FC = () => {
     );
   };
   const SystemSection = () => (
-    <VStack spacing={8} pr={20} align="stretch" w="full">
+    <VStack spacing={8} pr={{ base: 0, md: 6, xl: 16 }} align="stretch" w="full">
       <SimpleGrid columns={{ base: 1, md: 2, lg: 4 }} spacing={4}>
         <MetricCard icon={FiAlertTriangle} color="rose" label="Reports Filed" value={stats!.reports_filed} />
         <MetricCard icon={FiXCircle} color="red" label="Suspended Users" value={stats!.suspended_users} />
         <MetricCard icon={FiServer} color="purple" label="Storage Used" value={`${(stats!.storage_usage_mb || 0).toFixed(1)} MB`} raw />
         <MetricCard icon={FiShield} color="brand" label="Pending Verifications" value={stats!.pending_verifications ?? 0} />
       </SimpleGrid>
+
+      <Card bg={cardBg} border="1px solid" borderColor={borderColor} borderRadius="xl">
+        <CardHeader>
+          <HStack><Icon as={FiHome} color="brand.500" boxSize={5} /><Heading size="sm" color={textColor}>Home Feed</Heading></HStack>
+        </CardHeader>
+        <CardBody>
+          <Flex justify="space-between" align={{ base: 'stretch', sm: 'center' }} gap={4} direction={{ base: 'column', sm: 'row' }}>
+            <VStack align="start" spacing={1}>
+              <Text fontWeight="700" color={textColor}>Own products</Text>
+              <Tag size="sm" colorScheme={showOwnProductsOnHome ? 'green' : 'red'}>
+                {showOwnProductsOnHome ? 'Visible' : 'Hidden'}
+              </Tag>
+            </VStack>
+            <HStack spacing={0} borderWidth="1px" borderColor={borderColor} borderRadius="md" overflow="hidden" w="132px">
+              <Button size="sm" flex="1" minW={0} borderRadius={0} colorScheme={showOwnProductsOnHome ? 'green' : 'gray'} variant={showOwnProductsOnHome ? 'solid' : 'ghost'} onClick={() => saveShowOwnProductsOnHome(true)} isDisabled={marketplaceSettingsLoading}>
+                On
+              </Button>
+              <Button size="sm" flex="1" minW={0} borderRadius={0} colorScheme={!showOwnProductsOnHome ? 'red' : 'gray'} variant={!showOwnProductsOnHome ? 'solid' : 'ghost'} onClick={() => saveShowOwnProductsOnHome(false)} isDisabled={marketplaceSettingsLoading}>
+                Off
+              </Button>
+            </HStack>
+          </Flex>
+        </CardBody>
+      </Card>
 
       <Card bg={cardBg} border="1px solid" borderColor={borderColor} borderRadius="xl">
         <CardHeader>
@@ -3629,7 +3695,7 @@ const AdminDashboard: React.FC = () => {
           </Box>
 
           {/* Content Area */}
-          <Box flex={1} p={{ base: 3, md: 5 }} maxW="1400px" w="full" mx="auto" overflow="hidden">
+          <Box flex={1} p={{ base: 3, md: 5 }} maxW="1400px" w="full" mx="auto" overflowX="hidden" overflowY="auto" minH={0}>
             {activeSection === 'overview' && <OverviewSection />}
             {activeSection === 'moderation' && <ModerationSection />}
             {activeSection === 'management' && <ManagementSection />}
@@ -3748,4 +3814,3 @@ const AdminDashboard: React.FC = () => {
 };
 
 export default AdminDashboard;
-

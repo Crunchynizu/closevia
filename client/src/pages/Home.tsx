@@ -54,7 +54,7 @@ import {
 } from '@chakra-ui/icons'
 import { InputRightElement } from '@chakra-ui/react'
 import { FaUserCircle, FaHandshake, FaHome, FaTag, FaMotorcycle, FaCrown } from 'react-icons/fa'
-import { FiShoppingBag, FiDownload } from 'react-icons/fi'
+import { FiShoppingBag, FiDownload, FiHeart } from 'react-icons/fi'
 import { FILTER_CATEGORIES } from '../utils/categories'
 import { useProducts } from '../contexts/ProductContext'
 import { useAuth } from '../contexts/AuthContext'
@@ -77,6 +77,7 @@ import { useTradeMatchScores } from '../hooks/useTradeMatchScore'
 import InstallAppPrompt from '../components/InstallAppPrompt'
 import AdvertisementCarousel from '../components/AdvertisementCarousel'
 import AppDownloadBanner from '../components/AppDownloadBanner'
+import { getBoostStatus } from '../utils/boostUtils'
 const useDebounce = (value: string, delay: number) => {
   const [debouncedValue, setDebouncedValue] = useState(value)
 
@@ -235,7 +236,6 @@ const Home: React.FC = () => {
     setSelectedCategory('All')
     setSearchTerm('')
     // Trigger a single initial fetch through the filters effect
-    console.log('🔍 Fetching initial products with limit: 20')
     setFilters(prev => ({ ...prev, keyword: '', category: '', page: 1, limit: 20 }))
     setHasSearched(true)
 
@@ -316,7 +316,6 @@ const Home: React.FC = () => {
     const term = searchTerm.trim()
     const termLower = term.toLowerCase()
     
-    console.log('🔍 [Search] Term:', term, 'organizationSuggestions:', organizationSuggestions.length)
     
     // Check if search term matches an organization in current suggestions
     const matchedOrg = organizationSuggestions.find(org => {
@@ -325,11 +324,9 @@ const Home: React.FC = () => {
     })
     
     if (matchedOrg) {
-      console.log('✅ [Search] Found org in suggestions:', matchedOrg)
       // Navigate directly to the organization page
       const orgHandle = matchedOrg.org_handle || matchedOrg.slug
       if (orgHandle) {
-        console.log('🚀 [Search] Navigating to /org/' + orgHandle)
         navigate(`/org/${orgHandle}`)
         return
       }
@@ -338,15 +335,11 @@ const Home: React.FC = () => {
     // Fallback: Check API for organization if not in suggestions
     if (term.length >= 2) {
       try {
-        console.log('📡 [Search] Checking API for organization:', term)
         const response = await api.get(`/api/organizations?q=${encodeURIComponent(term)}&limit=1`)
-        console.log('📡 [Search] API response:', response.data)
         if (response.data?.success && Array.isArray(response.data?.data) && response.data.data.length > 0) {
           const org = response.data.data[0]
           const orgHandle = org.org_handle || org.slug
-          console.log('✅ [Search] Found org from API:', org, 'handle:', orgHandle)
           if (orgHandle) {
-            console.log('🚀 [Search] Navigating to /org/' + orgHandle)
             navigate(`/org/${orgHandle}`)
             return
           }
@@ -358,7 +351,6 @@ const Home: React.FC = () => {
     }
     
     // Otherwise, do a regular product keyword search
-    console.log('🔎 [Search] Falling back to product search for:', term)
     // Detect natural language queries for smart search
     const smartSignals = ['near me', 'nearby', 'cheap', 'budget', 'expensive', 'under ', 'below ', 'above ']
     const isSmartQuery = termLower.split(/\s+/).length >= 2 && smartSignals.some(s => termLower.includes(s))
@@ -627,20 +619,62 @@ const Home: React.FC = () => {
   // Trade match scores for logged-in users
   const tradeScores = useTradeMatchScores(products)
 
+  const sortedHomeProducts = useMemo(() => {
+    const getNumericDistance = (product: any) => {
+      if (Number.isFinite(product?.distanceKm)) return product.distanceKm as number
+
+      const distanceText = String(product?.distance || '').toLowerCase().trim()
+      const match = distanceText.match(/([\d.]+)\s*(km|m)\b/)
+      if (!match) return Number.POSITIVE_INFINITY
+
+      const value = Number(match[1])
+      if (!Number.isFinite(value)) return Number.POSITIVE_INFINITY
+      return match[2] === 'km' ? value : value / 1000
+    }
+
+    const sorted = [...products].sort((a: any, b: any) => {
+      const distanceA = getNumericDistance(a)
+      const distanceB = getNumericDistance(b)
+
+      if (distanceA !== distanceB) {
+        return distanceA - distanceB
+      }
+
+      const boostA = getBoostStatus(a)
+      const boostB = getBoostStatus(b)
+      if (boostA.isBoosted !== boostB.isBoosted) {
+        return boostA.isBoosted ? -1 : 1
+      }
+
+      const createdAtComparison = new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      if (createdAtComparison !== 0) {
+        return createdAtComparison
+      }
+
+      return Number(b.id || 0) - Number(a.id || 0)
+    })
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(
+        '[HOME SORT] final rendered order (first 30):',
+        sorted.slice(0, 30).map((p: any) => ({
+          id: p.id,
+          title: String(p.title || '').slice(0, 25),
+          distanceKm: p.distanceKm,
+          distance: p.distance,
+          isBoosted: getBoostStatus(p).isBoosted,
+        }))
+      )
+    }
+
+    return sorted
+  }, [products])
+
   // Product card rendering now handled by memoized ProductCard component
 
   // Component to render product grid with git pull --no-edit injections
   const ProductGridWithAds: React.FC<{ products: any[]; user: any }> = ({ products, user }) => {
-    const filteredProducts = products.filter(
-      (p) => p.status === 'available' && p.seller_id !== user?.id // Hide own products — can't trade with yourself
-    )
-
-    console.log('📦 ProductGridWithAds - Total products from API:', products.length)
-    console.log('📦 ProductGridWithAds - Current user ID:', user?.id)
-    console.log('📦 ProductGridWithAds - Filtered products (available):', filteredProducts.length)
-    if (products.length > 0) {
-      console.log('📦 Sample product data:', products[0])
-    }
+    const filteredProducts = products.filter((p) => p.status === 'available')
 
     // Use the ad injection hook
     const { shouldInsertAdAt, getAdForPosition, getAdIndexAt } = useStudentAdInjection(
@@ -704,12 +738,13 @@ const Home: React.FC = () => {
                 onBuyClick={handleBuyClick}
                 onViewOffers={handleViewOffers}
                 showPriceOverlay
+                imageLoading={displayIndex < 6 ? 'eager' : 'lazy'}
               />
                 )
               })()}
             </Box>
           ) : (
-            <Box key={`ad-${item.data.id}`} w="full" h="full">
+            <Box key={`ad-${item.data.id}-${item.index}-${displayIndex}`} w="full" h="full">
               <StudentAdCard ad={item.data} />
             </Box>
           )
@@ -741,39 +776,60 @@ const Home: React.FC = () => {
         >
           {/* Main Search Bar - Full width on mobile, inline on desktop */}
           {/* Mobile: Stacked layout */}
-          <VStack w="full" spacing={2} align="stretch" ref={searchContainerRef} display={{ base: 'flex', md: 'none' }}>
+          <VStack w="full" spacing={2} align="stretch" ref={searchContainerRef} display={{ base: 'flex', md: 'none' }} position="relative">
             {/* Search Input - Full width on mobile */}
-            <Box position="relative" w="full">
-              <InputGroup size="lg">
-                <InputLeftElement pointerEvents="none">
-                  <SearchIcon color="gray.400" />
-                </InputLeftElement>
-                <Input
-                  placeholder="Search products, categories, or keywords..."
-                  value={searchTerm}
-                  onChange={(e) => { setSearchTerm(e.target.value); if (e.target.value.trim().length >= 2) setShowSuggestions(true) }}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); if (e.key === 'Escape') setShowSuggestions(false) }}
-                  onFocus={() => { if (searchTerm.trim().length >= 2 && (suggestions.products.length > 0 || suggestions.categories.length > 0 || suggestions.tags.length > 0 || suggestions.brands.length > 0 || (suggestions.users?.length || 0) > 0)) setShowSuggestions(true) }}
-                  bg="white"
-                  border="2px"
-                  borderColor="gray.200"
-                  _focus={{
-                    borderColor: "brand.500",
-                    boxShadow: "0 0 0 1px var(--chakra-colors-brand-500)"
-                  }}
-                  pr="40px"
-                />
-                {/* Filter icon inside search - mobile only */}
-                <InputRightElement pointerEvents="auto">
-                  <IconButton
-                    aria-label="Toggle filters"
-                    icon={showFilters ? <ChevronUpIcon /> : <ChevronDownIcon />}
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setShowFilters(!showFilters)}
+            <HStack spacing={2} align="stretch">
+              <Box position="relative" flex="1" minW={0}>
+                <InputGroup size="lg">
+                  <InputLeftElement pointerEvents="none">
+                    <SearchIcon color="gray.400" />
+                  </InputLeftElement>
+                  <Input
+                    placeholder="Search products, categories, or keywords..."
+                    value={searchTerm}
+                    onChange={(e) => { setSearchTerm(e.target.value); if (e.target.value.trim().length >= 2) setShowSuggestions(true) }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); if (e.key === 'Escape') setShowSuggestions(false) }}
+                    onFocus={() => { if (searchTerm.trim().length >= 2 && (suggestions.products.length > 0 || suggestions.categories.length > 0 || suggestions.tags.length > 0 || suggestions.brands.length > 0 || (suggestions.users?.length || 0) > 0)) setShowSuggestions(true) }}
+                    bg="white"
+                    border="2px"
+                    borderColor="gray.200"
+                    _focus={{
+                      borderColor: "brand.500",
+                      boxShadow: "0 0 0 1px var(--chakra-colors-brand-500)"
+                    }}
+                    pr="40px"
                   />
-                </InputRightElement>
-              </InputGroup>
+                  {/* Filter icon inside search - mobile only */}
+                  <InputRightElement pointerEvents="auto">
+                    <IconButton
+                      aria-label="Toggle filters"
+                      icon={showFilters ? <ChevronUpIcon /> : <ChevronDownIcon />}
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowFilters(!showFilters)}
+                    />
+                  </InputRightElement>
+                </InputGroup>
+              </Box>
+              {user && (
+                <Tooltip label="Saved products" hasArrow>
+                  <IconButton
+                    aria-label="Saved products"
+                    icon={<Icon as={FiHeart} boxSize={5.5} />}
+                    size="lg"
+                    color="red.500"
+                    borderColor="red.200"
+                    bg="white"
+                    borderWidth="2px"
+                    borderRadius="xl"
+                    _hover={{ bg: 'red.50', borderColor: 'red.300' }}
+                    _active={{ bg: 'red.100' }}
+                    onClick={() => navigate('/saved-products')}
+                    flexShrink={0}
+                  />
+                </Tooltip>
+              )}
+            </HStack>
 
               {/* Search Suggestions Dropdown - Mobile */}
               {showSuggestions && (
@@ -884,7 +940,6 @@ const Home: React.FC = () => {
                   )}
                 </Box>
               )}
-            </Box>
           </VStack>
 
           {/* Desktop: Horizontal layout with search bar on left, buttons on right */}
@@ -1030,6 +1085,23 @@ const Home: React.FC = () => {
 
             {/* Desktop Controls - Right side buttons */}
             <HStack spacing={2} flexShrink={0}>
+              {user && (
+                <Tooltip label="Saved products" hasArrow>
+                  <IconButton
+                    aria-label="Saved products"
+                    icon={<Icon as={FiHeart} boxSize={5.5} />}
+                    variant="outline"
+                    size="lg"
+                    color="red.500"
+                    borderColor="red.200"
+                    bg="white"
+                    _hover={{ bg: 'red.50', borderColor: 'red.300' }}
+                    _active={{ bg: 'red.100' }}
+                    onClick={() => navigate('/saved-products')}
+                  />
+                </Tooltip>
+              )}
+
               {/* Search button */}
               <Button
                 leftIcon={<SearchIcon />}
@@ -1471,7 +1543,7 @@ const Home: React.FC = () => {
             minH={{ base: '1200px', md: '1600px' }}
             sx={{ '@media (max-width: 850px)': { paddingLeft: '12px', paddingRight: '12px', marginLeft: 0 } }}
           >
-            <ProductGridWithAds products={products} user={user} />
+            <ProductGridWithAds products={sortedHomeProducts} user={user} />
 
             {/* Sentinel for infinite scroll */}
             <Box ref={sentinelRef} h="1px" />

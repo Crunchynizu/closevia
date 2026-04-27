@@ -13,6 +13,7 @@ import {
   FormControl,
   FormLabel,
   FormHelperText,
+  FormErrorMessage,
   useToast,
   Progress,
   IconButton,
@@ -73,6 +74,7 @@ export interface ProductFormData {
   authenticity_risks?: string
   estimated_value_min?: number
   estimated_value_max?: number
+  show_estimated_value: boolean
   tags?: string
 
   // Product value
@@ -82,22 +84,83 @@ export interface ProductFormData {
   wanted_categories?: string[]
   wants?: string
   desired_product?: string
+
+  // Availability schedule
+  availability_slots?: AvailabilitySlot[]
+  availability_type?: 'flexible' | 'strict'
 }
 
 import { useAuth } from '../contexts/AuthContext'
 import { useProducts } from '../contexts/ProductContext'
 import { api } from '../services/api'
+import { AvailabilitySlot } from '../types'
 import { DASHBOARD_QUERY_KEYS } from '../hooks/useDashboard'
 import FloatingTab from '../components/FloatingTab'
 import { prepareImageForAIAnalysis, prepareImageForUpload } from '../utils/imageConverter'
 import { PRODUCT_CATEGORIES } from '../utils/categories'
 import { checkMultipleImageQuality, getQualityLabel, getQualityColorScheme, type ImageQualityResult as ClientQualityResult } from '../utils/imageQualityChecker'
 import { getBackupPriceEstimate } from '../utils/priceEstimator'
+import { formatEstimatedValueRange } from '../utils/currency'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const CONDITION_OPTIONS = ['New', 'Like New', 'Good', 'Used', 'For Parts']
 const MAX_DAILY_AI_REQUESTS = 100
+const DESCRIPTION_MIN_CHARS = 20
+const PRIVATE_HOME_LOCATION_LABEL = 'Private saved home location'
+const PH_SEARCH_VIEWBOX = '116.0,21.5,127.0,4.5'
+const PH_BOUNDS = {
+  minLat: 4.4,
+  maxLat: 21.3,
+  minLng: 116.8,
+  maxLng: 127.2,
+}
+
+const isInPhilippines = (lat: number, lng: number): boolean => {
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= PH_BOUNDS.minLat &&
+    lat <= PH_BOUNDS.maxLat &&
+    lng >= PH_BOUNDS.minLng &&
+    lng <= PH_BOUNDS.maxLng
+  )
+}
+
+const buildPhilippinesSearchUrl = (query: string, limit = 5): string => {
+  const q = query.toLowerCase().includes('philippines') ? query : `${query}, Philippines`
+  return `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&countrycodes=ph&bounded=1&viewbox=${PH_SEARCH_VIEWBOX}&limit=${limit}&q=${encodeURIComponent(q)}`
+}
+
+const isValidAskingPrice = (price?: number): boolean => {
+  return Number.isInteger(price) && typeof price === 'number' && price > 0
+}
+
+const getDescriptionValidationMessage = (description: string): string | null => {
+  const trimmed = description.trim()
+  if (!trimmed) {
+    return 'Add a short description to help others understand your item'
+  }
+  if (trimmed.length < DESCRIPTION_MIN_CHARS) {
+    return `Add a few more details (${DESCRIPTION_MIN_CHARS - trimmed.length} more chars)`
+  }
+
+  const alphanumeric = trimmed.replace(/[^a-z0-9]/gi, '').toLowerCase()
+  const letterCount = (trimmed.match(/[a-z]/gi) || []).length
+  const uniqueChars = new Set(alphanumeric.split(''))
+
+  if (alphanumeric.length < 8 || letterCount < 6) {
+    return 'Use a few words that describe the item'
+  }
+  if (/^[\d\s.,:;!?'"()[\]{}_-]+$/.test(trimmed)) {
+    return 'Describe the item using words, not just numbers or symbols'
+  }
+  if (uniqueChars.size <= 2) {
+    return 'Add a more meaningful description of the item'
+  }
+
+  return null
+}
 
 // ── Daily Budget Helpers ──────────────────────────────────────────────────
 
@@ -240,12 +303,20 @@ const AddProduct: React.FC = () => {
     authenticity_risks: undefined,
     estimated_value_min: undefined,
     estimated_value_max: undefined,
+    show_estimated_value: true,
     tags: '[]',
     value: undefined,
     wanted_categories: [],
     wants: '',
     desired_product: '',
+    availability_slots: [],
+    availability_type: 'flexible',
   })
+
+  // Availability slot editor state
+  const [avNewDate, setAvNewDate] = useState('')
+  const [avNewStart, setAvNewStart] = useState('')
+  const [avNewEnd, setAvNewEnd] = useState('')
 
   const [uploadedImages, setUploadedImages] = useState<File[]>([])
   const [imagePreviewUrls, setImagePreviewUrls] = useState<string[]>([])
@@ -269,6 +340,8 @@ const AddProduct: React.FC = () => {
 
   const [titleLength, setTitleLength] = useState(0)
   const [descriptionLength, setDescriptionLength] = useState(0)
+  const [priceInput, setPriceInput] = useState('')
+  const [priceError, setPriceError] = useState('')
 
 
   const [locationText, setLocationText] = useState<string>('')
@@ -303,6 +376,32 @@ const AddProduct: React.FC = () => {
   const bgColor = useColorModeValue('white', 'gray.800')
   const borderColor = useColorModeValue('gray.200', 'gray.700')
   const pageBg = '#FFFDF1'
+  const descriptionValidationMessage = getDescriptionValidationMessage(formData.description)
+
+  const savedHomeAddress = String(user?.home_address || '').trim()
+  const savedHomeLatitude = Number(user?.home_latitude)
+  const savedHomeLongitude = Number(user?.home_longitude)
+  const hasSavedHomeLocation =
+    savedHomeAddress.length > 0 &&
+    isInPhilippines(savedHomeLatitude, savedHomeLongitude)
+
+  const applySavedHomeLocation = useCallback(() => {
+    if (!hasSavedHomeLocation) return
+    setLocationText(savedHomeAddress)
+    setLocationDetected(true)
+    setFormData(prev => {
+      if (prev.location_type === 'current_location' || (prev.location_type === 'pickup_location' && customPickupLocationSet)) {
+        return prev
+      }
+      return {
+        ...prev,
+        location_type: 'no_location',
+        location: PRIVATE_HOME_LOCATION_LABEL,
+        latitude: savedHomeLatitude,
+        longitude: savedHomeLongitude,
+      }
+    })
+  }, [customPickupLocationSet, hasSavedHomeLocation, savedHomeAddress, savedHomeLatitude, savedHomeLongitude])
 
   // ── Location ──────────────────────────────────────────────────────────────
 
@@ -343,6 +442,14 @@ const AddProduct: React.FC = () => {
     )
   }, [])
 
+  const useDefaultPickupSource = useCallback(() => {
+    setCustomPickupLocationSet(false)
+    setLocationText('')
+    setLocationDetected(false)
+    setFormData(prev => ({ ...prev, location_type: 'current_location' }))
+    detectLocation()
+  }, [detectLocation])
+
   // Manual-entry fallback: user types an address, we forward-geocode it and
   // save both the text and resolved coords so distance is still accurate.
   const [manualLocationOpen, setManualLocationOpen] = useState(false)
@@ -353,9 +460,7 @@ const AddProduct: React.FC = () => {
     if (!q) return
     setManualLocationSaving(true)
     try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=1&countrycodes=ph&q=${encodeURIComponent(q)}`
-      )
+      const response = await fetch(buildPhilippinesSearchUrl(q, 1))
       const results = await response.json()
       const bestMatch = Array.isArray(results) && results.length > 0 ? results[0] : null
       if (bestMatch) {
@@ -372,7 +477,7 @@ const AddProduct: React.FC = () => {
           return
         }
         const label = bestMatch.display_name || q
-        if (!isNaN(lat) && !isNaN(lng)) {
+        if (!isNaN(lat) && !isNaN(lng) && isInPhilippines(lat, lng)) {
           setFormData(prev => ({ ...prev, latitude: lat, longitude: lng, location: label }))
         } else {
           setFormData(prev => ({ ...prev, location: label }))
@@ -399,22 +504,25 @@ const AddProduct: React.FC = () => {
 
   // Search for pickup locations
   const searchPickupLocations = useCallback(async (query: string) => {
-    if (!query.trim()) {
+    if (query.trim().length < 2) {
       setPickupSearchResults([])
+      setShowPickupSearchDropdown(false)
       return
     }
     setIsSearchingPickupLocation(true)
     try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=ph&q=${encodeURIComponent(query)}&limit=5`
-      )
+      const response = await fetch(buildPhilippinesSearchUrl(query, 5))
       const results = await response.json()
-      const formatted = results.map((r: any) => ({
-        name: r.name || r.display_name.split(',')[0],
-        address: r.display_name,
-        lat: parseFloat(r.lat),
-        lng: parseFloat(r.lon),
-      }))
+      const formatted = (Array.isArray(results) ? results : [])
+        .map((r: any) => ({
+          name: r.name || String(r.display_name || '').split(',')[0],
+          address: r.display_name,
+          lat: parseFloat(r.lat),
+          lng: parseFloat(r.lon),
+          countryCode: String(r.address?.country_code || '').toLowerCase(),
+        }))
+        .filter((r: any) => r.address && r.countryCode === 'ph' && isInPhilippines(r.lat, r.lng))
+        .map(({ name, address, lat, lng }: any) => ({ name, address, lat, lng }))
       setPickupSearchResults(formatted)
       setShowPickupSearchDropdown(true)
     } catch (err) {
@@ -427,8 +535,18 @@ const AddProduct: React.FC = () => {
 
   // Handle pickup location selection from search
   const selectPickupLocation = useCallback((result: { name: string; address: string; lat: number; lng: number }) => {
+    if (!isInPhilippines(result.lat, result.lng)) {
+      toast({
+        title: 'PH locations only',
+        description: 'Please select a pickup location within the Philippines.',
+        status: 'warning',
+        duration: 3000,
+      })
+      return
+    }
     setFormData(prev => ({
       ...prev,
+      location_type: 'pickup_location',
       latitude: result.lat,
       longitude: result.lng,
       location: result.address,
@@ -437,20 +555,20 @@ const AddProduct: React.FC = () => {
     setPickupSearchQuery('')
     setPickupSearchResults([])
     setShowPickupSearchDropdown(false)
-  }, [])
+  }, [toast])
 
   useEffect(() => {
-    detectLocation()
-  }, [detectLocation])
+    if (hasSavedHomeLocation) {
+      applySavedHomeLocation()
+    }
+  }, [applySavedHomeLocation, hasSavedHomeLocation])
 
   // Fetch user's approved organizations
   useEffect(() => {
     const fetchApprovedOrganizations = async () => {
       try {
         setIsLoadingOrganizations(true)
-        console.log('📦 [AddProduct] Fetching approved organizations...')
         const response = await api.get('/api/organizations/my-approved')
-        console.log('✅ [AddProduct] Approved organizations loaded:', response.data.data)
         if (response.data.success && response.data.data) {
           setApprovedOrganizations(response.data.data)
         }
@@ -809,13 +927,12 @@ const AddProduct: React.FC = () => {
         return (
           formData.title.trim().length > 0 &&
           formData.title.trim().length <= 25 &&
-          formData.description.trim().length >= 50 &&
+          !descriptionValidationMessage &&
           !!formData.category &&
           !!formData.location?.trim() &&
           !!formData.wanted_categories && 
           formData.wanted_categories.length > 0 &&
-          !!formData.price &&
-          formData.price > 0
+          isValidAskingPrice(formData.price)
         )
       case 3:
         return true
@@ -847,12 +964,12 @@ const AddProduct: React.FC = () => {
         const issues = []
         if (!formData.title.trim()) issues.push('Add a title')
         if (formData.title.trim().length > 25) issues.push('Title must be ≤25 characters')
-        if (formData.description.trim().length < 50) issues.push('Description must be ≥50 characters')
+        if (descriptionValidationMessage) issues.push(descriptionValidationMessage)
         if (!formData.condition) issues.push('Select a condition')
         if (!formData.category) issues.push('Select a category')
         if (!formData.location?.trim()) issues.push('Add a location')
         if (!formData.wanted_categories || formData.wanted_categories.length === 0) issues.push('Select desired categories')
-        if (!formData.price || formData.price <= 0) issues.push('Enter a desired price')
+        if (!isValidAskingPrice(formData.price)) issues.push(priceError || 'Enter a valid asking price')
         return issues.length > 0 ? issues.join(' • ') : 'Complete all required fields'
       case 3:
         return 'Ready to post'
@@ -869,9 +986,10 @@ const AddProduct: React.FC = () => {
         id: "addproduct-missing-name", title: 'We need a short name!', description: 'Please provide a catchy title for your item.', status: 'warning', position: 'top', duration: 4000, isClosable: true })
       return
     }
-    if (formData.description.trim().length < 50) {
+    const descriptionIssue = getDescriptionValidationMessage(formData.description)
+    if (descriptionIssue) {
       toast({
-        id: "addproduct-description-too-short", title: 'Tell us a bit more!', description: 'Your description is too short. Please add a few more details (minimum 50 characters).', status: 'warning', position: 'top', duration: 4000, isClosable: true })
+        id: "addproduct-description-too-short", title: 'Add a short description', description: descriptionIssue, status: 'warning', position: 'top', duration: 4000, isClosable: true })
       return
     }
     if (uploadedImages.length === 0) {
@@ -879,9 +997,9 @@ const AddProduct: React.FC = () => {
         id: "addproduct-no-images", title: 'Show off your item!', description: 'Upload at least one picture so others can see what you are offering.', status: 'warning', position: 'top', duration: 4000, isClosable: true })
       return
     }
-    if (!formData.price || formData.price <= 0) {
+    if (!isValidAskingPrice(formData.price)) {
       toast({
-        id: "addproduct-missing-price", title: 'Price required!', description: 'Please enter your desired price.', status: 'warning', position: 'top', duration: 4000, isClosable: true })
+        id: "addproduct-missing-price", title: 'Price required!', description: priceError || 'Enter a valid asking price greater than 0.', status: 'warning', position: 'top', duration: 4000, isClosable: true })
       return
     }
 
@@ -890,13 +1008,14 @@ const AddProduct: React.FC = () => {
       const fd = new FormData()
       fd.append('title', formData.title.trim())
       fd.append('description', formData.description.trim())
-      fd.append('price', formData.price?.toString() || '0')
+      fd.append('price', String(formData.price))
       fd.append('premium', formData.premium ? '1' : '0')
       fd.append('allow_buying', formData.allow_buying ? '1' : '0')
       fd.append('barter_only', formData.barter_only ? '1' : '0')
       fd.append('bidding_type', formData.bidding_type || 'none')
       fd.append('max_items_per_offer', String(formData.max_items_per_offer || 0))
       fd.append('location', formData.location?.trim() || '')
+      fd.append('location_type', formData.location_type || 'no_location')
       fd.append('condition', formData.condition || 'Used')
       fd.append('category', formData.category || 'General')
 
@@ -904,11 +1023,30 @@ const AddProduct: React.FC = () => {
         fd.append('latitude', formData.latitude.toString())
         fd.append('longitude', formData.longitude.toString())
       }
+      if (formData.location_type === 'pickup_location' && formData.latitude !== undefined && formData.longitude !== undefined) {
+        fd.append('pickup_latitude', formData.latitude.toString())
+        fd.append('pickup_longitude', formData.longitude.toString())
+        fd.append('pickup_address', formData.location?.trim() || '')
+      }
       if (formData.item_type) fd.append('item_type', formData.item_type)
       if (formData.brand) fd.append('brand', formData.brand)
       if (formData.authenticity_risks) fd.append('authenticity_risks', formData.authenticity_risks)
-      if (formData.estimated_value_min !== undefined) fd.append('estimated_value_min', String(formData.estimated_value_min))
-      if (formData.estimated_value_max !== undefined) fd.append('estimated_value_max', String(formData.estimated_value_max))
+      const hasAiEstimate =
+        formData.estimated_value_min !== undefined &&
+        formData.estimated_value_max !== undefined &&
+        formData.estimated_value_min > 0 &&
+        formData.estimated_value_max > 0
+      const fallbackEstimate = !hasAiEstimate && formData.category && formData.condition
+        ? getBackupPriceEstimate(formData.category, formData.condition)
+        : null
+      const submitEstimate = hasAiEstimate
+        ? { min: formData.estimated_value_min as number, max: formData.estimated_value_max as number }
+        : fallbackEstimate
+      if (submitEstimate) {
+        fd.append('estimated_value_min', String(submitEstimate.min))
+        fd.append('estimated_value_max', String(submitEstimate.max))
+      }
+      fd.append('show_estimated_value', formData.show_estimated_value ? 'true' : 'false')
       fd.append('tags', formData.tags || '[]')
       if (formData.value !== undefined) fd.append('value', String(formData.value))
       if (formData.wanted_categories && formData.wanted_categories.length > 0) {
@@ -916,17 +1054,19 @@ const AddProduct: React.FC = () => {
       }
       if (formData.wants) fd.append('wants', formData.wants)
       if (formData.desired_product) fd.append('desired_product', formData.desired_product)
+      if (formData.availability_slots && formData.availability_slots.length > 0) {
+        fd.append('availability_slots', JSON.stringify(formData.availability_slots))
+      }
+      fd.append('availability_type', formData.availability_type || 'flexible')
       
       // Add organization IDs for tagging
       if (selectedOrganizationIds.length > 0) {
         fd.append('organization_ids', JSON.stringify(selectedOrganizationIds))
-        console.log('📦 [AddProduct] Tagging organizations:', selectedOrganizationIds)
       }
 
       uploadedImages.forEach(f => fd.append('images', f))
       if (uploadedVideo) fd.append('video', uploadedVideo)
 
-      console.log('📤 [AddProduct] Submitting product with organizations:', selectedOrganizationIds.length > 0 ? selectedOrganizationIds : 'none')
       await createProduct(fd)
 
       // Ensure the dashboard shows the new listing immediately after redirect.
@@ -950,9 +1090,6 @@ const AddProduct: React.FC = () => {
         id: "addproduct-product-posted", title: 'All set! 🎉', description: 'Your item is now live and visible to others.', status: 'success', position: 'top', duration: 3000, isClosable: true })
       navigate('/dashboard')
     } catch (err: any) {
-      console.error('❌ [AddProduct] Error creating product:', err)
-      console.error('❌ [AddProduct] Response data:', err.response?.data)
-      console.error('❌ [AddProduct] Response status:', err.response?.status)
       let friendlyMsg = 'Something went wrong while saving your item. Please try again.'
       if (err.response?.status === 413) {
         friendlyMsg = 'One or more of your files are too large. Try uploading a smaller image.'
@@ -1180,8 +1317,9 @@ const AddProduct: React.FC = () => {
                     fontSize="9px" 
                     px={2}
                     py={1}
-                    borderRadius="md"
-                  >
+                 borderRadius="md"
+                  display="none"
+                 >
                     ★ Cover
                   </Badge>
                 )}
@@ -1389,14 +1527,13 @@ const AddProduct: React.FC = () => {
         borderWidth="1px"
         borderColor="gray.200"
         p={2.5}
-        cursor="pointer"
-        onClick={() => setExpandProductDetails(!expandProductDetails)}
+        cursor={expandProductDetails ? 'default' : 'pointer'}
         transition="all 0.2s"
         _hover={{ borderColor: "brand.300", shadow: "sm" }}
       >
         {/* Collapsed View */}
         {!expandProductDetails ? (
-          <HStack justify="space-between" align="center" spacing={2}>
+          <HStack justify="space-between" align="center" spacing={2} onClick={() => setExpandProductDetails(true)}>
             {/* AI Badges or Loading Skeleton */}
             {isGenerating && !aiDone ? (
               <HStack spacing={2} flex={1} minW={0}>
@@ -1443,7 +1580,7 @@ const AddProduct: React.FC = () => {
           </HStack>
         ) : (
           /* Expanded View */
-          <VStack spacing={2} align="stretch">
+          <VStack spacing={2} align="stretch" onClick={e => e.stopPropagation()}>
             {/* Close/Collapse hint - clicking these closes the dropdown */}
             <HStack justify="space-between" align="center" onClick={() => setExpandProductDetails(false)}>
               <Text fontSize="xs" fontWeight="bold" color="gray.700">Edit Details</Text>
@@ -1478,7 +1615,7 @@ const AddProduct: React.FC = () => {
             <FormControl isRequired>
               <FormLabel fontSize="xs" fontWeight="bold" color="gray.600">Description</FormLabel>
               <Textarea
-                placeholder="Describe your product..."
+                placeholder="Briefly describe your item (condition, brand, etc.)"
                 value={formData.description}
                 onChange={e => {
                   handleField('description', e.target.value)
@@ -1492,10 +1629,10 @@ const AddProduct: React.FC = () => {
               />
               {descriptionFieldFocused && (
                 <HStack justify="space-between" mt={1}>
-                  <Text fontSize="9px" color={descriptionLength < 50 ? 'red.500' : 'gray.500'}>
-                    {descriptionLength < 50 ? `${50 - descriptionLength} more chars` : '✓ Min met'}
+                  <Text fontSize="9px" color={descriptionValidationMessage ? 'orange.500' : 'gray.500'}>
+                    {descriptionValidationMessage || 'Looks clear enough'}
                   </Text>
-                  <Badge colorScheme={descriptionLength < 50 ? 'red' : 'green'} fontSize="9px">
+                  <Badge colorScheme={descriptionValidationMessage ? 'orange' : 'green'} fontSize="9px">
                     {descriptionLength}/800
                   </Badge>
                 </HStack>
@@ -1542,10 +1679,10 @@ const AddProduct: React.FC = () => {
       <Box p={3} borderRadius="xl" borderWidth="1px" borderColor="brand.100" bg="white" shadow="sm">
         <VStack align="stretch" spacing={3}>
           <Text fontSize="xs" color="gray.600" fontWeight="bold" textTransform="uppercase" letterSpacing="wider">
-            Your Current Location
+            My Home Location
           </Text>
 
-          {isGettingLocation ? (
+          {isGettingLocation && !hasSavedHomeLocation ? (
             <HStack spacing={3} p={3} bg="gray.50" borderRadius="lg" border="1px dashed" borderColor="gray.200">
               <Spinner size="sm" color="brand.500" />
               <VStack align="start" spacing={0}>
@@ -1553,7 +1690,24 @@ const AddProduct: React.FC = () => {
                 <Text fontSize="10px" color="gray.500">Please wait while we automatically find you</Text>
               </VStack>
             </HStack>
-          ) : locationDetected && locationText ? (
+          ) : hasSavedHomeLocation ? (
+            <VStack align="stretch" spacing={3}>
+              <HStack align="center" spacing={3} p={3} bg="brand.50" borderRadius="lg" border="1px dashed" borderColor="brand.200">
+                <Box p={2} bg="brand.100" borderRadius="full">
+                  <Text fontSize="md">Home</Text>
+                </Box>
+                <VStack align="start" spacing={0} flex={1}>
+                  <Text fontSize="xs" fontWeight="700" color="brand.700">Saved Home Location</Text>
+                  <Text fontSize="sm" fontWeight="bold" color="brand.800" noOfLines={2} title={savedHomeAddress}>
+                    {savedHomeAddress}
+                  </Text>
+                  <Text fontSize="10px" color="brand.600" fontWeight="500">
+                    Used privately for matching, distance calculations, and as the default product location unless you choose an override below.
+                  </Text>
+                </VStack>
+              </HStack>
+            </VStack>
+          ) : false && locationDetected && locationText ? (
             <VStack align="stretch" spacing={3}>
               <HStack align="center" spacing={3} p={3} bg="brand.50" borderRadius="lg" border="1px dashed" borderColor="brand.200">
                 <Box p={2} bg="brand.100" borderRadius="full">
@@ -1583,8 +1737,9 @@ const AddProduct: React.FC = () => {
           ) : (
             <VStack align="stretch" spacing={2}>
                <Box p={3} bg="gray.50" borderRadius="lg" border="1px dashed" borderColor="gray.200" textAlign="center">
-                 <Text fontSize="xs" mb={3} color="gray.500">We need your location to match you with nearby trades.</Text>
-                 <Button
+                 <Text fontSize="xs" fontWeight="600" color="gray.700">No Home Location saved yet</Text>
+                 <Text fontSize="10px" mt={1} color="gray.500">Add one in Settings, or choose an optional pickup override below for this product.</Text>
+                 <Button display="none"
                   size="sm"
                   colorScheme="brand"
                   variant="solid"
@@ -1605,7 +1760,7 @@ const AddProduct: React.FC = () => {
       <Box bg="blue.50" p={2} borderRadius="md" borderWidth="1px" borderColor="blue.200">
         <FormControl>
           <FormLabel fontSize="xs" fontWeight="bold" color="blue.800" mb={1.5}>
-            📦 How would you like buyers to collect this item?
+            Change pickup location for this product (optional)
           </FormLabel>
           <VStack align="stretch" spacing={1.5}>
             {/* Option 1: Use Current Location */}
@@ -1620,24 +1775,21 @@ const AddProduct: React.FC = () => {
               <HStack align="start" mb={formData.location_type === 'current_location' && locationText ? 1.5 : 0} spacing={2}>
                 <Radio 
                   isChecked={formData.location_type === 'current_location'}
-                  onChange={() => {
-                    setFormData(prev => ({ ...prev, location_type: 'current_location' }))
-                    setCustomPickupLocationSet(false)
-                    detectLocation()
-                  }}
+                  onChange={useDefaultPickupSource}
                   colorScheme="blue"
                   flex="0 0 auto"
                   mt={0.5}
                   cursor="pointer"
                 />
-                <VStack align="start" spacing={0} flex={1} cursor="pointer" onClick={() => {
-                  setFormData(prev => ({ ...prev, location_type: 'current_location' }))
-                  setCustomPickupLocationSet(false)
-                  detectLocation()
-                }}>
-                  <Text fontWeight="600" fontSize="xs">✓ Use My Current Location</Text>
-                  <Text fontSize="10px" color="gray.600">Buyers pick up from your detected location</Text>
+                <VStack align="start" spacing={0} flex={1} cursor="pointer" onClick={useDefaultPickupSource}>
+                  <Text fontWeight="600" fontSize="xs">
+                    Use My Current Location
+                  </Text>
+                  <Text fontSize="10px" color="gray.600">
+                    Other users pick up from your detected location
+                  </Text>
                 </VStack>
+                {formData.location_type === 'current_location' && isGettingLocation && <Spinner size="xs" />}
               </HStack>
               {formData.location_type === 'current_location' && locationText && (
                 <Box pl={6} pt={1} borderTopWidth="1px" borderTopColor="blue.200">
@@ -1730,8 +1882,18 @@ const AddProduct: React.FC = () => {
                   <SavedLocationsUI
                     locations={locations}
                     onSelectLocation={(loc) => {
+                      if (!isInPhilippines(loc.latitude, loc.longitude)) {
+                        toast({
+                          title: 'PH locations only',
+                          description: 'Please choose a saved pickup location within the Philippines.',
+                          status: 'warning',
+                          duration: 3000,
+                        })
+                        return
+                      }
                       setFormData(prev => ({
                         ...prev,
+                        location_type: 'pickup_location',
                         location: loc.address,
                         latitude: loc.latitude,
                         longitude: loc.longitude,
@@ -1761,7 +1923,7 @@ const AddProduct: React.FC = () => {
                     <Text fontSize={{ base: '8px', md: '9px' }} fontWeight="600" color="blue.700" mb={0.5}>Search</Text>
                     <Box position="relative">
                       <Input
-                        placeholder="Search location..."
+                        placeholder="Search Philippine pickup location..."
                         value={pickupSearchQuery}
                         onChange={(e) => {
                           setPickupSearchQuery(e.target.value)
@@ -1835,8 +1997,17 @@ const AddProduct: React.FC = () => {
                           <MapUpdater lat={formData.latitude} lng={formData.longitude} />
                           <MapClickHandler onLocationSelect={async (lat, lng) => {
                             try {
+                              if (!isInPhilippines(lat, lng)) {
+                                toast({
+                                  title: 'PH locations only',
+                                  description: 'Please pin a pickup location within the Philippines.',
+                                  status: 'warning',
+                                  duration: 3000,
+                                })
+                                return
+                              }
                               const res = await fetch(
-                                `https://nominatim.openstreetmap.org/reverse?format=json&zoom=18&addressdetails=1&lat=${lat}&lon=${lng}`
+                                `https://nominatim.openstreetmap.org/reverse?format=json&zoom=18&addressdetails=1&accept-language=en&lat=${lat}&lon=${lng}`
                               )
                               const data = await res.json()
                               const addr = data.address || {}
@@ -1855,10 +2026,10 @@ const AddProduct: React.FC = () => {
                               const city = addr.city || addr.town || addr.municipality || ''
                               const parts = [street, barangay, city].filter(Boolean)
                               const address = parts.join(', ') || `${lat.toFixed(4)}, ${lng.toFixed(4)}`
-                              setFormData(prev => ({ ...prev, latitude: lat, longitude: lng, location: address }))
+                              setFormData(prev => ({ ...prev, location_type: 'pickup_location', latitude: lat, longitude: lng, location: address }))
                               setCustomPickupLocationSet(true)
                             } catch {
-                              setFormData(prev => ({ ...prev, latitude: lat, longitude: lng, location: `${lat.toFixed(4)}, ${lng.toFixed(4)}` }))
+                              setFormData(prev => ({ ...prev, location_type: 'pickup_location', latitude: lat, longitude: lng, location: `${lat.toFixed(4)}, ${lng.toFixed(4)}` }))
                               setCustomPickupLocationSet(true)
                             }
                           }} />
@@ -1873,7 +2044,7 @@ const AddProduct: React.FC = () => {
 
           </VStack>
           <FormHelperText fontSize="8px" mt={1.5} color="blue.700">
-            💡 Choose how buyers will collect your product
+            Home Location is used by default. Choose an override only if this product needs a different pickup point.
           </FormHelperText>
         </FormControl>
       </Box>
@@ -1935,43 +2106,243 @@ const AddProduct: React.FC = () => {
             <FormHelperText fontSize="10px">Choose up to 3 categories.</FormHelperText>
           </FormControl>
           
-          <FormControl isRequired>
+          <FormControl isRequired isInvalid={!!priceError}>
             <FormLabel fontSize="xs" fontWeight="semibold" color="gray.600">Asking Price</FormLabel>
+            <Box
+              mb={2}
+              p={3}
+              bg="purple.50"
+              borderRadius="lg"
+              borderLeft="3px solid"
+              borderLeftColor="purple.300"
+            >
+              <Text fontSize="xs" fontWeight="bold" color="purple.800" mb={1}>
+                AI Estimated Value
+              </Text>
+              {(() => {
+                const aiEstimate = formData.estimated_value_min && formData.estimated_value_max && formData.estimated_value_min > 0
+                  ? { min: formData.estimated_value_min, max: formData.estimated_value_max }
+                  : null
+
+                const fallbackEstimate = !aiEstimate && formData.category && formData.condition
+                  ? getBackupPriceEstimate(formData.category, formData.condition)
+                  : null
+
+                const estimate = aiEstimate || fallbackEstimate
+
+                if (!estimate && isGenerating && !aiDone) {
+                  return <Skeleton height="24px" borderRadius="md" />
+                }
+
+                return estimate ? (
+                  <>
+                    <Text fontSize="lg" fontWeight="bold" color={aiEstimate ? 'purple.900' : 'orange.700'}>
+                      {formatEstimatedValueRange(estimate.min, estimate.max)}
+                    </Text>
+                    <Text fontSize="10px" color="purple.700" mt={1}>
+                      Use this as a guide when setting your asking price.
+                    </Text>
+                  </>
+                ) : (
+                  <Text fontSize="10px" color="gray.600" fontStyle="italic">
+                    Select a category and condition to see the estimated value.
+                  </Text>
+                )
+              })()}
+            </Box>
             <Input
               placeholder="e.g. 500"
-              type="number"
-              value={formData.price ?? ''}
+              type="text"
+              value={priceInput}
               onChange={e => {
-                let val = e.target.value ? Number(e.target.value) : undefined
-                // Prevent negative numbers
-                if (val !== undefined && val < 0) {
-                  val = undefined
+                const raw = e.target.value.trim()
+                setPriceInput(raw)
+
+                if (raw === '') {
+                  setPriceError('')
+                  handleField('price', undefined)
+                  return
                 }
-                handleField('price', val)
+
+                if (!/^\d+$/.test(raw)) {
+                  setPriceError('Enter a valid whole-peso amount')
+                  handleField('price', undefined)
+                  return
+                }
+
+                const normalized = raw.replace(/^0+/, '')
+                if (!normalized) {
+                  setPriceInput('')
+                  setPriceError('Price must be greater than 0')
+                  handleField('price', undefined)
+                  return
+                }
+
+                const nextPrice = Number(normalized)
+                if (!Number.isSafeInteger(nextPrice) || nextPrice <= 0) {
+                  setPriceError('Enter a valid asking price')
+                  handleField('price', undefined)
+                  return
+                }
+
+                setPriceInput(normalized)
+                setPriceError('')
+                handleField('price', nextPrice)
               }}
               onKeyDown={(e) => {
-                // Block minus and plus signs
-                if (e.key === '-' || e.key === '+') {
+                if (['-', '+', '.', ',', 'e', 'E'].includes(e.key)) {
                   e.preventDefault()
                 }
               }}
-              onBlur={(e) => {
-                const val = Number(e.target.value)
-                if (val < 0) {
+              onBlur={() => {
+                if (!isValidAskingPrice(formData.price)) {
                   handleField('price', undefined)
-                  e.target.value = ''
                 }
               }}
               size="sm"
               bg="white"
               h="40px"
               onClick={e => e.stopPropagation()}
-              min={0}
-              step={1}
               inputMode="numeric"
+              pattern="[0-9]*"
             />
-            <FormHelperText fontSize="10px" color="gray.500">Your asking price in ₱</FormHelperText>
+            {priceError ? (
+              <FormErrorMessage fontSize="10px">{priceError}</FormErrorMessage>
+            ) : (
+              <FormHelperText fontSize="10px" color="gray.500">Your asking price in PHP, whole pesos only.</FormHelperText>
+            )}
           </FormControl>
+
+          {/* ──────── AVAILABILITY SCHEDULE ──────── */}
+          <Box pt={2} borderTopWidth="1px" borderTopColor="gray.100">
+            <HStack justify="space-between" mb={2}>
+              <HStack spacing={2}>
+                <Text fontSize="xs" fontWeight="bold" color="gray.700">Availability Schedule</Text>
+                <Badge colorScheme="teal" fontSize="8px">Optional</Badge>
+              </HStack>
+              <HStack spacing={2}>
+                <Text fontSize="10px" color="gray.500">Schedule type:</Text>
+                <HStack spacing={1}>
+                  {(['flexible', 'strict'] as const).map(t => (
+                    <Button
+                      key={t}
+                      size="xs"
+                      fontSize="10px"
+                      h="22px"
+                      colorScheme={formData.availability_type === t ? (t === 'strict' ? 'orange' : 'teal') : 'gray'}
+                      variant={formData.availability_type === t ? 'solid' : 'outline'}
+                      onClick={() => handleField('availability_type', t)}
+                    >
+                      {t === 'flexible' ? 'Flexible' : 'Strict'}
+                    </Button>
+                  ))}
+                </HStack>
+              </HStack>
+            </HStack>
+            <Text fontSize="10px" color="gray.500" mb={2}>
+              {formData.availability_type === 'strict'
+                ? 'Offerers must choose one of your listed time slots.'
+                : 'Offerers can pick your slots or suggest a different time.'}
+            </Text>
+
+            {/* Existing slots */}
+            {(formData.availability_slots || []).length > 0 && (
+              <VStack align="stretch" spacing={1} mb={2}>
+                {(formData.availability_slots || []).map(slot => {
+                  const fmt = (t: string) => {
+                    const [h, m] = t.split(':').map(Number)
+                    const ampm = h >= 12 ? 'PM' : 'AM'
+                    const hour = h % 12 || 12
+                    return m === 0 ? `${hour}${ampm}` : `${hour}:${String(m).padStart(2, '0')}${ampm}`
+                  }
+                  const d = new Date(`${slot.date}T00:00:00`)
+                  const dateStr = d.toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' })
+                  return (
+                    <HStack key={slot.id} p={1.5} bg="teal.50" borderRadius="md" borderLeft="3px solid" borderLeftColor="teal.400" justify="space-between">
+                      <Text fontSize="11px" color="teal.800" fontWeight="medium">
+                        {dateStr} · {fmt(slot.start_time)}–{fmt(slot.end_time)}
+                      </Text>
+                      <IconButton
+                        aria-label="Remove slot"
+                        icon={<CloseIcon boxSize={2} />}
+                        size="xs"
+                        variant="ghost"
+                        colorScheme="red"
+                        h="18px"
+                        minW="18px"
+                        onClick={() => handleField('availability_slots', (formData.availability_slots || []).filter(s => s.id !== slot.id))}
+                      />
+                    </HStack>
+                  )
+                })}
+              </VStack>
+            )}
+
+            {/* Add slot row */}
+            <VStack align="stretch" spacing={1.5} p={2} bg="gray.50" borderRadius="md" borderWidth="1px" borderColor="gray.200">
+              <Text fontSize="10px" fontWeight="semibold" color="gray.600">Add a time slot</Text>
+              <HStack spacing={1.5}>
+                <Input
+                  type="date"
+                  value={avNewDate}
+                  onChange={e => setAvNewDate(e.target.value)}
+                  min={new Date().toISOString().split('T')[0]}
+                  size="sm"
+                  fontSize="11px"
+                  flex={1.5}
+                  bg="white"
+                />
+                <Input
+                  type="time"
+                  value={avNewStart}
+                  onChange={e => setAvNewStart(e.target.value)}
+                  size="sm"
+                  fontSize="11px"
+                  flex={1}
+                  bg="white"
+                  placeholder="From"
+                />
+                <Text fontSize="10px" color="gray.400" flexShrink={0}>–</Text>
+                <Input
+                  type="time"
+                  value={avNewEnd}
+                  onChange={e => setAvNewEnd(e.target.value)}
+                  size="sm"
+                  fontSize="11px"
+                  flex={1}
+                  bg="white"
+                  placeholder="To"
+                />
+                <Button
+                  size="sm"
+                  colorScheme="teal"
+                  fontSize="11px"
+                  h="32px"
+                  px={3}
+                  flexShrink={0}
+                  isDisabled={!avNewDate || !avNewStart || !avNewEnd || avNewEnd <= avNewStart}
+                  onClick={() => {
+                    if (!avNewDate || !avNewStart || !avNewEnd || avNewEnd <= avNewStart) return
+                    const newSlot: AvailabilitySlot = {
+                      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                      date: avNewDate,
+                      start_time: avNewStart,
+                      end_time: avNewEnd,
+                    }
+                    handleField('availability_slots', [...(formData.availability_slots || []), newSlot])
+                    setAvNewDate('')
+                    setAvNewStart('')
+                    setAvNewEnd('')
+                  }}
+                >
+                  Add
+                </Button>
+              </HStack>
+              {avNewEnd && avNewStart && avNewEnd <= avNewStart && (
+                <Text fontSize="9px" color="red.500">End time must be after start time.</Text>
+              )}
+            </VStack>
+          </Box>
         </VStack>
       </Box>
     </VStack>
@@ -1984,6 +2355,13 @@ const AddProduct: React.FC = () => {
     })()
 
     const listingDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+    const aiEstimate = formData.estimated_value_min && formData.estimated_value_max && formData.estimated_value_min > 0
+      ? { min: formData.estimated_value_min, max: formData.estimated_value_max }
+      : null
+    const fallbackEstimate = !aiEstimate && formData.category && formData.condition
+      ? getBackupPriceEstimate(formData.category, formData.condition)
+      : null
+    const estimate = aiEstimate || fallbackEstimate
 
     return (
       <VStack spacing={4} align="stretch">
@@ -2061,6 +2439,15 @@ const AddProduct: React.FC = () => {
             <SimpleGrid columns={{ base: 2, sm: 3 }} spacing={3}>
               <Box>
                 <Text fontSize="xs" color="gray.500" fontWeight="bold" textTransform="uppercase" mb={1}>
+                  Asking Price
+                </Text>
+                <Text fontSize="sm" fontWeight="semibold" color="gray.800">
+                  {formData.price && formData.price > 0 ? `P${Number(formData.price).toLocaleString()}` : 'Not set'}
+                </Text>
+              </Box>
+
+              <Box>
+                <Text fontSize="xs" color="gray.500" fontWeight="bold" textTransform="uppercase" mb={1}>
                   Condition
                 </Text>
                 <Text fontSize="sm" fontWeight="semibold" color="gray.800">
@@ -2126,6 +2513,40 @@ const AddProduct: React.FC = () => {
                 </Box>
               )}
             </SimpleGrid>
+
+            {/* Availability slots summary */}
+            {(formData.availability_slots || []).length > 0 && (
+              <>
+                <Box borderBottomWidth="1px" borderBottomColor="gray.200" />
+                <Box>
+                  <HStack mb={1.5} spacing={2}>
+                    <Text fontSize="xs" color="gray.500" fontWeight="bold" textTransform="uppercase">
+                      Availability
+                    </Text>
+                    <Badge colorScheme={formData.availability_type === 'strict' ? 'orange' : 'teal'} fontSize="8px">
+                      {formData.availability_type === 'strict' ? 'Strict' : 'Flexible'}
+                    </Badge>
+                  </HStack>
+                  <VStack align="stretch" spacing={1}>
+                    {(formData.availability_slots || []).map(slot => {
+                      const fmt = (t: string) => {
+                        const [h, m] = t.split(':').map(Number)
+                        const ampm = h >= 12 ? 'PM' : 'AM'
+                        const hour = h % 12 || 12
+                        return m === 0 ? `${hour}${ampm}` : `${hour}:${String(m).padStart(2, '0')}${ampm}`
+                      }
+                      const d = new Date(`${slot.date}T00:00:00`)
+                      const dateStr = d.toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' })
+                      return (
+                        <Text key={slot.id} fontSize="11px" color="teal.800">
+                          🕐 {dateStr} · {fmt(slot.start_time)}–{fmt(slot.end_time)}
+                        </Text>
+                      )
+                    })}
+                  </VStack>
+                </Box>
+              </>
+            )}
           </VStack>
         </Box>
 
@@ -2135,32 +2556,71 @@ const AddProduct: React.FC = () => {
           bg="gray.50"
           borderRadius="lg"
           borderLeft="3px solid"
-          borderLeftColor="purple.300"
-          textAlign="center"
+          borderLeftColor={formData.show_estimated_value ? 'purple.300' : 'gray.300'}
         >
-          <Text fontSize="xs" fontWeight="medium" color="gray.600" mb={1}>
-            Estimated Value (Market Range)
-          </Text>
+          <HStack justify="space-between" align="center" mb={2} gap={3}>
+            <Box textAlign="left">
+              <Text fontSize="xs" fontWeight="medium" color="gray.600">
+                Estimated Value (Market Range)
+              </Text>
+              <Text fontSize="10px" color="gray.500">
+                Choose if other users can see this estimate.
+              </Text>
+            </Box>
+            <HStack spacing={0} borderWidth="1px" borderColor="gray.200" borderRadius="md" overflow="hidden" flexShrink={0}>
+              <Button
+                size="xs"
+                borderRadius={0}
+                colorScheme={formData.show_estimated_value ? 'green' : 'gray'}
+                variant={formData.show_estimated_value ? 'solid' : 'ghost'}
+                onClick={() => handleField('show_estimated_value', true)}
+              >
+                On
+              </Button>
+              <Button
+                size="xs"
+                borderRadius={0}
+                colorScheme={!formData.show_estimated_value ? 'red' : 'gray'}
+                variant={!formData.show_estimated_value ? 'solid' : 'ghost'}
+                onClick={() => handleField('show_estimated_value', false)}
+              >
+                Off
+              </Button>
+            </HStack>
+          </HStack>
           {isGenerating && !aiDone ? (
             <Skeleton height="32px" borderRadius="md" />
+          ) : !formData.show_estimated_value ? (
+            <Text fontSize="sm" color="gray.600" fontWeight="semibold" textAlign="center">
+              Hidden from product viewers
+            </Text>
           ) : (() => {
             const aiEstimate = formData.estimated_value_min && formData.estimated_value_max && formData.estimated_value_min > 0
               ? { min: formData.estimated_value_min, max: formData.estimated_value_max }
               : null
-            
+
             const fallbackEstimate = !aiEstimate && formData.category && formData.condition
               ? getBackupPriceEstimate(formData.category, formData.condition)
               : null
-            
+
             const estimate = aiEstimate || fallbackEstimate
 
+            if (!estimate && isGenerating && !aiDone) {
+              return <Skeleton height="32px" borderRadius="md" />
+            }
+
             return estimate ? (
-              <Heading fontSize="2xl" fontWeight="bold" color={aiEstimate ? 'gray.800' : 'amber.700'}>
-                ₱{Number(estimate.min).toLocaleString()} – ₱{Number(estimate.max).toLocaleString()}
-              </Heading>
+              <>
+                <Heading fontSize="2xl" fontWeight="bold" color={aiEstimate ? 'gray.800' : 'orange.700'}>
+                  {formatEstimatedValueRange(estimate.min, estimate.max)}
+                </Heading>
+                <Text fontSize="10px" color="gray.500" mt={1}>
+                  Use this as a guide when setting your asking price.
+                </Text>
+              </>
             ) : (
               <Text fontSize="sm" color="gray.600" fontStyle="italic">
-                Add product details to see estimate
+                Select a category and condition to see the estimated value.
               </Text>
             )
           })()}

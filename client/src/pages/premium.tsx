@@ -73,6 +73,7 @@ const Premium: React.FC = () => {
   const [isYearly, setIsYearly] = useState(false)
   const [upgrading, setUpgrading] = useState<string | null>(null) // 'plus' | 'pro' | null
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null)
+  const [showCurrentPlanDetails, setShowCurrentPlanDetails] = useState(false)
   const [userProducts, setUserProducts] = useState<any[]>([])
   const [productsLoading, setProductsLoading] = useState(false)
   const [boostingProduct, setBoostingProduct] = useState<number | null>(null)
@@ -263,15 +264,23 @@ const Premium: React.FC = () => {
       const response = await api.post(`/api/products/boost/${productId}`)
       
       if (response.data?.success) {
+        const boostData = response.data?.data || {}
+        const boostedAt = boostData.boosted_at || new Date().toISOString()
+        const alreadyBoosted = !!boostData.already_boosted
         toast({
           id: 'boost-success',
-          title: '🚀 Boost Successful!',
-          description: `"${productName}" is now boosted and will appear at the top of the feed for the next 3 hours!`,
+          title: alreadyBoosted ? 'Already Boosted' : 'Boost Successful!',
+          description: response.data.message || `"${productName}" is now boosted and will appear at the top of the feed for the next 3 hours!`,
           status: 'success',
           duration: 4000,
           isClosable: true,
         })
-        markProductBoosted(productId, new Date().toISOString())
+        if (boostData.active !== false) {
+          markProductBoosted(productId, boostedAt)
+          setUserProducts((current) =>
+            current.map((p) => p.id === productId ? { ...p, boosted_at: boostedAt } : p)
+          )
+        }
         // Refresh products list to show updated boost status
         fetchUserProducts()
       }
@@ -309,11 +318,9 @@ const Premium: React.FC = () => {
         // Fallback if response structure is different
         window.location.href = responsePayload.checkout_url
       } else {
-        console.error('Response:', responsePayload)
         throw new Error('Invalid response: No checkout URL found')
       }
     } catch (error: any) {
-      console.error('Upgrade error:', error)
       const errorMsg = error.response?.data?.error || error.response?.data?.message || error.message || 'Something went wrong'
       toast({
         id: 'premium-upgrade-error',
@@ -633,7 +640,13 @@ const Premium: React.FC = () => {
                 variant="ghost"
                 colorScheme={currentTier === 'pro' ? 'purple' : 'blue'}
                 fontSize="xs"
-                onClick={() => handleUpgrade(currentTier === 'plus' ? 'pro' : 'plus')}
+                onClick={() => {
+                  if (currentTier === 'plus') {
+                    handleUpgrade('pro')
+                    return
+                  }
+                  setShowCurrentPlanDetails((current) => !current)
+                }}
               >
                 {currentTier === 'pro' ? 'View Details' : 'Upgrade →'}
               </Button>
@@ -641,6 +654,51 @@ const Premium: React.FC = () => {
           </CardBody>
         </Card>
       </SimpleGrid>
+
+      <Collapse in={showCurrentPlanDetails} animateOpacity>
+        <Card
+          bg={cardBg}
+          borderWidth="1px"
+          borderColor={currentTier === 'pro' ? 'purple.200' : 'blue.200'}
+          borderRadius="2xl"
+        >
+          <CardBody>
+            <VStack align="stretch" spacing={5}>
+              <Flex justify="space-between" align={{ base: 'start', md: 'center' }} direction={{ base: 'column', md: 'row' }} gap={3}>
+                <Box>
+                  <Heading size="sm">
+                    {currentTier === 'pro' ? 'Your Pro features' : 'Your Plus features'}
+                  </Heading>
+                  <Text fontSize="sm" color={mutedText} mt={1}>
+                    Everything included in your current plan.
+                  </Text>
+                </Box>
+                <Button size="sm" variant="ghost" onClick={() => setShowCurrentPlanDetails(false)}>
+                  Hide details
+                </Button>
+              </Flex>
+
+              <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} spacing={5}>
+                <FeatureSection
+                  title="Listings"
+                  features={currentTier === 'pro' ? proFeatures.listings : plusFeatures.listings}
+                  color={currentTier === 'pro' ? 'purple' : 'blue'}
+                />
+                <FeatureSection
+                  title="Trading"
+                  features={currentTier === 'pro' ? proFeatures.trading : plusFeatures.trading}
+                  color={currentTier === 'pro' ? 'purple' : 'blue'}
+                />
+                <FeatureSection
+                  title="Profile"
+                  features={currentTier === 'pro' ? proFeatures.profile : plusFeatures.profile}
+                  color={currentTier === 'pro' ? 'purple' : 'blue'}
+                />
+              </SimpleGrid>
+            </VStack>
+          </CardBody>
+        </Card>
+      </Collapse>
 
       {/* Your Products - Boost Section */}
       {isPremiumUser && (
@@ -1084,4 +1142,3 @@ const Premium: React.FC = () => {
 }
 
 export default Premium
-

@@ -201,6 +201,7 @@ type Product struct {
 	SellerID             int               `json:"seller_id"`
 	SellerName           string            `json:"seller_name,omitempty"`
 	SellerProfilePicture string            `json:"seller_profile_picture,omitempty"`
+	SellerPremiumTier    string            `json:"seller_premium_tier,omitempty"`
 	Premium              bool              `json:"premium"`
 	Status               string            `json:"status" validate:"oneof=available sold traded locked suspended deleted"`
 	AllowBuying          bool              `json:"allow_buying"` // Whether buying is allowed
@@ -209,6 +210,7 @@ type Product struct {
 	Condition            string            `json:"condition,omitempty" validate:"omitempty,oneof=New Like-New Used Fair"`
 	EstimatedValueMin    *float64          `json:"estimated_value_min,omitempty"`
 	EstimatedValueMax    *float64          `json:"estimated_value_max,omitempty"`
+	ShowEstimatedValue   bool              `json:"show_estimated_value"`
 	SuggestedValue       int               `json:"suggested_value,omitempty"`
 	Value                *float64          `json:"value,omitempty"` // User-defined product value
 	Category             string            `json:"category,omitempty"`
@@ -232,6 +234,7 @@ type Product struct {
 	VideoURL             string            `json:"video_url,omitempty"`
 	Analytics            *ProductAnalytics `json:"analytics,omitempty"`
 	Distance             string            `json:"distance,omitempty"` // Computed distance from viewer (e.g. "3.2 KM")
+	IsSaved              bool              `json:"is_saved,omitempty"`
 	CreatedAt            time.Time         `json:"created_at"`
 	UpdatedAt            time.Time         `json:"updated_at"`
 	WishlistCount        int               `json:"wishlist_count,omitempty"`
@@ -239,43 +242,49 @@ type Product struct {
 	OfferCount           int               `json:"offer_count"`
 	ViewCount            int               `json:"view_count,omitempty"`
 	BoostedAt            *time.Time        `json:"boosted_at,omitempty"`
+	BoostDurationHours   int               `json:"boost_duration_hours,omitempty"`
+	FeaturedOrder        *int              `json:"featured_order,omitempty"`
 	OrganizationTags     []Organization    `json:"organization_tags,omitempty"` // Tagged organizations
+	AvailabilitySlots    string            `json:"availability_slots,omitempty"` // JSON array of {id,date,start_time,end_time}
+	AvailabilityType     string            `json:"availability_type,omitempty"`  // "flexible" or "strict"
 }
 
 // ProductCreate represents data for creating a product
 type ProductCreate struct {
-	Title            string      `json:"title" validate:"required,min=2,max=255"`
-	Description      string      `json:"description"`
-	Price            *float64    `json:"price,omitempty"` // Optional for barter-only items
-	ImageURLs        StringArray `json:"image_urls,omitempty"`
-	Premium          bool        `json:"premium"`
-	AllowBuying      bool        `json:"allow_buying"`
-	BarterOnly       bool        `json:"barter_only"`
-	Location         string      `json:"location,omitempty"`
-	LocationType     string      `json:"location_type,omitempty" validate:"omitempty,oneof=current_location pickup_location no_location"` // Type of product location setting
-	Condition        string      `json:"condition,omitempty" validate:"omitempty,oneof=New Like-New Used Fair"`
-	Category         string      `json:"category,omitempty"`
-	Value            *float64    `json:"value,omitempty"` // User-defined product value
-	BiddingType      string      `json:"bidding_type,omitempty"`
-	MaxItemsPerOffer int         `json:"max_items_per_offer,omitempty"`
+	Title              string      `json:"title" validate:"required,min=2,max=255"`
+	Description        string      `json:"description"`
+	Price              *float64    `json:"price,omitempty"` // Optional for barter-only items
+	ImageURLs          StringArray `json:"image_urls,omitempty"`
+	Premium            bool        `json:"premium"`
+	AllowBuying        bool        `json:"allow_buying"`
+	BarterOnly         bool        `json:"barter_only"`
+	Location           string      `json:"location,omitempty"`
+	LocationType       string      `json:"location_type,omitempty" validate:"omitempty,oneof=current_location pickup_location no_location"` // Type of product location setting
+	Condition          string      `json:"condition,omitempty" validate:"omitempty,oneof=New Like-New Used Fair"`
+	Category           string      `json:"category,omitempty"`
+	ShowEstimatedValue bool        `json:"show_estimated_value"`
+	Value              *float64    `json:"value,omitempty"` // User-defined product value
+	BiddingType        string      `json:"bidding_type,omitempty"`
+	MaxItemsPerOffer   int         `json:"max_items_per_offer,omitempty"`
 }
 
 // ProductUpdate represents data for updating a product
 type ProductUpdate struct {
-	Title            *string      `json:"title,omitempty" validate:"omitempty,min=2,max=255"`
-	Description      *string      `json:"description,omitempty"`
-	Price            *float64     `json:"price,omitempty" validate:"omitempty,gt=0"`
-	ImageURLs        *StringArray `json:"image_urls,omitempty"`
-	Premium          *bool        `json:"premium,omitempty"`
-	Status           *string      `json:"status,omitempty" validate:"omitempty,oneof=available sold traded locked suspended deleted"`
-	AllowBuying      *bool        `json:"allow_buying,omitempty"`
-	BarterOnly       *bool        `json:"barter_only,omitempty"`
-	Location         *string      `json:"location,omitempty"`
-	Condition        *string      `json:"condition,omitempty" validate:"omitempty,oneof=New Like-New Used Fair"`
-	Category         *string      `json:"category,omitempty"`
-	BiddingType      *string      `json:"bidding_type,omitempty" validate:"omitempty,oneof=none blind open"`
-	Value            *float64     `json:"value,omitempty"` // User-defined product value
-	MaxItemsPerOffer *int         `json:"max_items_per_offer,omitempty"`
+	Title              *string      `json:"title,omitempty" validate:"omitempty,min=2,max=255"`
+	Description        *string      `json:"description,omitempty"`
+	Price              *float64     `json:"price,omitempty" validate:"omitempty,gt=0"`
+	ImageURLs          *StringArray `json:"image_urls,omitempty"`
+	Premium            *bool        `json:"premium,omitempty"`
+	Status             *string      `json:"status,omitempty" validate:"omitempty,oneof=available sold traded locked suspended deleted"`
+	AllowBuying        *bool        `json:"allow_buying,omitempty"`
+	BarterOnly         *bool        `json:"barter_only,omitempty"`
+	Location           *string      `json:"location,omitempty"`
+	Condition          *string      `json:"condition,omitempty" validate:"omitempty,oneof=New Like-New Used Fair"`
+	Category           *string      `json:"category,omitempty"`
+	ShowEstimatedValue *bool        `json:"show_estimated_value,omitempty"`
+	BiddingType        *string      `json:"bidding_type,omitempty" validate:"omitempty,oneof=none blind open"`
+	Value              *float64     `json:"value,omitempty"` // User-defined product value
+	MaxItemsPerOffer   *int         `json:"max_items_per_offer,omitempty"`
 }
 
 // ProductVote represents a user's vote on a product price
@@ -451,29 +460,38 @@ type ReviewSummary struct {
 
 // TradeCreate represents payload to create a trade
 type TradeCreate struct {
-	TargetProductID      int      `json:"target_product_id" validate:"required"`
-	OfferedProductIDs    []int    `json:"offered_product_ids" validate:"omitempty,dive,gt=0"`
-	Message              string   `json:"message"`
-	OfferedCashAmount    *float64 `json:"offered_cash_amount,omitempty"`
-	TradeOption          string   `json:"trade_option" validate:"required,oneof=meetup delivery"`
-	MeetingType          string   `json:"meeting_type" validate:"omitempty,oneof=meetup pickup"`
-	DeliveryAddress      string   `json:"delivery_address,omitempty"`
-	DeliveryType         string   `json:"delivery_type,omitempty" validate:"omitempty,oneof=standard express"`
-	DeliveryInstructions string   `json:"delivery_instructions,omitempty"`
-	PaymentMethod        string   `json:"payment_method,omitempty" validate:"omitempty,oneof=cod upfront"`
+	TargetProductID            int      `json:"target_product_id" validate:"required"`
+	OfferedProductIDs          []int    `json:"offered_product_ids" validate:"omitempty,dive,gt=0"`
+	Message                    string   `json:"message"`
+	OfferedCashAmount          *float64 `json:"offered_cash_amount,omitempty"`
+	TradeOption                string   `json:"trade_option" validate:"required,oneof=meetup delivery"`
+	MeetingType                string   `json:"meeting_type" validate:"omitempty,oneof=meetup pickup"`
+	DeliveryAddress            string   `json:"delivery_address,omitempty"`
+	DeliveryType               string   `json:"delivery_type,omitempty" validate:"omitempty,oneof=standard express"`
+	DeliveryInstructions       string   `json:"delivery_instructions,omitempty"`
+	PaymentMethod              string   `json:"payment_method,omitempty" validate:"omitempty,oneof=cod upfront"`
+	AdditionalTargetProductIDs []int    `json:"additional_target_product_ids,omitempty" validate:"omitempty,dive,gt=0"`
+	MeetupLocation             string   `json:"meetup_location,omitempty"`
+	MeetupDate                 string   `json:"meetup_date,omitempty"`
+	MeetupTime                 string   `json:"meetup_time,omitempty"`
 }
 
 // TradeAction represents accept/decline/counter actions
 type TradeAction struct {
-	Action                   string   `json:"action" validate:"required,oneof=accept decline counter complete cancel confirm_meetup confirm_meetup_done reset_meetup_selection update_delivery_state request_option_change approve_option_change reject_option_change convert_to_multiway"`
+	Action                   string   `json:"action" validate:"required,oneof=accept decline counter edit_offer complete cancel confirm_meetup confirm_meetup_done reset_meetup_selection update_delivery_state request_option_change approve_option_change reject_option_change convert_to_multiway"`
+	OfferedProductIDs        []int    `json:"offered_product_ids,omitempty"`
+	OfferedCashAmount        *float64 `json:"offered_cash_amount,omitempty"`
 	Message                  string   `json:"message,omitempty"`
 	CounterOfferedProductIDs []int    `json:"counter_offered_product_ids,omitempty"`
 	CounterOfferedCashAmount *float64 `json:"counter_offered_cash_amount,omitempty"`
+	TradeOption              string   `json:"trade_option,omitempty" validate:"omitempty,oneof=meetup delivery"`
+	MeetingType              string   `json:"meeting_type,omitempty" validate:"omitempty,oneof=meetup pickup"`
 	MeetupLocation           string   `json:"meetup_location,omitempty"`
 	MeetupTime               string   `json:"meetup_time,omitempty"`
 	MeetupDate               string   `json:"meetup_date,omitempty"`
 	RequestedOption          string   `json:"requested_option,omitempty"`
 	DeliveryAddress          string   `json:"delivery_address,omitempty"`
+	PaymentMethod            string   `json:"payment_method,omitempty"`
 	CancellationReason       string   `json:"cancellation_reason,omitempty"`
 }
 
@@ -826,24 +844,25 @@ type TrustFactor struct {
 
 // SellerStats represents seller statistics for display on product pages
 type SellerStats struct {
-	UserID           int                 `json:"user_id"`
-	AvgRating        float64             `json:"avg_rating"`
-	PositivePercent  float64             `json:"positive_percent"`
-	TotalTrades      int                 `json:"total_trades"`
-	AvgResponseTime  string              `json:"avg_response_time"`
-	TotalFeedback    int                 `json:"total_feedback"`
-	ResponseMetric   string              `json:"response_metric,omitempty"`   // "excellent", "good", etc.
-	MemberSinceYear  int                 `json:"member_since_year,omitempty"` // Year user joined
-	CompletedTrades  int                 `json:"completed_trades,omitempty"`
-	CancelledTrades  int                 `json:"cancelled_trades,omitempty"`
-	PendingTrades    int                 `json:"pending_trades,omitempty"`
-	TrustScore       int                 `json:"trust_score"`               // 0-100 calculated trust score
-	TrustLevel       string              `json:"trust_level"`               // "trusted", "new", "risky"
-	ReportCount      int                 `json:"report_count"`              // Number of reviewed/resolved reports
-	HasReports       bool                `json:"has_reports"`               // Whether user has been reported
-	TrustFactors     []TrustFactor       `json:"trust_factors,omitempty"`   // Detailed breakdown of trust score
-	ConductSummary   *UserConductSummary `json:"conduct_summary,omitempty"` // Trade quality & conduct grades
-	HasActiveDispute bool                `json:"has_active_dispute"`        // Whether user has an active unresolved dispute
+	UserID             int                 `json:"user_id"`
+	AvgRating          float64             `json:"avg_rating"`
+	PositivePercent    float64             `json:"positive_percent"`
+	TotalTrades        int                 `json:"total_trades"`
+	AvgResponseTime    string              `json:"avg_response_time"`
+	ResponseSampleSize int                 `json:"response_sample_size"`
+	TotalFeedback      int                 `json:"total_feedback"`
+	ResponseMetric     string              `json:"response_metric,omitempty"`   // "excellent", "good", etc.
+	MemberSinceYear    int                 `json:"member_since_year,omitempty"` // Year user joined
+	CompletedTrades    int                 `json:"completed_trades,omitempty"`
+	CancelledTrades    int                 `json:"cancelled_trades,omitempty"`
+	PendingTrades      int                 `json:"pending_trades,omitempty"`
+	TrustScore         int                 `json:"trust_score"`               // 0-100 calculated trust score
+	TrustLevel         string              `json:"trust_level"`               // "trusted", "new", "risky"
+	ReportCount        int                 `json:"report_count"`              // Number of reviewed/resolved reports
+	HasReports         bool                `json:"has_reports"`               // Whether user has been reported
+	TrustFactors       []TrustFactor       `json:"trust_factors,omitempty"`   // Detailed breakdown of trust score
+	ConductSummary     *UserConductSummary `json:"conduct_summary,omitempty"` // Trade quality & conduct grades
+	HasActiveDispute   bool                `json:"has_active_dispute"`        // Whether user has an active unresolved dispute
 }
 
 // Report represents a trader report for policy violations

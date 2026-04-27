@@ -1,3 +1,10 @@
+export interface AvailabilitySlot {
+  id: string
+  date: string        // "YYYY-MM-DD"
+  start_time: string  // "HH:MM"
+  end_time: string    // "HH:MM"
+}
+
 export interface User {
   id: number
   slug?: string // Unique URL identifier
@@ -56,12 +63,16 @@ export interface Product {
   seller_id: number
   seller_name?: string
   seller_profile_picture?: string
+  seller_premium_tier?: 'free' | 'plus' | 'pro'
   premium: boolean
   status: 'available' | 'sold' | 'traded' | 'locked' | 'suspended' | 'deleted'
   allow_buying: boolean
   barter_only: boolean
   location?: string
   location_type?: 'current_location' | 'pickup_location' | 'no_location'
+  pickup_address?: string
+  pickup_latitude?: number
+  pickup_longitude?: number
   condition?: string
   suggested_value?: number
   category?: string
@@ -70,6 +81,7 @@ export interface Product {
   created_at: string
   updated_at: string
   boosted_at?: string
+  featured_order?: number
   wishlist_count?: number;
   bidding_type?: 'none' | 'blind' | 'open'
   counterfeit_confidence?: number;
@@ -81,6 +93,7 @@ export interface Product {
   want_count?: number;
   estimated_value_min?: number;
   estimated_value_max?: number;
+  show_estimated_value?: boolean;
   desired_price?: number;
   desired_product?: string;
   wanted_categories?: string[];
@@ -88,6 +101,8 @@ export interface Product {
   brand?: string;
   max_items_per_offer?: number;
   view_count?: number;
+  is_saved?: boolean;
+  boost_duration_hours?: number;
   organization_tags?: Array<{
     id: number;
     slug: string;
@@ -95,6 +110,8 @@ export interface Product {
     logo_url?: string;
     description?: string;
   }>;
+  availability_slots?: AvailabilitySlot[]
+  availability_type?: 'flexible' | 'strict'
 }
 
 export interface Order {
@@ -119,6 +136,7 @@ export interface ProductCreate {
   location?: string
   condition: string
   category?: string
+  show_estimated_value?: boolean
   bidding_type?: 'none' | 'blind' | 'open'
   wants?: string
   max_items_per_offer?: number
@@ -136,6 +154,9 @@ export interface ProductUpdate {
   location?: string
   condition?: string
   category?: string
+  estimated_value_min?: number
+  estimated_value_max?: number
+  show_estimated_value?: boolean
   bidding_type?: 'none' | 'blind' | 'open'
   max_items_per_offer?: number
   wants?: string
@@ -233,6 +254,7 @@ export interface Trade {
   meetup_status?: 'pending' | 'accepted' | 'declined' | 'disputed' | string
   meetup_confirmed?: boolean
   meetup_location?: string
+  meetup_date?: string
   meetup_time?: string
   buyer_meetup_confirmed?: boolean
   seller_meetup_confirmed?: boolean
@@ -326,18 +348,27 @@ export interface TradeCreate {
   meeting_type?: 'meetup' | 'pickup' // Type of meeting flow for trades
   delivery_address?: string // Required if trade_option is 'delivery'
   payment_method?: 'cod' | 'upfront' // Payment method preference for buyout offers
+  additional_target_product_ids?: number[]
+  meetup_location?: string
+  meetup_date?: string
+  meetup_time?: string
 }
 
 export interface TradeAction {
-  action: 'accept' | 'decline' | 'counter' | 'complete' | 'cancel' | 'confirm_meetup' | 'confirm_meetup_done' | 'reset_meetup_selection' | 'update_delivery_state' | 'request_option_change' | 'approve_option_change' | 'reject_option_change' | 'convert_to_multiway'
+  action: 'accept' | 'decline' | 'counter' | 'edit_offer' | 'complete' | 'cancel' | 'confirm_meetup' | 'confirm_meetup_done' | 'reset_meetup_selection' | 'update_delivery_state' | 'request_option_change' | 'approve_option_change' | 'reject_option_change' | 'convert_to_multiway'
+  offered_product_ids?: number[]
+  offered_cash_amount?: number
   message?: string
   counter_offered_product_ids?: number[]
   counter_offered_cash_amount?: number
+  trade_option?: TradeOption
+  meeting_type?: 'meetup' | 'pickup'
   meetup_location?: string
   meetup_time?: string
   meetup_date?: string
   requested_option?: TradeOption // For option change requests
   delivery_address?: string // For delivery option
+  payment_method?: 'gcash' | 'cod' | 'wallet' | 'online'
 }
 
 export interface APIResponse<T = any> {

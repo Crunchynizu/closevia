@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import {
   Box,
   Container,
@@ -96,6 +96,7 @@ import {
   FaStar,
 } from 'react-icons/fa'
 import { FiSettings, FiSave, FiMapPin } from 'react-icons/fi'
+import { motion, useAnimation, useDragControls, AnimationControls, DragControls } from 'framer-motion'
 
 const NOTIFICATION_GROUPS: Array<{
   title: string
@@ -168,6 +169,26 @@ const HomeMapCenterUpdater = ({ lat, lng }: { lat: number; lng: number }) => {
   return null
 }
 
+interface SettingsSheetProps {
+  isMobile: boolean | undefined
+  sheetAnimation: AnimationControls
+  dragControls: DragControls
+  onClose: () => void
+  children: React.ReactNode
+}
+
+const SettingsSheet: React.FC<SettingsSheetProps> = ({ children }) => {
+  const pageBg = useColorModeValue('#FFFDF1', 'gray.900')
+
+  return (
+    <Box h="100dvh" w="100%" bg={pageBg} display="flex" flexDirection="column" overflow="hidden">
+      <Box flex={1} overflowY="auto" overflowX="hidden" pb={{ base: '100px', md: '80px' }}>
+        {children}
+      </Box>
+    </Box>
+  )
+}
+
 const SettingsPage: React.FC = () => {
   const toast = useToast()
   const navigate = useNavigate()
@@ -183,6 +204,8 @@ const SettingsPage: React.FC = () => {
   const notificationDisabledBg = useColorModeValue('white', 'gray.800')
   const notificationIconBg = useColorModeValue('white', 'gray.700')
   const isMobile = useBreakpointValue({ base: true, md: false })
+  const sheetAnimation = useAnimation()
+  const dragControls = useDragControls()
 
   // Account State
   const [username, setUsername] = useState(user?.name || '')
@@ -360,7 +383,6 @@ const SettingsPage: React.FC = () => {
 
   // Refresh user data on component mount.
   useEffect(() => {
-    console.log('🗺️ Settings page mounted, refreshing user data...')
     refreshUser()
   }, [])
 
@@ -440,7 +462,6 @@ const SettingsPage: React.FC = () => {
     const file = event.target.files?.[0]
     if (!file) return
 
-    console.log('📸 Image file selected:', { name: file.name, size: file.size, type: file.type })
 
     // Validate file type
     const supportedImageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
@@ -473,8 +494,6 @@ const SettingsPage: React.FC = () => {
     const reader = new FileReader()
     reader.onloadend = () => {
       const dataUrl = reader.result as string
-      console.log('📸 Image converted to data URL, length:', dataUrl.length)
-      console.log('📸 Data URL preview (first 100 chars):', dataUrl.substring(0, 100))
       setProfileImage(dataUrl)
       setUploadingImage(false)
       markFieldDirty('profileImage')
@@ -1198,8 +1217,12 @@ const SettingsPage: React.FC = () => {
     }
   }
 
+  const handleClose = useCallback(() => {
+    navigate(-1)
+  }, [navigate])
+
   return (
-    <Box minH="100vh" bg={pageBg} pb={{ base: '100px', md: '80px' }}>
+    <SettingsSheet isMobile={isMobile} sheetAnimation={sheetAnimation} dragControls={dragControls} onClose={handleClose}>
       <Container maxW="container.lg" py={{ base: 6, md: 8 }}>
         <VStack spacing={6} align="stretch">
 
@@ -1209,7 +1232,7 @@ const SettingsPage: React.FC = () => {
             {/* Sticky Header Pill */}
             <Box
               position="sticky"
-              top={{ base: '40px', md: '64px' }}
+              top={0}
               zIndex={20}
               bg={cardBg}
               borderRadius="2xl"
@@ -1217,7 +1240,6 @@ const SettingsPage: React.FC = () => {
               border="1px"
               borderColor={borderColor}
               shadow="sm"
-              transform={{ base: 'translateY(-12px)', md: 'translateY(-20px)' }}
             >
               {/* Header Title & Actions */}
               <Flex justify="space-between" align="center" mb={4}>
@@ -2781,7 +2803,7 @@ const SettingsPage: React.FC = () => {
       </AlertDialog>
 
       <FloatingTab />
-    </Box>
+    </SettingsSheet>
   )
 }
 

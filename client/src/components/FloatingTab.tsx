@@ -89,15 +89,15 @@ const FloatingTab: React.FC<FloatingTabProps> = ({
           />
 
           {/* Dashboard Button */}
-          <Box position="relative">
+          <Box position="relative" h="full" w="56px" flexShrink={0}>
             <IconButton
               as={RouterLink}
               to={dashboardLink}
               aria-label="Dashboard"
               icon={<FiShoppingBag />}
               h="full"
-              w="56px"
-              flexShrink={0}
+              w="full"
+              minW="56px"
               bg="transparent"
               color="brand.500"
               borderRadius="full"
@@ -162,13 +162,13 @@ const FloatingTab: React.FC<FloatingTabProps> = ({
           )}
 
           {/* Notification Button */}
-          <Box position="relative">
+          <Box position="relative" h="full" w="56px" flexShrink={0}>
             <IconButton
               aria-label="Notifications"
               icon={<FaBell />}
               h="full"
-              w="56px"
-              flexShrink={0}
+              w="full"
+              minW="56px"
               bg="transparent"
               color="brand.500"
               borderRadius="full"
@@ -196,6 +196,7 @@ const FloatingTab: React.FC<FloatingTabProps> = ({
                 fontSize="0.7em"
                 px={1}
                 zIndex={1}
+                pointerEvents="none"
               >
                 {notificationCount}
               </CBadge>

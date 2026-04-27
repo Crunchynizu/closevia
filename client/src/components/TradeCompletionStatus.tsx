@@ -62,7 +62,7 @@ const TradeCompletionStatus: React.FC<TradeCompletionStatusProps> = ({
   const isCurrentUserSeller = user?.id === sellerId
   const currentUserCompleted = isCurrentUserBuyer ? buyerCompleted : sellerCompleted
   const otherUserCompleted = isCurrentUserBuyer ? sellerCompleted : buyerCompleted
-  const otherUserName = isCurrentUserBuyer ? 'Trader' : 'Buyer'
+  const otherUserName = 'other trader'
 
   const handleCompleteClick = async () => {
     setIsSubmitting(true)
@@ -76,7 +76,7 @@ const TradeCompletionStatus: React.FC<TradeCompletionStatusProps> = ({
       toast({
         id: "tradecompletionstatus-trade-marked-complete",
         title: 'Trade Marked Complete',
-        description: `You've marked this trade as complete. Waiting for ${otherUserName} to confirm...`,
+        description: `You've marked this trade as complete. Waiting for the ${otherUserName} to confirm...`,
         status: 'info',
         duration: 3000,
         isClosable: true,
@@ -157,7 +157,7 @@ const TradeCompletionStatus: React.FC<TradeCompletionStatusProps> = ({
             {/* Other User Status */}
             <VStack spacing={1} flex={1}>
               <Text fontSize="xs" color="gray.600">
-                {otherUserName}'s Status
+                Other Trader's Status
               </Text>
               <HStack>
                 {otherUserCompleted ? (
@@ -211,7 +211,7 @@ const TradeCompletionStatus: React.FC<TradeCompletionStatusProps> = ({
           <HStack justify="center" spacing={2}>
             <Spinner size="sm" color="blue.500" />
             <Text fontSize="sm" color="gray.600">
-              Waiting for {otherUserName} to confirm...
+              Waiting for the {otherUserName} to confirm...
             </Text>
           </HStack>
         )}

@@ -32,7 +32,6 @@ import {
   Alert,
   AlertIcon,
   Progress,
-  Image,
   Tooltip,
 } from '@chakra-ui/react'
 import {
@@ -423,16 +422,10 @@ const ViewDetailsModal: React.FC<ViewDetailsModalProps> = ({
               borderColor="gray.200"
               overflow="hidden"
             >
-              <Image
-                src={`https://api.mapbox.com/styles/v1/mapbox/streets-v11/static/pin-s-a+3b82f6(${delivery.pickup_longitude || 121.0},${delivery.pickup_latitude || 14.6}),pin-s-b+22c55e(${delivery.delivery_longitude || 121.1},${delivery.delivery_latitude || 14.65})/auto/400x150?access_token=YOUR_MAPBOX_TOKEN`}
-                alt="Route preview"
-                fallback={
-                  <VStack spacing={2}>
-                    <Icon as={FaMapMarkerAlt} color="gray.400" boxSize={8} />
-                    <Text fontSize="sm" color="gray.500">Route preview</Text>
-                  </VStack>
-                }
-              />
+              <VStack spacing={2}>
+                <Icon as={FaMapMarkerAlt} color="gray.400" boxSize={8} />
+                <Text fontSize="sm" color="gray.500">Route preview</Text>
+              </VStack>
             </Box>
 
             {/* Addresses */}
@@ -732,6 +725,7 @@ const RiderHome: React.FC = () => {
   const [availableDeliveries, setAvailableDeliveries] = useState<DeliveryWithBatch[]>([])
   const [activeDeliveries, setActiveDeliveries] = useState<DeliveryWithBatch[]>([])
   const [completedDeliveries, setCompletedDeliveries] = useState<DeliveryWithBatch[]>([])
+  const [completedLoaded, setCompletedLoaded] = useState(false)
   const [loading, setLoading] = useState(true)
   const [accepting, setAccepting] = useState<number | null>(null)
   // Task 14: Express job lock message
@@ -753,15 +747,20 @@ const RiderHome: React.FC = () => {
     if (!riderState?.permissions?.can_view_jobs) return
 
     try {
-      const [availableRes, activeRes, completedRes] = await Promise.all([
+      const shouldLoadCompleted = deliveryTab === 2 || completedLoaded
+      const requests = [
         api.get('/api/deliveries/available'),
         api.get('/api/deliveries/my-jobs?status=active'),
-        api.get('/api/deliveries/my-jobs?status=completed'),
-      ])
+        shouldLoadCompleted ? api.get('/api/deliveries/my-jobs?status=completed') : Promise.resolve(null),
+      ] as const
+      const [availableRes, activeRes, completedRes] = await Promise.all(requests)
 
       setAvailableDeliveries(availableRes.data?.data || [])
       setActiveDeliveries(activeRes.data?.data || [])
-      setCompletedDeliveries(completedRes.data?.data || [])
+      if (completedRes) {
+        setCompletedDeliveries(completedRes.data?.data || [])
+        setCompletedLoaded(true)
+      }
 
       // Task 14: Show message if rider is locked on express job
       if (availableRes.data?.message) {
@@ -776,11 +775,15 @@ const RiderHome: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [riderState?.permissions?.can_view_jobs, toast])
+  }, [completedLoaded, deliveryTab, riderState?.permissions?.can_view_jobs, toast])
 
   useEffect(() => {
     fetchDeliveries()
-    const interval = setInterval(fetchDeliveries, 15000)
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchDeliveries()
+      }
+    }, 15000)
     return () => clearInterval(interval)
   }, [fetchDeliveries])
 

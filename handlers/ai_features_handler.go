@@ -126,7 +126,7 @@ func (h *AIFeaturesHandler) GetProximity(c *fiber.Ctx) error {
 		var sellerHomeLat, sellerHomeLon sql.NullFloat64
 		err = h.db.QueryRow("SELECT latitude, longitude, home_latitude, home_longitude FROM users WHERE id = ?", sellerID).Scan(&productLat, &productLon, &sellerHomeLat, &sellerHomeLon)
 		if err != nil {
-			return c.JSON(models.APIResponse{Success: true, Data: nil, Message: "Seller not found"})
+			return c.JSON(models.APIResponse{Success: true, Data: nil, Message: "Trader not found"})
 		}
 
 		if sellerHomeLat.Valid && sellerHomeLon.Valid {
@@ -156,7 +156,7 @@ func (h *AIFeaturesHandler) GetProximity(c *fiber.Ctx) error {
 	}
 
 	if err != nil {
-		return c.Status(500).JSON(models.APIResponse{Success: false, Error: err.Error()})
+		return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to calculate distance"})
 	}
 
 	return c.JSON(models.APIResponse{

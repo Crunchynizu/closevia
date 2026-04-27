@@ -5,15 +5,12 @@ import {
   HStack,
   VStack,
   Icon,
-  CircularProgress,
-  CircularProgressLabel,
   Tooltip,
   Badge,
   Progress,
   Divider,
-  Avatar,
 } from '@chakra-ui/react'
-import { FiCheckCircle, FiAlertTriangle, FiXCircle, FiAward, FiInfo } from 'react-icons/fi'
+import { FiCheckCircle, FiAlertTriangle, FiXCircle } from 'react-icons/fi'
 
 interface TrustFactor {
   label: string
@@ -143,58 +140,71 @@ const TrustScoreCard: React.FC<TrustScoreCardProps> = ({ score, trustLevel, fact
   const responseInfo = formatResponseTime(responseTime)
   
   if (compact) {
-    const tooltipLines = factors && factors.length > 0
-      ? factors.map(f => `${f.status === 'pass' ? '✔' : f.status === 'warn' ? '⚠' : '✘'} ${f.label} (${f.points}/${f.max})`).join('\n')
+    const tooltipContent = factors && factors.length > 0
+      ? factors.map(f =>
+          `${f.status === 'pass' ? '✔' : f.status === 'warn' ? '⚠' : '✘'} ${f.label} (${f.points}/${f.max})`
+        ).join('\n')
       : `Trust Score: ${score}/100`
-    const conductLine = conductSummary && conductSummary.total_grades > 0
-      ? `\nConduct: ${conductSummary.letter_grade} (${conductSummary.overall_avg.toFixed(1)}/5)`
-      : ''
-    const badgeLines = [
-      levelLabelBadge(activeLevel),
-      isVerified ? '✔ Verified' : '',
-      typeof listingCount === 'number' ? `📦 ${listingCount} listing${listingCount !== 1 ? 's' : ''}` : '',
-      typeof tradeCount === 'number' ? `🔁 ${tradeCount} trade${tradeCount !== 1 ? 's' : ''}` : '',
-      typeof positivePercent === 'number' && positivePercent > 0 ? `⭐ ${Math.round(positivePercent)}% positive` : '',
-      responseInfo ? responseInfo.label : '',
-      hasActiveDispute ? '⚠️ Active Dispute' : '',
-    ].filter(Boolean).join('\n')
-    const badgeSection = badgeLines ? `\n${badgeLines}` : ''
+    const conductLine =
+      conductSummary && conductSummary.total_grades > 0
+        ? `\nConduct: ${conductSummary.letter_grade} (${conductSummary.overall_avg.toFixed(1)}/5)`
+        : ''
+
+    const levelLabel =
+      activeLevel === 'trusted' ? 'Trusted trader' :
+      activeLevel === 'new' ? 'Moderate trust' :
+      'Needs improvement'
+
+    const levelColorScheme =
+      activeLevel === 'trusted' ? 'green' :
+      activeLevel === 'new' ? 'yellow' : 'red'
+
     return (
-      <Tooltip
-        label={tooltipLines + conductLine + badgeSection}
-        whiteSpace="pre-line"
-        placement="top"
-        hasArrow
-      >
-        <HStack spacing={2} cursor="default">
-          <CircularProgress
+      <Box w="100%">
+        <HStack justify="space-between" mb={1}>
+          <Text fontSize="sm" fontWeight="bold" color="gray.700">Trust Score</Text>
+          <HStack spacing={2}>
+            <Text fontSize="sm" fontWeight="bold" color="gray.800">{score}/100</Text>
+            {hasActiveDispute && (
+              <Tooltip label="User has an unresolved trade dispute." hasArrow>
+                <Box as="span">
+                  <Icon as={FiAlertTriangle} color="orange.500" boxSize={3.5} />
+                </Box>
+              </Tooltip>
+            )}
+          </HStack>
+        </HStack>
+        <Tooltip label={tooltipContent + conductLine} whiteSpace="pre-line" placement="top" hasArrow>
+          <Progress
             value={score}
-            size="40px"
-            thickness="10px"
-            color={levelColor(activeLevel)}
-            trackColor={levelTrackColor(activeLevel)}
-          >
-            <CircularProgressLabel fontSize="xs" fontWeight="bold">
-              {score}
-            </CircularProgressLabel>
-          </CircularProgress>
+            size="sm"
+            colorScheme={levelColorScheme}
+            borderRadius="full"
+            mb={2}
+            cursor="default"
+          />
+        </Tooltip>
+        <HStack spacing={2} align="center">
+          <Badge colorScheme={levelColorScheme} fontSize="xs">
+            {levelLabel}
+          </Badge>
           {conductSummary && conductSummary.total_grades > 0 && (
-            <Badge colorScheme={conductSummary.letter_grade.startsWith('A') ? 'green' : conductSummary.letter_grade.startsWith('B') ? 'blue' : conductSummary.letter_grade === 'C' ? 'orange' : 'red'} fontSize="xs">
-              {conductSummary.letter_grade}
+            <Badge
+              colorScheme={
+                conductSummary.letter_grade.startsWith('A') ? 'green' :
+                conductSummary.letter_grade.startsWith('B') ? 'blue' :
+                conductSummary.letter_grade === 'C' ? 'orange' : 'red'
+              }
+              fontSize="xs"
+            >
+              Conduct: {conductSummary.letter_grade}
             </Badge>
           )}
-          {hasActiveDispute && (
-            <Tooltip label="User has an unresolved trade dispute." hasArrow>
-              <Box as="span">
-                <Icon as={FiAlertTriangle} color="orange.500" boxSize={3.5} />
-              </Box>
-            </Tooltip>
-          )}
-          <Text fontSize="xs" color="gray.600" fontWeight="medium">
-            Trust
-          </Text>
         </HStack>
-      </Tooltip>
+        <Text fontSize="xs" color="gray.400" mt={1.5}>
+          Based on verification, completed trades, ratings, response speed, and trade success.
+        </Text>
+      </Box>
     )
   }
 

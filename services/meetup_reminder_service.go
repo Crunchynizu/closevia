@@ -38,10 +38,12 @@ func (s *MeetupReminderService) processPreMeetupReminders() {
 			t.seller_id,
 			ms.agreed_time,
 			ms.agreed_location,
-			t.buyer_name,
-			t.seller_name
+			COALESCE(ub.name, '') AS buyer_name,
+			COALESCE(us.name, '') AS seller_name
 		FROM trades t
 		JOIN meetup_status ms ON t.id = ms.trade_id
+		LEFT JOIN users ub ON t.buyer_id = ub.id
+		LEFT JOIN users us ON t.seller_id = us.id
 		WHERE 
 			t.status = 'active' 
 			AND ms.stage = 'scheduled'
@@ -136,10 +138,12 @@ func (s *MeetupReminderService) GetUpcomingMeetups(hoursAhead int) ([]map[string
 			t.seller_id,
 			ms.agreed_time,
 			ms.agreed_location,
-			t.buyer_name,
-			t.seller_name
+			COALESCE(ub.name, '') AS buyer_name,
+			COALESCE(us.name, '') AS seller_name
 		FROM trades t
 		JOIN meetup_status ms ON t.id = ms.trade_id
+		LEFT JOIN users ub ON t.buyer_id = ub.id
+		LEFT JOIN users us ON t.seller_id = us.id
 		WHERE 
 			t.status = 'active' 
 			AND ms.stage IN ('scheduled', 'on_the_way', 'arrived')

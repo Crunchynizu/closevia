@@ -7,19 +7,27 @@ import {
   Image,
   Badge,
   HStack,
+  VStack,
   Flex,
   Tooltip,
   Icon,
   useColorModeValue,
+  useToast,
 } from '@chakra-ui/react'
-import { StarIcon } from '@chakra-ui/icons'
-import { FaMoneyBillWave, FaHandshake, FaExchangeAlt, FaRocket, FaCheckCircle } from 'react-icons/fa'
+import { EditIcon, StarIcon, ViewIcon } from '@chakra-ui/icons'
+import { FaMoneyBillWave, FaHandshake, FaExchangeAlt, FaCheckCircle, FaHeart, FaRegHeart } from 'react-icons/fa'
 import { Link as RouterLink, useNavigate } from 'react-router-dom'
 import { getFirstImage, getImageUrl } from '../utils/imageUtils'
 import { getProductUrl } from '../utils/productUtils'
 import { IconButton } from '@chakra-ui/react'
 import VerifiedAvatar from './VerifiedAvatar'
 import ProximityBadge from './ProximityBadge'
+import OptimizedImage from './OptimizedImage'
+import { getBoostStatus } from '../utils/boostUtils'
+import { useAuth } from '../contexts/AuthContext'
+import { api } from '../services/api'
+import AvailabilitySlots from './AvailabilitySlots'
+import { AvailabilitySlot } from '../types'
 
 interface ProductCardProps {
   product: any
@@ -30,6 +38,7 @@ interface ProductCardProps {
   showPriceOverlay?: boolean
   onBoostClick?: (productId: number) => void
   isStagnant?: boolean
+  imageLoading?: 'lazy' | 'eager'
 }
 
 /**
@@ -45,38 +54,35 @@ const ProductCard: React.FC<ProductCardProps> = ({
   showPriceOverlay = false,
   onBoostClick,
   isStagnant = false,
+  imageLoading = 'lazy',
 }) => {
   const navigate = useNavigate()
+  const toast = useToast()
+  const { user } = useAuth()
   const [boostTimeRemaining, setBoostTimeRemaining] = useState<string | null>(null)
   const [isBoosted, setIsBoosted] = useState(false)
+  const [isSaved, setIsSaved] = useState(Boolean(product.is_saved))
+  const [isSaving, setIsSaving] = useState(false)
+  const isOwnProduct = Boolean(user?.id && product.seller_id && Number(user.id) === Number(product.seller_id))
 
   // Calculate boost remaining time
   useEffect(() => {
     if (!product.boosted_at) {
       setIsBoosted(false)
+      setBoostTimeRemaining(null)
       return
     }
 
     const calculateRemaining = () => {
-      const boostedAtRaw = String(product.boosted_at)
-      const normalizedBoostedAt = boostedAtRaw.includes('T') ? boostedAtRaw : boostedAtRaw.replace(' ', 'T')
-      const boostedTime = new Date(normalizedBoostedAt).getTime()
-      if (Number.isNaN(boostedTime)) {
-        setIsBoosted(false)
-        setBoostTimeRemaining(null)
-        return
-      }
-      const expiresAt = boostedTime + 3 * 60 * 60 * 1000 // 3 hours in ms
-      const now = new Date().getTime()
-      const remaining = expiresAt - now
+      const { isBoosted: boostActive, remainingMs } = getBoostStatus(product)
 
-      if (remaining <= 0) {
+      if (!boostActive || remainingMs <= 0) {
         setIsBoosted(false)
         setBoostTimeRemaining(null)
       } else {
         setIsBoosted(true)
-        const hours = Math.floor(remaining / (60 * 60 * 1000))
-        const minutes = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000))
+        const hours = Math.floor(remainingMs / (60 * 60 * 1000))
+        const minutes = Math.floor((remainingMs % (60 * 60 * 1000)) / (60 * 1000))
         
         if (hours > 0) {
           setBoostTimeRemaining(`${hours}h ${minutes}m`)
@@ -90,7 +96,17 @@ const ProductCard: React.FC<ProductCardProps> = ({
     const interval = setInterval(calculateRemaining, 60000) // Update every minute
 
     return () => clearInterval(interval)
-  }, [product.boosted_at])
+  }, [product.boosted_at, product.seller_premium_tier])
+
+  useEffect(() => {
+    setIsSaved(Boolean(product.is_saved))
+
+    if (!product.id) return
+    if (!user) {
+      const savedProducts = JSON.parse(localStorage.getItem('savedProducts') || '[]')
+      setIsSaved(savedProducts.includes(product.id))
+    }
+  }, [product.id, product.is_saved, user])
 
 
 
@@ -136,6 +152,85 @@ const ProductCard: React.FC<ProductCardProps> = ({
     [product.id, onViewOffers]
   )
 
+  const handleEditClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      navigate(`/edit-product/${product.id}`)
+    },
+    [navigate, product.id]
+  )
+
+  const handleViewListingClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      navigate(getProductUrl(product))
+    },
+    [navigate, product]
+  )
+
+  const handleSaveToggle = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (!product.id || isSaving) return
+
+      if (user?.id === product.seller_id) {
+        toast({
+          id: `productcard-own-save-${product.id}`,
+          title: 'You cannot save your own item',
+          status: 'info',
+          duration: 2000,
+        })
+        return
+      }
+
+      if (!user) {
+        const savedProducts = JSON.parse(localStorage.getItem('savedProducts') || '[]')
+        const nextSaved = !isSaved
+        const updated = nextSaved
+          ? Array.from(new Set([...savedProducts, product.id]))
+          : savedProducts.filter((id: number) => id !== product.id)
+        localStorage.setItem('savedProducts', JSON.stringify(updated))
+        setIsSaved(nextSaved)
+        toast({
+          id: `productcard-save-local-${product.id}`,
+          title: nextSaved ? 'Saved' : 'Removed from saved',
+          status: nextSaved ? 'success' : 'info',
+          duration: 1800,
+        })
+        return
+      }
+
+      try {
+        setIsSaving(true)
+        if (isSaved) {
+          await api.delete(`/api/users/saved-products/${product.id}`)
+          setIsSaved(false)
+        } else {
+          await api.post('/api/users/saved-products', { product_id: product.id })
+          setIsSaved(true)
+        }
+        toast({
+          id: `productcard-save-${product.id}`,
+          title: isSaved ? 'Removed from saved' : 'Saved',
+          status: isSaved ? 'info' : 'success',
+          duration: 1800,
+        })
+      } catch (error: any) {
+        toast({
+          id: `productcard-save-error-${product.id}`,
+          title: 'Could not update saved item',
+          description: error?.response?.data?.error || 'Please try again.',
+          status: 'error',
+          duration: 3000,
+          isClosable: true,
+        })
+      } finally {
+        setIsSaving(false)
+      }
+    },
+    [isSaved, isSaving, product.id, product.seller_id, toast, user]
+  )
+
   const formatPriceCompact = (value: unknown): string => {
     const num = Number(value)
     if (!Number.isFinite(num)) return ''
@@ -149,6 +244,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
     if (num >= 1000) return (num / 1000).toFixed(0) + 'k'
     return num.toString()
   }
+  const canShowEstimate = product.show_estimated_value !== false && product.estimated_value_min && product.estimated_value_max
 
   return (
     <Box
@@ -169,22 +265,31 @@ const ProductCard: React.FC<ProductCardProps> = ({
     >
       {/* Image section */}
       <Box position="relative" w="full" pt="100%" overflow="hidden" bg="gray.100">
-        <Image
+        <OptimizedImage
           src={getFirstImage(product.image_urls)}
           alt={product.title}
+          displayWidth="100%"
+          displayHeight="100%"
+          objectFit="cover"
+          loading={imageLoading}
+          fallbackSrc="/no-image.svg"
           position="absolute"
           top={0}
           left={0}
-          w="100%"
-          h="100%"
-          objectFit="cover"
-          loading="lazy"
-          fallbackSrc="/no-image.svg"
         />
 
         {/* Top-right image badges */}
-        <Box position="absolute" top={{ base: 2, md: 3 }} right={{ base: 2, md: 3 }} zIndex={1}>
-          <Box display="flex" flexDirection="column" gap={1.5} alignItems="flex-end">
+        <Box
+          position="absolute"
+          top={{ base: 2, md: 3 }}
+          right={{ base: 2, md: 3 }}
+          zIndex={1}
+          maxW={{ base: '58%', md: '62%' }}
+          display="flex"
+          flexDirection="column"
+          gap={1.5}
+          alignItems="flex-end"
+        >
             {isStagnant && onBoostClick && (
               <Tooltip label="Boost this listing" placement="left" hasArrow>
                 <Button
@@ -225,36 +330,49 @@ const ProductCard: React.FC<ProductCardProps> = ({
                 w="auto"
                 boxShadow="sm"
                 backdropFilter="blur(8px)"
+                maxW="100%"
               >
                 <Text fontSize={{ base: '9px', md: 'xs' }} fontWeight="800" lineHeight="1.2">
                   {product.price && product.price > 0
                     ? `₱${formatPriceCompact(product.price)}`
-                    : product.estimated_value_min && product.estimated_value_max
+                    : canShowEstimate
                       ? `₱${formatPriceCompact(product.estimated_value_min)} – ₱${formatPriceCompact(product.estimated_value_max)}`
                       : 'Price Unavailable'}
                 </Text>
-                {product.price && product.price > 0 && product.estimated_value_min && product.estimated_value_max && (
+                {product.price && product.price > 0 && canShowEstimate && (
                   <Text display={{ base: 'none', sm: 'block' }} fontSize="2xs" color={useColorModeValue('brand.600', 'brand.300')} lineHeight="1.25" mt={0.5} fontWeight="700" whiteSpace="nowrap">
-                    📊 Market Est. ₱{formatPriceUltraCompact(product.estimated_value_min)} – ₱{formatPriceUltraCompact(product.estimated_value_max)}
+                    📊 Market Est. {product.estimated_value_min === product.estimated_value_max
+                      ? `₱${formatPriceUltraCompact(product.estimated_value_min)}`
+                      : `₱${formatPriceUltraCompact(product.estimated_value_min)} – ₱${formatPriceUltraCompact(product.estimated_value_max)}`}
                   </Text>
                 )}
-                {product.price && product.price > 0 && product.estimated_value_min && product.estimated_value_max && (
+                {product.price && product.price > 0 && canShowEstimate && (
                   <Text display={{ base: 'block', sm: 'none' }} fontSize="2xs" color={useColorModeValue('brand.600', 'brand.300')} lineHeight="1.2" mt={0.5} fontWeight="700" whiteSpace="nowrap">
-                    📊 Est. ₱{formatPriceUltraCompact(product.estimated_value_min)}-₱{formatPriceUltraCompact(product.estimated_value_max)}
+                    📊 Est. {product.estimated_value_min === product.estimated_value_max
+                      ? `₱${formatPriceUltraCompact(product.estimated_value_min)}`
+                      : `₱${formatPriceUltraCompact(product.estimated_value_min)}-₱${formatPriceUltraCompact(product.estimated_value_max)}`}
                   </Text>
                 )}
-                {(!product.price || product.price <= 0) && product.estimated_value_min && product.estimated_value_max && (
+                {(!product.price || product.price <= 0) && canShowEstimate && (
                   <Text fontSize="2xs" color={useColorModeValue('green.600', 'green.300')} mt={0.5} fontWeight="700">
                     📊 Market Est. range
                   </Text>
                 )}
               </Box>
             )}
-          </Box>
         </Box>
 
         {(product.tradeMatchScore != null && product.tradeMatchScore > 0) || isBoosted ? (
-          <Box position="absolute" top={{ base: 2, md: 3 }} left={{ base: 2, md: 3 }} display="flex" flexDirection="column" gap={1.5} alignItems="flex-start">
+          <Box
+            position="absolute"
+            top={{ base: 2, md: 3 }}
+            left={{ base: 2, md: 3 }}
+            zIndex={2}
+            display="flex"
+            flexDirection="column"
+            gap={1.5}
+            alignItems="flex-start"
+          >
             {product.tradeMatchScore != null && product.tradeMatchScore > 0 && (
               <Tooltip
                 hasArrow
@@ -325,8 +443,14 @@ const ProductCard: React.FC<ProductCardProps> = ({
         )}
 
         {/* Location badge - Using accurate ProximityBadge */}
-        <Box position="absolute" bottom={{ base: 2, md: 3 }} left={{ base: 2, md: 3 }}>
-          <ProximityBadge type="product" targetId={product.id} showIcon={true} />
+        <Box position="absolute" bottom={{ base: 2, md: 3 }} left={{ base: 2, md: 3 }} zIndex={2}>
+          <ProximityBadge
+            type="product"
+            targetId={product.id}
+            showIcon={true}
+            prefetchedDistanceKm={product.distanceKm}
+            prefetchedDistanceLabel={product.distance}
+          />
         </Box>
       </Box>
 
@@ -338,9 +462,9 @@ const ProductCard: React.FC<ProductCardProps> = ({
         flex={1}
         overflow="hidden"
       >
-        {/* Seller row (desktop) */}
-        <Flex justify="space-between" align="center" mb={1}>
-          <HStack spacing={1} align="center" mt="auto">
+        {/* Seller, condition, and save row */}
+        <Flex justify="space-between" align="center" gap={2} mb={1}>
+          <HStack spacing={1} align="center" minW={0} flex={1}>
             {((product as any).seller_slug || product.seller_id) ? (
               <RouterLink to={`/users/${(product as any).seller_slug || product.seller_id}`} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                 <VerifiedAvatar
@@ -368,9 +492,33 @@ const ProductCard: React.FC<ProductCardProps> = ({
               {product.seller_name || 'Unknown'}
             </Text>
           </HStack>
-          <Badge fontSize={{ base: 'xs', md: '2xs' }} colorScheme="blue" flexShrink={0} borderWidth="1px">
-            {product.condition || 'Used'}
-          </Badge>
+          <HStack spacing={{ base: 1, md: 1.5 }} flexShrink={0}>
+            <Badge fontSize={{ base: '10px', md: '2xs' }} colorScheme="blue" flexShrink={0} borderWidth="1px" borderRadius="md" px={1.5}>
+              {product.condition || 'Used'}
+            </Badge>
+            {isOwnProduct ? (
+              <Badge colorScheme="gray" variant="subtle" borderRadius="full" fontSize={{ base: '10px', md: '2xs' }} px={2}>
+                Your item
+              </Badge>
+            ) : (
+              <Tooltip label={isSaved ? 'Remove from saved' : 'Save'} placement="top" hasArrow>
+                <IconButton
+                  aria-label={isSaved ? 'Remove from saved' : 'Save product'}
+                  icon={isSaved ? <FaHeart /> : <FaRegHeart />}
+                  size="xs"
+                  minW={{ base: '30px', md: '28px' }}
+                  h={{ base: '30px', md: '28px' }}
+                  borderRadius="full"
+                  variant="ghost"
+                  color={isSaved ? 'red.500' : 'gray.600'}
+                  isLoading={isSaving}
+                  onClick={handleSaveToggle}
+                  _hover={{ bg: 'red.50', color: isSaved ? 'red.600' : 'red.500' }}
+                  _active={{ transform: 'scale(0.96)' }}
+                />
+              </Tooltip>
+            )}
+          </HStack>
         </Flex>
 
         {/* Title */}
@@ -418,6 +566,24 @@ const ProductCard: React.FC<ProductCardProps> = ({
 
         {/* Wishlist badge */}
         <Flex mb={1} align="center" gap={1} minH={{ base: '16px', md: '18px' }}>
+          {isBoosted && (
+            <Tooltip label={boostTimeRemaining ? `Boosted for ${boostTimeRemaining} more` : 'Boosted'} placement="top" hasArrow>
+              <Badge
+                colorScheme="orange"
+                variant="solid"
+                borderRadius="full"
+                px={2}
+                py={0.5}
+                fontSize="xs"
+                display="inline-flex"
+                alignItems="center"
+                gap={1}
+              >
+                <StarIcon boxSize={2.5} />
+                Boosted
+              </Badge>
+            </Tooltip>
+          )}
           {product.wishlist_count > 0 && (
             <Badge
               colorScheme="pink"
@@ -430,9 +596,22 @@ const ProductCard: React.FC<ProductCardProps> = ({
               ❤️ {product.wishlist_count} {product.wishlist_count === 1 ? 'person wants' : 'people want'}
             </Badge>
           )}
-          
-          {/* Boosted indicator moved to image badge stack */}
         </Flex>
+
+        {/* Availability Slots (compact) */}
+        {(() => {
+          const raw = (product as any).availability_slots
+          if (!raw) return null
+          try {
+            const slots: AvailabilitySlot[] = typeof raw === 'string' ? JSON.parse(raw) : raw
+            if (!Array.isArray(slots) || slots.length === 0) return null
+            return (
+              <Box mb={1}>
+                <AvailabilitySlots slots={slots} availabilityType={(product as any).availability_type} compact />
+              </Box>
+            )
+          } catch { return null }
+        })()}
 
         {/* Organization Tags */}
         {product.organization_tags && product.organization_tags.length > 0 && (
@@ -477,64 +656,101 @@ const ProductCard: React.FC<ProductCardProps> = ({
         )}
 
         {/* Action buttons */}
-        <HStack spacing={{ base: 1.5, md: 2 }} mt="auto" pt={2} w="full">
-          <Tooltip label="Trade" placement="top">
+        {isOwnProduct ? (
+          <VStack spacing={2} align="stretch" mt="auto" pt={2} w="full">
+            <Badge alignSelf="flex-start" colorScheme="gray" variant="subtle" borderRadius="full" px={2.5} py={0.5}>
+              This is your item
+            </Badge>
+            <HStack spacing={{ base: 1.5, md: 2 }} w="full">
+              <Button
+                size="sm"
+                leftIcon={<EditIcon />}
+                flex={1}
+                px={{ base: 1, md: 3 }}
+                borderRadius="xl"
+                fontSize={{ base: '10px', md: '13px' }}
+                fontWeight="700"
+                colorScheme="brand"
+                variant="outline"
+                onClick={handleEditClick}
+              >
+                Edit
+              </Button>
+              <Button
+                size="sm"
+                leftIcon={<ViewIcon />}
+                flex={1}
+                px={{ base: 1, md: 3 }}
+                borderRadius="xl"
+                fontSize={{ base: '10px', md: '13px' }}
+                fontWeight="700"
+                variant="ghost"
+                onClick={handleViewListingClick}
+              >
+                View
+              </Button>
+            </HStack>
+          </VStack>
+        ) : (
+          <HStack spacing={{ base: 1.5, md: 2 }} mt="auto" pt={2} w="full">
+            <Tooltip label="Trade" placement="top">
+              <Button
+                size="sm"
+                bg={useColorModeValue('brand.50', 'brand.900')}
+                color={useColorModeValue('brand.600', 'brand.200')}
+                leftIcon={<Icon as={FaExchangeAlt} />}
+                flex={1}
+                px={{ base: 1, md: 3 }}
+                borderRadius="xl"
+                fontSize={{ base: '10px', md: '13px' }}
+                fontWeight="700"
+                onClick={handleTradeClick}
+                isDisabled={product.status === 'sold'}
+                transition="all 0.2s"
+                _hover={{ bg: useColorModeValue('brand.100', 'brand.800'), transform: 'translateY(-2px)', shadow: 'sm' }}
+                _active={{ transform: 'scale(0.98)' }}
+              >
+                {product.status === 'sold' ? 'Sold' : 'Trade'}
+              </Button>
+            </Tooltip>
+
             <Button
               size="sm"
-              bg={useColorModeValue('brand.50', 'brand.900')}
-              color={useColorModeValue('brand.600', 'brand.200')}
-              leftIcon={<Icon as={FaExchangeAlt} />}
+              bg={useColorModeValue('orange.50', 'orange.900')}
+              color={useColorModeValue('orange.600', 'orange.200')}
+              leftIcon={<Icon as={FaMoneyBillWave} />}
               flex={1}
               px={{ base: 1, md: 3 }}
               borderRadius="xl"
               fontSize={{ base: '10px', md: '13px' }}
               fontWeight="700"
-              onClick={handleTradeClick}
+              _hover={{ bg: useColorModeValue('orange.100', 'orange.800'), transform: 'translateY(-2px)', shadow: 'sm' }}
+              _active={{ transform: 'scale(0.98)' }}
+              onClick={handleBuyoutClick}
               isDisabled={product.status === 'sold'}
               transition="all 0.2s"
-              _hover={{ bg: useColorModeValue('brand.100', 'brand.800'), transform: 'translateY(-2px)', shadow: 'sm' }}
-              _active={{ transform: 'scale(0.98)' }}
             >
-              {product.status === 'sold' ? 'Sold' : 'Trade'}
+              Buyout
             </Button>
-          </Tooltip>
 
-          <Button
-            size="sm"
-            bg={useColorModeValue('orange.50', 'orange.900')}
-            color={useColorModeValue('orange.600', 'orange.200')}
-            leftIcon={<Icon as={FaMoneyBillWave} />}
-            flex={1}
-            px={{ base: 1, md: 3 }}
-            borderRadius="xl"
-            fontSize={{ base: '10px', md: '13px' }}
-            fontWeight="700"
-            _hover={{ bg: useColorModeValue('orange.100', 'orange.800'), transform: 'translateY(-2px)', shadow: 'sm' }}
-            _active={{ transform: 'scale(0.98)' }}
-            onClick={handleBuyoutClick}
-            isDisabled={product.status === 'sold'}
-            transition="all 0.2s"
-          >
-            Buyout
-          </Button>
-
-          <Tooltip label="View offers" placement="top">
-            <IconButton
-              aria-label="View offers"
-              icon={<FaHandshake />}
-              size="sm"
-              bg={useColorModeValue('blue.50', 'blue.900')}
-              color={useColorModeValue('blue.600', 'blue.200')}
-              borderRadius="xl"
-              onClick={handleViewOffers}
-              isDisabled={product.status === 'sold'}
-              flexShrink={0}
-              transition="all 0.2s"
-              _hover={{ bg: useColorModeValue('blue.100', 'blue.800'), transform: 'translateY(-2px)', shadow: 'sm' }}
-              _active={{ transform: 'scale(0.98)' }}
-            />
-          </Tooltip>
-        </HStack>
+            <Tooltip label="View offers" placement="top">
+              <IconButton
+                aria-label="View offers"
+                icon={<FaHandshake />}
+                size="sm"
+                bg={useColorModeValue('blue.50', 'blue.900')}
+                color={useColorModeValue('blue.600', 'blue.200')}
+                borderRadius="xl"
+                onClick={handleViewOffers}
+                isDisabled={product.status === 'sold'}
+                flexShrink={0}
+                transition="all 0.2s"
+                _hover={{ bg: useColorModeValue('blue.100', 'blue.800'), transform: 'translateY(-2px)', shadow: 'sm' }}
+                _active={{ transform: 'scale(0.98)' }}
+              />
+            </Tooltip>
+          </HStack>
+        )}
       </Box>
     </Box>
   )

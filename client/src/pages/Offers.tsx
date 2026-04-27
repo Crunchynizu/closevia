@@ -107,6 +107,21 @@ const Offers: React.FC = () => {
     return productTitles.get(productId) || 'Unnamed Item'
   }
 
+  const getSellerRequestedItems = (trade: Trade) => {
+    return (trade.items || []).filter((item: any) => {
+      const offeredBy = (item?.offered_by ?? item?.offeredBy ?? '').toLowerCase()
+      return offeredBy === 'seller'
+    })
+  }
+
+  const getRequestedBundleCount = (trade: Trade) => 1 + getSellerRequestedItems(trade).length
+
+  const getRequestedBundleTitle = (trade: Trade) => {
+    const count = getRequestedBundleCount(trade)
+    const title = getProductTitle(trade.target_product_id, trade.product_title)
+    return count > 1 ? `${title} + ${count - 1} more` : title
+  }
+
   useEffect(() => { 
     fetchAll()
     // Get current user ID from localStorage or API
@@ -122,25 +137,6 @@ const Offers: React.FC = () => {
 
     return () => clearInterval(interval)
   }, [])
-
-  // Debug: inspect API structure for /api/trades
-  useEffect(() => {
-    if (!loading) {
-      try {
-        // eslint-disable-next-line no-console
-        console.log('🔍 [TRADE STRUCTURE DEBUG] Incoming trades:', JSON.stringify(incoming.slice(0, 2), null, 2))
-        // eslint-disable-next-line no-console
-        console.log('🔍 [TRADE STRUCTURE DEBUG] Outgoing trades:', JSON.stringify(outgoing.slice(0, 2), null, 2))
-        const sample = incoming[0] || outgoing[0]
-        if (sample?.items && sample.items.length > 0) {
-          // eslint-disable-next-line no-console
-          console.log('🔍 [ITEMS DEBUG] Trade items type:', typeof (sample.items[0] as any))
-          // eslint-disable-next-line no-console
-          console.log('🔍 [ITEMS DEBUG] First item structure:', sample.items[0])
-        }
-      } catch {}
-    }
-  }, [loading, incoming, outgoing])
 
   const updateTrade = async (id: number, action: TradeAction) => {
     // Prevent multiple concurrent requests
@@ -266,8 +262,8 @@ const Offers: React.FC = () => {
       if (result?.multiway?.match_found) {
         toast({
           id: 'success-convert-multiway-match',
-          title: 'Match Found!',
-          description: 'A 3-way trade match was found immediately! Redirecting to your multi-way dashboard...',
+          title: 'Connection Found!',
+          description: 'A 3-way Trade Connect was found immediately! Redirecting to your multi-way dashboard...',
           status: 'success',
           duration: 5000
         })
@@ -731,8 +727,13 @@ const Offers: React.FC = () => {
               {/* Product Title */}
               <Box w="100%">
                 <Text fontWeight="600" fontSize="sm" noOfLines={2} color="gray.800">
-                  {getProductTitle(trade.target_product_id, trade.product_title)}
+                  {getRequestedBundleTitle(trade)}
                 </Text>
+                {getRequestedBundleCount(trade) > 1 && (
+                  <Badge colorScheme="blue" variant="subtle" fontSize="9px" mt={1}>
+                    {getRequestedBundleCount(trade)} requested items
+                  </Badge>
+                )}
               </Box>
 
               {/* Trade Option Badge */}
@@ -772,7 +773,7 @@ const Offers: React.FC = () => {
                 <HStack spacing={1}>
                   {type === 'received' && <Text>From: <strong>{(trade.buyer_name || 'User').substring(0, 15)}</strong></Text>}
                   {type === 'sent' && <Text>To: <strong>{(trade.seller_name || 'User').substring(0, 15)}</strong></Text>}
-                  {type === 'progress' && <Text><strong>{(trade.buyer_name || 'Buyer').substring(0, 12)}</strong> ↔ <strong>{(trade.seller_name || 'Seller').substring(0, 12)}</strong></Text>}
+                  {type === 'progress' && <Text><strong>{(trade.buyer_name || 'Trader').substring(0, 12)}</strong> ↔ <strong>{(trade.seller_name || 'Trader').substring(0, 12)}</strong></Text>}
                 </HStack>
                 <Text fontSize="10px" color="gray.500" mt={1}>{new Date(trade.created_at).toLocaleDateString()}</Text>
               </Box>
@@ -1130,7 +1131,12 @@ const Offers: React.FC = () => {
 
                             {/* Product title and trade option */}
                             <VStack align="start" spacing={0.5} flex="1" overflow="hidden" mb={1}>
-                              <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getProductTitle(t.target_product_id, t.product_title)}</Text>
+                              <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getRequestedBundleTitle(t)}</Text>
+                              {getRequestedBundleCount(t) > 1 && (
+                                <Badge colorScheme="blue" variant="subtle" fontSize="8px" px={1} py={0}>
+                                  {getRequestedBundleCount(t)} requested items
+                                </Badge>
+                              )}
                               {t.trade_option && (
                                 <Badge 
                                   colorScheme={t.trade_option === 'meetup' ? (t?.meeting_type === 'pickup' ? 'orange' : 'blue') : t.trade_option === 'delivery' ? 'green' : 'purple'}
@@ -1255,7 +1261,12 @@ const Offers: React.FC = () => {
 
                           {/* Product title and trade option */}
                           <VStack align="start" spacing={0.5} flex="1" overflow="hidden" mb={1}>
-                            <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getProductTitle(t.target_product_id, t.product_title)}</Text>
+                            <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getRequestedBundleTitle(t)}</Text>
+                            {getRequestedBundleCount(t) > 1 && (
+                              <Badge colorScheme="blue" variant="subtle" fontSize="8px" px={1} py={0}>
+                                {getRequestedBundleCount(t)} requested items
+                              </Badge>
+                            )}
                             {t.trade_option && (
                               <Badge 
                                 colorScheme={t.trade_option === 'meetup' ? (t?.meeting_type === 'pickup' ? 'orange' : 'blue') : t.trade_option === 'delivery' ? 'green' : 'purple'}
@@ -1387,7 +1398,12 @@ const Offers: React.FC = () => {
 
                       {/* Product title and trade option */}
                       <VStack align="start" spacing={0.5} flex="1" overflow="hidden" mb={1}>
-                        <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getProductTitle(t.target_product_id, t.product_title)}</Text>
+                        <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getRequestedBundleTitle(t)}</Text>
+                        {getRequestedBundleCount(t) > 1 && (
+                          <Badge colorScheme="blue" variant="subtle" fontSize="8px" px={1} py={0}>
+                            {getRequestedBundleCount(t)} requested items
+                          </Badge>
+                        )}
                         {t.trade_option && (
                           <Badge 
                             colorScheme={t.trade_option === 'meetup' ? 'blue' : t.trade_option === 'delivery' ? 'green' : 'purple'}
@@ -1509,7 +1525,12 @@ const Offers: React.FC = () => {
 
                       {/* Product title and trade option */}
                       <VStack align="start" spacing={0.5} flex="1" overflow="hidden" mb={1}>
-                        <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getProductTitle(t.target_product_id, t.product_title)}</Text>
+                        <Text fontWeight="semibold" fontSize="sm" noOfLines={2} color="gray.800">{getRequestedBundleTitle(t)}</Text>
+                        {getRequestedBundleCount(t) > 1 && (
+                          <Badge colorScheme="blue" variant="subtle" fontSize="8px" px={1} py={0}>
+                            {getRequestedBundleCount(t)} requested items
+                          </Badge>
+                        )}
                         {t.trade_option && (
                           <Badge 
                             colorScheme={t.trade_option === 'meetup' ? (t?.meeting_type === 'pickup' ? 'orange' : 'blue') : t.trade_option === 'delivery' ? 'green' : 'purple'}
@@ -1530,7 +1551,7 @@ const Offers: React.FC = () => {
                             Pickup: {pickupInfo.label}
                           </Badge>
                         )}
-                        <Text fontSize="10px" color="gray.600" noOfLines={1}><Text as="span" fontWeight="medium">{(t.buyer_name || 'Buyer').substring(0, 12)}</Text> ↔ <Text as="span" fontWeight="medium">{(t.seller_name || 'Seller').substring(0, 12)}</Text></Text>
+                        <Text fontSize="10px" color="gray.600" noOfLines={1}><Text as="span" fontWeight="medium">{(t.buyer_name || 'Trader').substring(0, 12)}</Text> ↔ <Text as="span" fontWeight="medium">{(t.seller_name || 'Trader').substring(0, 12)}</Text></Text>
                       </VStack>
 
                       {/* Actions positioned at bottom */}
@@ -1590,8 +1611,13 @@ const Offers: React.FC = () => {
                   >
                     <HStack justify="space-between" align="start" spacing={2}>
                       <VStack align="start" spacing={0.5} flex="1" overflow="hidden">
-                        <Text fontWeight="semibold" color="gray.800" fontSize="sm" noOfLines={1}>{getProductTitle(t.target_product_id, t.product_title)}</Text>
-                        <Text fontSize="10px" color="gray.600" noOfLines={1}>Buyer: {(t.buyer_name || 'User').substring(0, 15)} • Trader: {(t.seller_name || 'User').substring(0, 15)}</Text>
+                        <Text fontWeight="semibold" color="gray.800" fontSize="sm" noOfLines={1}>{getRequestedBundleTitle(t)}</Text>
+                        {getRequestedBundleCount(t) > 1 && (
+                          <Badge colorScheme="blue" variant="subtle" fontSize="8px" px={1} py={0}>
+                            {getRequestedBundleCount(t)} requested items
+                          </Badge>
+                        )}
+                        <Text fontSize="10px" color="gray.600" noOfLines={1}>Trader: {(t.buyer_name || 'User').substring(0, 15)} • Trader: {(t.seller_name || 'User').substring(0, 15)}</Text>
                         <Text fontSize="9px" color="gray.400">Source: {t.source}</Text>
                       </VStack>
                       {getStatusBadge(t.status)}
@@ -1626,8 +1652,13 @@ const Offers: React.FC = () => {
                   >
                     <HStack justify="space-between" align="start" spacing={2}>
                       <VStack align="start" spacing={0.5} flex="1" overflow="hidden">
-                        <Text fontWeight="semibold" color="gray.800" fontSize="sm" noOfLines={1}>{getProductTitle(t.target_product_id, t.product_title)}</Text>
-                        <Text fontSize="10px" color="gray.600" noOfLines={1}>Buyer: {(t.buyer_name || 'User').substring(0, 15)} • Trader: {(t.seller_name || 'User').substring(0, 15)}</Text>
+                        <Text fontWeight="semibold" color="gray.800" fontSize="sm" noOfLines={1}>{getRequestedBundleTitle(t)}</Text>
+                        {getRequestedBundleCount(t) > 1 && (
+                          <Badge colorScheme="blue" variant="subtle" fontSize="8px" px={1} py={0}>
+                            {getRequestedBundleCount(t)} requested items
+                          </Badge>
+                        )}
+                        <Text fontSize="10px" color="gray.600" noOfLines={1}>Trader: {(t.buyer_name || 'User').substring(0, 15)} • Trader: {(t.seller_name || 'User').substring(0, 15)}</Text>
                         <Text fontSize="9px" color="red.400">Expired due to 7 days of inactivity</Text>
                       </VStack>
                       {getStatusBadge(t.status)}
@@ -1686,7 +1717,7 @@ const Offers: React.FC = () => {
                   </Text>
                   {tradeToCancel && (
                     <Text fontSize="xs" color="gray.500" mt={2}>
-                      Product: {getProductTitle(tradeToCancel.target_product_id, tradeToCancel.product_title)}
+                      Product: {getRequestedBundleTitle(tradeToCancel)}
                     </Text>
                   )}
                 </VStack>
@@ -1738,7 +1769,7 @@ const Offers: React.FC = () => {
                   </Text>
                   {tradeToDecline && (
                     <Text fontSize="xs" color="gray.500" mt={1}>
-                      Product: {getProductTitle(tradeToDecline.target_product_id, tradeToDecline.product_title)}
+                      Product: {getRequestedBundleTitle(tradeToDecline)}
                     </Text>
                   )}
                 </VStack>

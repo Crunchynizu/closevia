@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Product, ProductCreate, ProductUpdate, SearchFilters, PaginatedResponse } from '../types'
 import { api } from '../services/api'
 import { apiCallWithRetry } from '../utils/apiUtils'
+import { getBoostStatus } from '../utils/boostUtils'
 
 interface ProductContextType {
   products: Product[]
@@ -53,10 +54,6 @@ interface ProductProviderProps {
 
 export const ProductProvider: React.FC<ProductProviderProps> = ({ children }) => {
   const queryClient = useQueryClient()
-  // Avoid calling `useAuth()` here to prevent errors when provider ordering
-  // is incorrect during initialization. Read token from localStorage instead
-  // which is safe even if `AuthProvider` isn't present yet.
-  const [token] = useState<string | null>(() => localStorage.getItem('clovia_token'))
   const [products, setProducts] = useState<Product[]>(() => {
     // Try to restore from localStorage on mount
     try {
@@ -84,7 +81,6 @@ export const ProductProvider: React.FC<ProductProviderProps> = ({ children }) =>
       if (userCached) {
         const user = JSON.parse(userCached)
         if (user?.home_latitude != null && user?.home_longitude != null) {
-          console.log('[ProductContext] Initializing with User Home Profile Coords:', user.home_latitude, user.home_longitude)
           return { lat: user.home_latitude, lng: user.home_longitude, isHome: true }
         }
       }
@@ -140,6 +136,18 @@ export const ProductProvider: React.FC<ProductProviderProps> = ({ children }) =>
         console.warn('Failed to persist products:', e)
       }
     }
+  }, [products])
+
+  useEffect(() => {
+    if (!products.some((product) => getBoostStatus(product).isBoosted)) {
+      return
+    }
+
+    const interval = window.setInterval(() => {
+      setProducts((current) => addDistanceToProducts(current, true))
+    }, 60000)
+
+    return () => window.clearInterval(interval)
   }, [products])
 
   // Get the viewer's location — STRICTLY use saved home address from clovia_user
@@ -248,18 +256,6 @@ export const ProductProvider: React.FC<ProductProviderProps> = ({ children }) =>
     }
   }
 
-  // Pre-compute boost expiration times to avoid redundant Date operations in sort
-  const getBoostStatus = (product: Product): { isBoosted: boolean; timeRemaining: number } => {
-    if (!product.boosted_at) return { isBoosted: false, timeRemaining: 0 }
-    const boostedAtRaw = String(product.boosted_at)
-    const normalizedBoostedAt = boostedAtRaw.includes('T') ? boostedAtRaw : boostedAtRaw.replace(' ', 'T')
-    const boostTimestamp = new Date(normalizedBoostedAt).getTime()
-    if (Number.isNaN(boostTimestamp)) return { isBoosted: false, timeRemaining: 0 }
-    const boostExpiry = boostTimestamp + 3 * 60 * 60 * 1000
-    const timeRemaining = boostExpiry - Date.now()
-    return { isBoosted: timeRemaining > 0, timeRemaining }
-  }
-
   // Helper to parse distance string quickly (avoids regex in hot path)
   const parseDistanceString = (distStr: string): number => {
     const lowerStr = distStr.toLowerCase().trim()
@@ -288,6 +284,28 @@ export const ProductProvider: React.FC<ProductProviderProps> = ({ children }) =>
     return distA - distB
   }
 
+  const compareProducts = (a: Product, b: Product): number => {
+    // Distance is the primary sort key (nearest first)
+    const distanceComparison = compareByDistance(a, b)
+    if (distanceComparison !== 0) {
+      return distanceComparison
+    }
+
+    // Boost as secondary tiebreaker (active-boosted products win equal-distance ties)
+    const boostA = getBoostStatus(a)
+    const boostB = getBoostStatus(b)
+    if (boostA.isBoosted !== boostB.isBoosted) {
+      return boostA.isBoosted ? -1 : 1
+    }
+
+    const createdAtComparison = new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    if (createdAtComparison !== 0) {
+      return createdAtComparison
+    }
+
+    return b.id - a.id
+  }
+
   // Add distance to products and sort by nearest first
   // skipProcessed=true skips products that already have distanceKm set (optimization for pagination)
   const addDistanceToProducts = (productsList: Product[], skipProcessed = false): Product[] => {
@@ -299,41 +317,42 @@ export const ProductProvider: React.FC<ProductProviderProps> = ({ children }) =>
       if (skipProcessed && product.distanceKm !== undefined && product.distanceKm !== Infinity) {
         return {
           ...product,
-          // Ensure boosted items keep priority when re-sorting after pagination.
+          // Ensure boost expiration is re-evaluated on every sort pass.
           // @ts-ignore - extending product with cache for sorting
-          _boostStatus: (product as any)._boostStatus || getBoostStatus(product),
+          _boostStatus: getBoostStatus(product),
         }
       }
 
       let dist = Infinity
       const cacheKey = getDistanceCacheKey(product)
-      const cachedDistance = distanceCacheRef.current.get(cacheKey)
 
-      if (cachedDistance) {
-        return {
-          ...product,
-          distance: cachedDistance.distance,
-          distanceKm: cachedDistance.distanceKm,
-          // @ts-ignore - extending product with cache for sorting
-          _boostStatus: getBoostStatus(product),
-        }
-      }
-      
-      // Priority 1: Use backend-computed distance string (SQL Haversine — always accurate)
-      // The backend receives viewer_lat/viewer_lng from the home address and computes distance in MySQL.
-      // We never recalculate on the frontend to avoid inaccurate browser GPS.
+      // Priority 1: Fresh backend-computed distance string (SQL Haversine with current viewer coords).
+      // Always prefer over cache — the cache key excludes viewer coordinates so it can be stale
+      // when the user changes their home address between sessions.
       if (product.distance) {
         dist = parseDistanceString(product.distance)
-      }
-      // Priority 2: If backend sent no distance string but we have coords + home location,
-      // compute client-side as a fallback (e.g. for products loaded before home address was set)
-      else if (userLocation?.isHome && product.latitude && product.longitude) {
-        dist = calculateDistance(
-          userLocation.lat,
-          userLocation.lng,
-          product.latitude,
-          product.longitude
-        )
+      } else {
+        // Priority 2: Cache (for context products re-processed after initial load, which have no
+        // fresh backend string but do have a valid cached distanceKm from the initial fetch)
+        const cachedDistance = distanceCacheRef.current.get(cacheKey)
+        if (cachedDistance) {
+          return {
+            ...product,
+            distance: cachedDistance.distance,
+            distanceKm: cachedDistance.distanceKm,
+            // @ts-ignore - extending product with cache for sorting
+            _boostStatus: getBoostStatus(product),
+          }
+        }
+        // Priority 3: Client-side Haversine fallback (for products loaded before home address was set)
+        else if (userLocation?.isHome && product.latitude && product.longitude) {
+          dist = calculateDistance(
+            userLocation.lat,
+            userLocation.lng,
+            product.latitude,
+            product.longitude
+          )
+        }
       }
 
       // Preserve backend distance label exactly (it uses the correct "58M AWAY" / "2.2KM AWAY" format)
@@ -360,39 +379,8 @@ export const ProductProvider: React.FC<ProductProviderProps> = ({ children }) =>
     })
     persistDistanceCache()
 
-    // Sort by:
-    // 1. Boosted status (boosted products first for 3 hours, then by remaining time)
-    // 2. Premium pin status
-    // 3. Distance (nearest first)
-    // 4. Newest first (for identical everything else)
-    withDistance.sort((a, b) => {
-      // Use pre-cached boost status (computed once per product during mapping, not during sort)
-      const boostA = (a as any)._boostStatus || { isBoosted: false, timeRemaining: 0 }
-      const boostB = (b as any)._boostStatus || { isBoosted: false, timeRemaining: 0 }
-
-      // Prioritize boosted products first
-      if (boostA.isBoosted !== boostB.isBoosted) {
-        return boostA.isBoosted ? -1 : 1
-      }
-
-      // If both are boosted, sort by remaining boost time (more time remaining first)
-      if (boostA.isBoosted) {
-        return boostB.timeRemaining - boostA.timeRemaining
-      }
-
-      // Otherwise, prioritize premium pins
-      if (a.premium !== b.premium) {
-        return a.premium ? -1 : 1
-      }
-
-      const distanceComparison = compareByDistance(a, b)
-      if (distanceComparison !== 0) {
-        return distanceComparison
-      }
-      
-      // Finally, newest first
-      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    })
+    // Sort by: nearest first → boost tiebreaker → newest → id
+    withDistance.sort(compareProducts)
 
     return withDistance
   }
@@ -426,15 +414,6 @@ export const ProductProvider: React.FC<ProductProviderProps> = ({ children }) =>
     })
   }
 
-  // Helper function to get headers with auth token
-  const getAuthHeaders = () => {
-    const headers: any = {}
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`
-    }
-    return headers
-  }
-
   const searchProducts = async (filters: SearchFilters) =>
     searchProductsWithLocation(filters, latestUserLocationRef.current)
 
@@ -446,23 +425,13 @@ export const ProductProvider: React.FC<ProductProviderProps> = ({ children }) =>
   ) => {
     const activeLoc = location ?? latestUserLocationRef.current
     try {
-      console.log('Searching products with filters:', filters, 'viewer:', activeLoc)
       const filterKey = JSON.stringify(filters) + (activeLoc ? `@${activeLoc.lat},${activeLoc.lng}` : '')
 
       // Keep currentFiltersRef in sync for re-fetch on home change
       currentFiltersRef.current = filters
 
-      // Return cached data if available and identical filters + location
-      if (cacheRef.current && cacheRef.current.filters === filterKey) {
-        console.log('Using cached products for filters:', filters)
-        safeSetProducts(cacheRef.current.products)
-        setHasMore(true)
-        return
-      }
-
       // Return pending request if same request is already in flight
       if (pendingRequestRef.current) {
-        console.log('Request already pending, returning existing promise')
         return pendingRequestRef.current
       }
 
@@ -502,29 +471,21 @@ export const ProductProvider: React.FC<ProductProviderProps> = ({ children }) =>
         }
 
         if (viewerLat !== null && viewerLng !== null) {
-          console.log(`[API_REQUEST] Attaching viewer coords to /listings API: lat=${viewerLat}, lng=${viewerLng}`)
           params.append(filters.useSmartSearch ? 'lat' : 'viewer_lat', viewerLat.toString())
           params.append(filters.useSmartSearch ? 'lng' : 'viewer_lng', viewerLng.toString())
-        } else {
-          console.log(`[API_REQUEST] No viewer coords available. Distance badge will hide/be NULL properly.`)
         }
         params.append('page', (filters.page || 1).toString())
         params.append('limit', (filters.limit || 10).toString())
 
         const endpoint = filters.useSmartSearch ? '/api/products/smart-search' : '/api/products'
         const response = await apiCallWithRetry(async () => {
-          return await api.get(`${endpoint}?${params.toString()}`, {
-            headers: getAuthHeaders(),
-          })
+          return await api.get(`${endpoint}?${params.toString()}`)
         })
-
-        console.log('API Response:', response.data)
 
         // Handle different response structures safely
         if (response.data && response.data.data) {
           const data = response.data.data as PaginatedResponse<Product>
           if (data && data.data && Array.isArray(data.data)) {
-            console.log('Setting products from paginated response:', data.data.length)
             safeSetProducts(data.data)
             // Cache the result
             cacheRef.current = { filters: filterKey, products: data.data, timestamp: Date.now() }
@@ -536,19 +497,16 @@ export const ProductProvider: React.FC<ProductProviderProps> = ({ children }) =>
             // If returned fewer than limit, we know there's no more
             setHasMore(loaded >= limit && (data.page < (data.total_pages || Number.MAX_SAFE_INTEGER)))
           } else {
-            console.log('No products in paginated response')
             safeSetProducts([])
             setHasMore(false)
           }
         } else if (response.data && Array.isArray(response.data)) {
           // Direct array response
-          console.log('Setting products from direct array response:', response.data.length)
           safeSetProducts(response.data)
           cacheRef.current = { filters: filterKey, products: response.data, timestamp: Date.now() }
           setHasMore(false)
         } else {
           // Fallback to empty array
-          console.log('No products found, setting empty array')
           safeSetProducts([])
           setHasMore(false)
         }
@@ -624,20 +582,20 @@ export const ProductProvider: React.FC<ProductProviderProps> = ({ children }) =>
 
       const endpoint = filters.useSmartSearch ? '/api/products/smart-search' : '/api/products'
       const response = await apiCallWithRetry(async () => {
-        return await api.get(`${endpoint}?${params.toString()}`, {
-          headers: getAuthHeaders(),
-        })
+        return await api.get(`${endpoint}?${params.toString()}`)
       })
 
       if (response.data && response.data.data) {
         const data = response.data.data as PaginatedResponse<Product>
         const newItems = Array.isArray(data?.data) ? data.data : []
-        // OPTIMIZATION: Only compute distance for new items, skip reprocessing old items
+        // Compute distances for new items only
         const newItemsWithDistance = addDistanceToProducts(newItems, false)
-        // Merge new items with existing, then sort entire list once (not twice)
-        const allProducts = Array.isArray(products) ? [...products, ...newItemsWithDistance] : newItemsWithDistance
-        const sortedProducts = addDistanceToProducts(allProducts, true) // skipProcessed=true avoids recalculating
-        setProducts(sortedProducts)
+        // Functional update: use current state (not stale closure) so concurrent
+        // boost-timer or SSE updates are not overwritten
+        setProducts(current => {
+          const allProducts = Array.isArray(current) ? [...current, ...newItemsWithDistance] : newItemsWithDistance
+          return addDistanceToProducts(allProducts, true) // global sort, skip re-computing old distances
+        })
         setCurrentPage(data.page || nextPage)
         const totalPages = data.total_pages || 0
         if (totalPages > 0) {
@@ -648,9 +606,10 @@ export const ProductProvider: React.FC<ProductProviderProps> = ({ children }) =>
         }
       } else if (response.data && Array.isArray(response.data)) {
         const newItems = response.data as Product[]
-        const allProducts = Array.isArray(products) ? [...products, ...newItems] : newItems
-        const sortedProducts = addDistanceToProducts(allProducts)
-        setProducts(sortedProducts)
+        setProducts(current => {
+          const allProducts = Array.isArray(current) ? [...current, ...newItems] : newItems
+          return addDistanceToProducts(allProducts)
+        })
         setHasMore(newItems.length > 0)
         setCurrentPage(nextPage)
       } else {
@@ -667,13 +626,10 @@ export const ProductProvider: React.FC<ProductProviderProps> = ({ children }) =>
   const getProduct = async (idOrSlug: number | string): Promise<Product | null> => {
     try {
       setError(null)
-      console.log(`🔍 Fetching product: ${idOrSlug}`)
 
       const response = await api.get(`/api/products/${idOrSlug}`, {
-        headers: getAuthHeaders(),
       })
 
-      console.log(`✓ Product ${idOrSlug} fetched successfully`)
       // Handle different response structures
       // API returns { data: { product: {...}, votes: {...}, user_vote: "" } }
       // We need to extract the actual product object
@@ -757,7 +713,6 @@ export const ProductProvider: React.FC<ProductProviderProps> = ({ children }) =>
       const response = await api.post('/api/products', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
-          ...getAuthHeaders(),
         },
       })
       const newProduct = response.data.data
@@ -789,7 +744,6 @@ export const ProductProvider: React.FC<ProductProviderProps> = ({ children }) =>
       }
 
       await api.put(`/api/products/${id}`, payload, {
-        headers: getAuthHeaders(),
       })
       safeSetProducts((products || []).map(p => p.id === id ? { ...p, ...product } : p))
       
@@ -805,7 +759,6 @@ export const ProductProvider: React.FC<ProductProviderProps> = ({ children }) =>
     try {
       setError(null)
       await api.delete(`/api/products/${id}`, {
-        headers: getAuthHeaders(),
       })
       safeSetProducts((products || []).filter(p => p.id !== id))
       
@@ -841,7 +794,6 @@ export const ProductProvider: React.FC<ProductProviderProps> = ({ children }) =>
     try {
       setError(null)
       const response = await api.get(`/api/products/user/${userId}?page=${page}`, {
-        headers: getAuthHeaders(),
       })
       return response.data.data
     } catch (error: any) {

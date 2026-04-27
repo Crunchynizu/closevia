@@ -116,7 +116,7 @@ const MeetupActionButtons: React.FC<MeetupActionButtonsProps> = ({
 
       toast({
         title: 'Success',
-        description: 'Meetup time proposed! Waiting for seller confirmation.',
+        description: 'Meetup time proposed! Waiting for the other trader to confirm.',
         status: 'success',
         duration: 3000,
       })
@@ -317,8 +317,8 @@ const MeetupActionButtons: React.FC<MeetupActionButtonsProps> = ({
                 }}
               >
                 <option value="">-- Select Reason --</option>
-                <option value="seller_not_appeared">Seller didn't appear</option>
-                <option value="buyer_not_appeared">Buyer didn't appear</option>
+                <option value="seller_not_appeared">Other trader didn't appear</option>
+                <option value="buyer_not_appeared">I couldn't make it</option>
                 <option value="item_not_available">Item not available</option>
                 <option value="item_damaged">Item damaged/different condition</option>
                 <option value="price_dispute">Price dispute</option>

@@ -136,10 +136,7 @@ func (s *MeetupService) ProposeMeetupDetails(tradeID, userID int, proposedTime t
 		}
 	} else {
 		// Only one user has proposed
-		userRole := "Buyer"
-		if !isBuyer {
-			userRole = "Seller"
-		}
+		userRole := "Trader"
 		systemMsg = &models.SystemMessage{
 			MessageType: "proposal_received",
 			Title:       "📍 " + userRole + " Proposed Meetup Time",
@@ -240,10 +237,7 @@ func (s *MeetupService) MarkHeadingOut(tradeID, userID int) (*models.SystemMessa
 	}
 
 	status, _ := s.GetMeetupStatus(tradeID)
-	userRole := "Buyer"
-	if !isBuyer {
-		userRole = "Seller"
-	}
+	userRole := "Trader"
 
 	var systemMsg *models.SystemMessage
 	if status.BuyerHeadingOut && status.SellerHeadingOut {
@@ -307,10 +301,7 @@ func (s *MeetupService) MarkArrived(tradeID, userID int) (*models.SystemMessage,
 
 	// Transition to 'arrived' stage if both have arrived
 	status, _ := s.GetMeetupStatus(tradeID)
-	userRole := "Buyer"
-	if !isBuyer {
-		userRole = "Seller"
-	}
+	userRole := "Trader"
 
 	var systemMsg *models.SystemMessage
 	if status.BuyerArrived && status.SellerArrived {
@@ -417,10 +408,7 @@ func (s *MeetupService) ConfirmCompletion(tradeID, userID int) (bool, *models.Sy
 		return true, systemMsg, nil
 	}
 
-	userRole := "Buyer"
-	if !isBuyer {
-		userRole = "Seller"
-	}
+	userRole := "Trader"
 
 	systemMsg = &models.SystemMessage{
 		MessageType: "completion_confirmed_partial",

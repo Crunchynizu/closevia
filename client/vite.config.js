@@ -144,25 +144,30 @@ export default defineConfig({
             output: {
                 // Manual chunks configuration for optimal splitting
                 manualChunks(id) {
-                    // Keep React and React-DOM in main vendor bundle (don't separate!)
-                    // React must be available to all components that depend on it
-                    if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
-                        return 'vendor';
+                    if (!id.includes('node_modules'))
+                        return undefined;
+                    if (id.includes('node_modules/react/') ||
+                        id.includes('node_modules/react-dom/') ||
+                        id.includes('node_modules/react-router/') ||
+                        id.includes('node_modules/react-router-dom/') ||
+                        id.includes('node_modules/scheduler/')) {
+                        return 'react-core';
                     }
-                    // Keep react-leaflet and leaflet with React (they depend on React)
-                    if (id.includes('react-leaflet') || id.includes('leaflet')) {
-                        return 'vendor'; // Don't separate - needs React from vendor
+                    if (id.includes('node_modules/@chakra-ui/') ||
+                        id.includes('node_modules/@emotion/') ||
+                        id.includes('node_modules/framer-motion/')) {
+                        return 'ui-framework';
                     }
-                    // Keep all other node_modules in vendor too
-                    if (id.includes('node_modules')) {
-                        return 'vendor';
+                    if (id.includes('node_modules/firebase/')) {
+                        return 'firebase';
                     }
-                    // Split large components into route-based chunks
-                    if (id.includes('/pages/') || id.includes('/components/')) {
-                        const match = id.match(/\/(pages|components)\/(\w+)/);
-                        if (match)
-                            return `${match[1]}-${match[2]}`;
+                    if (id.includes('node_modules/react-leaflet/') || id.includes('node_modules/leaflet/')) {
+                        return 'maps';
                     }
+                    if (id.includes('node_modules/recharts/') || id.includes('node_modules/d3-')) {
+                        return 'charts';
+                    }
+                    return undefined;
                 },
                 // Async loading for dynamically imported modules
                 assetFileNames: (assetInfo) => {
@@ -185,6 +190,9 @@ export default defineConfig({
     server: {
         host: true,
         port: 5173,
+        headers: {
+            'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
+        },
         hmr: {
             host: 'localhost',
             port: 5173,
@@ -196,6 +204,11 @@ export default defineConfig({
                 changeOrigin: true,
                 secure: false,
             },
+        },
+    },
+    preview: {
+        headers: {
+            'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
         },
     },
 });

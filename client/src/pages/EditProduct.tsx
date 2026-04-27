@@ -70,6 +70,16 @@ const MapClickHandler = ({ onLocationSelect }: { onLocationSelect: (lat: number,
   return null
 }
 
+const formatEstimatedValueRange = (min?: number, max?: number) => {
+  if (!min || !max || min <= 0 || max <= 0) return null
+  const formatter = new Intl.NumberFormat('en-PH', {
+    style: 'currency',
+    currency: 'PHP',
+    maximumFractionDigits: 0,
+  })
+  return min === max ? formatter.format(min) : `${formatter.format(min)} - ${formatter.format(max)}`
+}
+
 const EditProduct: React.FC = () => {
   const { id } = useParams<{ id: string }>()
   const queryClient = useQueryClient()
@@ -231,6 +241,9 @@ const EditProduct: React.FC = () => {
         max_items_per_offer: product.max_items_per_offer ?? 0,
         wants: product.wants || '',
         wanted_categories: parsedWantedCats,
+        estimated_value_min: product.estimated_value_min,
+        estimated_value_max: product.estimated_value_max,
+        show_estimated_value: product.show_estimated_value !== false,
         latitude: product.latitude,
         longitude: product.longitude,
         location_type: product.location_type || 'no_location',
@@ -374,6 +387,7 @@ const EditProduct: React.FC = () => {
       if (formData.max_items_per_offer !== undefined) form.append('max_items_per_offer', String(formData.max_items_per_offer))
       if (formData.wants !== undefined) form.append('wants', formData.wants)
       form.append('wanted_categories', JSON.stringify(formData.wanted_categories || []))
+      form.append('show_estimated_value', formData.show_estimated_value !== false ? 'true' : 'false')
 
       // Add image files from previews that are data URLs (newly uploaded)
       // For existing server URLs, we keep them via image_urls field
@@ -535,6 +549,57 @@ const EditProduct: React.FC = () => {
                   />
                 </FormControl>
 
+                {/* Estimated Value Visibility */}
+                <Box
+                  p={3}
+                  bg="gray.50"
+                  borderRadius="lg"
+                  borderLeft="3px solid"
+                  borderLeftColor={formData.show_estimated_value !== false ? 'purple.300' : 'gray.300'}
+                >
+                  <HStack justify="space-between" align="center" gap={3}>
+                    <Box textAlign="left" minW={0}>
+                      <Text fontSize="xs" fontWeight="medium" color="gray.600">
+                        Estimated Value (Market Range)
+                      </Text>
+                      <Text fontSize="10px" color="gray.500">
+                        Choose if other users can see this estimate.
+                      </Text>
+                      {formData.show_estimated_value !== false ? (
+                        <Text fontSize="sm" color="gray.800" fontWeight="semibold" mt={1}>
+                          {formatEstimatedValueRange(formData.estimated_value_min, formData.estimated_value_max) || 'No estimate available'}
+                        </Text>
+                      ) : (
+                        <Text fontSize="sm" color="gray.600" fontWeight="semibold" mt={1}>
+                          Hidden from product viewers
+                        </Text>
+                      )}
+                    </Box>
+                    <HStack spacing={0} borderWidth="1px" borderColor="gray.200" borderRadius="md" overflow="hidden" flexShrink={0}>
+                      <Button
+                        type="button"
+                        size="xs"
+                        borderRadius={0}
+                        colorScheme={formData.show_estimated_value !== false ? 'green' : 'gray'}
+                        variant={formData.show_estimated_value !== false ? 'solid' : 'ghost'}
+                        onClick={() => handleInputChange('show_estimated_value', true)}
+                      >
+                        On
+                      </Button>
+                      <Button
+                        type="button"
+                        size="xs"
+                        borderRadius={0}
+                        colorScheme={formData.show_estimated_value === false ? 'red' : 'gray'}
+                        variant={formData.show_estimated_value === false ? 'solid' : 'ghost'}
+                        onClick={() => handleInputChange('show_estimated_value', false)}
+                      >
+                        Off
+                      </Button>
+                    </HStack>
+                  </HStack>
+                </Box>
+
                 {/* Category & Condition */}
                 <Grid templateColumns={{ base: '1fr', md: '1fr 1fr' }} gap={{ base: 3, md: 4 }} w="full">
                   <FormControl>
@@ -571,7 +636,7 @@ const EditProduct: React.FC = () => {
                 <Box bg="yellow.50" p={3} borderRadius="md" borderWidth="1px" borderColor="yellow.200">
                   <FormControl>
                     <FormLabel fontSize="xs" fontWeight="bold" color="yellow.800" mb={2}>
-                      📦 How would you like buyers to collect this item?
+                      📦 How would you like other users to collect this item?
                     </FormLabel>
                     <VStack align="stretch" spacing={2}>
                       {/* Option 1: Use Current Location */}
@@ -604,7 +669,7 @@ const EditProduct: React.FC = () => {
                             useCurrentLocation()
                           }}>
                             <Text fontWeight="600" fontSize="xs">✓ Use My Current Location</Text>
-                            <Text fontSize="9px" color="gray.600">Buyers pick up from your detected location</Text>
+                            <Text fontSize="9px" color="gray.600">Other users pick up from your detected location</Text>
                           </VStack>
                           {detectingLocation && <Spinner size="sm" />}
                         </HStack>
