@@ -1890,7 +1890,7 @@ func (h *ProductHandler) GetProduct(c *fiber.Ctx) error {
 	productID, parseErr := strconv.Atoi(idOrSlug)
 	if parseErr == nil {
 		// It's a numeric ID
-		err = h.db.QueryRow(`
+		err = h.db.QueryRow(fmt.Sprintf(`
 			SELECT p.id, p.slug, p.title, p.description, p.price, p.image_urls, p.video_url, p.seller_id,
 			       p.premium, p.status, p.allow_buying, p.barter_only, p.location, p.`+"condition"+`,
 			       p.suggested_value, p.category, p.estimated_value_min, p.estimated_value_max, COALESCE(p.show_estimated_value, TRUE), p.`+"`value`"+`, p.wants, p.wanted_categories,
@@ -1898,7 +1898,8 @@ func (h *ProductHandler) GetProduct(c *fiber.Ctx) error {
 			       p.price_reasoning, p.created_at, p.updated_at,
 			       u.name as seller_name, u.profile_picture as seller_profile_picture,
 			       (SELECT COUNT(*) FROM wishlists w WHERE w.product_id = p.id) as want_count,
-			       p.availability_slots, p.availability_type
+			       p.availability_slots, p.availability_type,
+			       %s
 			FROM products p
 			LEFT JOIN users u ON p.seller_id = u.id
 			WHERE p.id = ?
@@ -1910,12 +1911,8 @@ func (h *ProductHandler) GetProduct(c *fiber.Ctx) error {
 			&wantsNull, &wantedCategoriesRaw, &locationTypeNull, &pickupLatNull, &pickupLonNull, &pickupAddressNull, &priceReasoningNull,
 			&product.CreatedAt, &product.UpdatedAt,
 			&sellerNameNull, &sellerProfilePictureNull, &product.WantCount,
-			&availabilitySlotsNull, &availabilityTypeNull)
-			&sellerNameNull, &sellerProfilePictureNull, &product.WantCount, &product.IsSaved)
+			&availabilitySlotsNull, &availabilityTypeNull, &product.IsSaved)
 	} else {
-		err = h.db.QueryRow(`
-			SELECT p.id, p.slug, p.title, p.description, p.price, p.image_urls, p.video_url, p.seller_id,
-			       p.premium, p.status, p.allow_buying, p.barter_only, p.location, p.`+"condition"+`,
 		err = h.db.QueryRow(fmt.Sprintf(`
 			SELECT p.id, p.slug, p.title, p.description, p.price, p.image_urls, p.video_url, p.seller_id, 
 			       p.premium, p.status, p.allow_buying, p.barter_only, p.location, p.`+"condition"+`, 
@@ -1924,7 +1921,8 @@ func (h *ProductHandler) GetProduct(c *fiber.Ctx) error {
 			       p.price_reasoning, p.created_at, p.updated_at,
 			       u.name as seller_name, u.profile_picture as seller_profile_picture,
 			       (SELECT COUNT(*) FROM wishlists w WHERE w.product_id = p.id) as want_count,
-			       p.availability_slots, p.availability_type
+			       p.availability_slots, p.availability_type,
+			       %s
 			FROM products p
 			LEFT JOIN users u ON p.seller_id = u.id
 			WHERE p.slug = ?
@@ -1936,7 +1934,7 @@ func (h *ProductHandler) GetProduct(c *fiber.Ctx) error {
 			&wantsNull, &wantedCategoriesRaw, &locationTypeNull, &pickupLatNull, &pickupLonNull, &pickupAddressNull, &priceReasoningNull,
 			&product.CreatedAt, &product.UpdatedAt,
 			&sellerNameNull, &sellerProfilePictureNull, &product.WantCount,
-			&availabilitySlotsNull, &availabilityTypeNull)
+			&availabilitySlotsNull, &availabilityTypeNull, &product.IsSaved)
 	}
 
 	if err == nil {
