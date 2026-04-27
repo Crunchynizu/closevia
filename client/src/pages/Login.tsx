@@ -34,7 +34,7 @@ import { auth } from '../config/firebase'
 import { clearStoredAuth, getStoredUser } from '../utils/authStorage'
 import { signInWithPopup, GoogleAuthProvider, User as FirebaseUser } from 'firebase/auth'
 
-const MotionBox = motion(Box as any)
+const MotionBox = motion(Box as any) as any
 
 const valuePoints = [
   { icon: FaShieldAlt, label: 'Safe student trades' },
