@@ -8,7 +8,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../contexts/AuthContext'
 import { useNotification } from '../contexts/NotificationContext'
 import { api } from '../services/api'
-import { Product, Trade, TradeCreate, TradeOption } from '../types'
+import { CollectionSetup, Product, Trade, TradeCreate, TradeOption } from '../types'
 import { getFirstImage } from '../utils/imageUtils'
 import { reverseGeocodeToAddress, formatCoordinates } from '../utils/locationUtils'
 import { getProductLocationKey, getProductLocationLabel, getProductRawLocation } from '../utils/productLocation'
@@ -138,6 +138,49 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
 
   const selectedTargetsHaveDifferentLocations = selectedTargetLocationKeys.size > 1
   const selectedTargetsNeedLocationPlan = selectedTargetProducts.length > 1 && selectedTargetsHaveDifferentLocations
+  const fmtTime = (t: string) => {
+    const [h, m] = t.split(':').map(Number)
+    const ampm = h >= 12 ? 'PM' : 'AM'
+    const hour = h % 12 || 12
+    return m === 0 ? `${hour}:00 ${ampm}` : `${hour}:${String(m).padStart(2, '0')} ${ampm}`
+  }
+
+  const collectionSetup = useMemo<CollectionSetup>(() => {
+    const raw = (targetProduct as any)?.collection_setup
+    if (!raw) {
+      return {
+        methods: ['pickup', 'meetup'],
+        pickup: { days: [], time_start: '', time_end: '' },
+        meetup: { locations: [], days: [], time_start: '', time_end: '' },
+      }
+    }
+    try {
+      return typeof raw === 'string' ? JSON.parse(raw) : raw
+    } catch {
+      return {
+        methods: ['pickup', 'meetup'],
+        pickup: { days: [], time_start: '', time_end: '' },
+        meetup: { locations: [], days: [], time_start: '', time_end: '' },
+      }
+    }
+  }, [targetProduct])
+  const enabledCollectionMethods = collectionSetup.methods?.length ? collectionSetup.methods : ['pickup', 'meetup']
+  const pickupEnabled = enabledCollectionMethods.includes('pickup')
+  const meetupEnabled = enabledCollectionMethods.includes('meetup')
+  const dayLabels: Record<string, string> = {
+    weekdays: 'Weekdays',
+    weekends: 'Weekends',
+    monday: 'Mon',
+    tuesday: 'Tue',
+    wednesday: 'Wed',
+    thursday: 'Thu',
+    friday: 'Fri',
+    saturday: 'Sat',
+    sunday: 'Sun',
+  }
+  const formatCollectionDays = (days?: string[]) => (days && days.length > 0 ? days.map(day => dayLabels[day] || day).join(', ') : 'Any day')
+  const formatCollectionWindow = (start?: string, end?: string) => start && end ? `${fmtTime(start)} - ${fmtTime(end)}` : 'Flexible time'
+  const preferredMeetupLocations = (collectionSetup.meetup?.locations || []).map(location => location.trim()).filter(Boolean)
 
   // For meetup: pick the first offered product that has location data
   const myProductForMeetup = useMemo(
@@ -169,6 +212,13 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
     if (meetupChoice === 'custom') return customMeetupAddress.trim() || null
     return null
   }, [meetupChoice, myProductForMeetup, targetProduct, midpointLabel, customMeetupAddress])
+
+  const resolvedMeetupCoords = useMemo(() => {
+    if (meetupChoice === 'my_product') return getProductCoords(myProductForMeetup)
+    if (meetupChoice === 'their_product') return getProductCoords(targetProduct)
+    if (meetupChoice === 'midpoint') return meetupMidpointCoords
+    return null
+  }, [meetupChoice, meetupMidpointCoords, myProductForMeetup, targetProduct])
 
   // OSM map link for selected meetup point
   const meetupMapUrl = useMemo(() => {
@@ -305,6 +355,12 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
       setCommittedProductIds(new Set())
     }
   }, [isOpen, user, targetProductId, editTrade])
+
+  useEffect(() => {
+    if (!isOpen || editTrade || !targetProduct) return
+    if (pickupEnabled && !meetupEnabled) setTradeOption('pickup')
+    if (!pickupEnabled && meetupEnabled) setTradeOption('meetup')
+  }, [editTrade, isOpen, meetupEnabled, pickupEnabled, targetProduct])
 
   useEffect(() => {
     if (!selectedTargetsNeedLocationPlan) {
@@ -583,9 +639,22 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
     try {
       setSubmittingTrade(true)
 
-      const proposedMeetupLocation = tradeOption === 'meetup' ? (resolvedMeetupAddress || '').trim() : ''
-      const proposedMeetupDate = tradeOption === 'meetup' ? meetupDate.trim() : ''
-      const proposedMeetupTime = tradeOption === 'meetup' ? meetupTime.trim() : ''
+      const pickupLocation = getProductRawLocation(targetProduct) || targetProduct?.pickup_address || targetProduct?.location || ''
+      const proposedMeetupLocation = tradeOption === 'pickup'
+        ? pickupLocation.trim()
+        : (resolvedMeetupAddress || '').trim()
+      const proposedMeetupCoords = tradeOption === 'pickup' ? getProductCoords(targetProduct) : resolvedMeetupCoords
+      const proposedMeetupDate = meetupDate.trim()
+      const proposedMeetupTime = meetupTime.trim()
+      if (!proposedMeetupLocation || !proposedMeetupDate || !proposedMeetupTime) {
+        toast({
+          id: "trademodal-logistics-required",
+          title: 'Collection details required',
+          description: 'Choose a collection location, date, and time from the owner setup.',
+          status: 'warning',
+        })
+        return
+      }
 
       // Append meetup preference and proposed time to message so the other trader can see it
       let finalMessage = tradeMessage
@@ -624,8 +693,10 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
           additional_target_product_ids: additionalTargetIds,
         }),
         ...(proposedMeetupLocation && { meetup_location: proposedMeetupLocation }),
+        ...(proposedMeetupLocation && { meetup_label: proposedMeetupLocation }),
         ...(proposedMeetupDate && { meetup_date: proposedMeetupDate }),
         ...(proposedMeetupTime && { meetup_time: proposedMeetupTime }),
+        ...(proposedMeetupCoords && { meetup_lat: proposedMeetupCoords.lat, meetup_lng: proposedMeetupCoords.lng }),
         ...(selectedSlotId && { selected_availability_slot_id: selectedSlotId }),
       }
       if (isEditMode && editTrade?.id) {
@@ -638,8 +709,10 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
           meeting_type: tradeOption === 'pickup' ? 'pickup' : 'meetup',
           payment_method: editTrade.payment_method,
           ...(proposedMeetupLocation && { meetup_location: proposedMeetupLocation }),
+          ...(proposedMeetupLocation && { meetup_label: proposedMeetupLocation }),
           ...(proposedMeetupDate && { meetup_date: proposedMeetupDate }),
           ...(proposedMeetupTime && { meetup_time: proposedMeetupTime }),
+          ...(proposedMeetupCoords && { meetup_lat: proposedMeetupCoords.lat, meetup_lng: proposedMeetupCoords.lng }),
           ...(selectedSlotId && { selected_availability_slot_id: selectedSlotId }),
         })
       } else {
@@ -675,7 +748,7 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
     }
   }
 
-  const canConfirm = selectedOfferIds.length > 0 && !!tradeOption && (!selectedTargetsNeedLocationPlan || locationPlanAcknowledged) && (selectedTargetProducts.length === 0 || scheduleAgreed)
+  const canConfirm = selectedOfferIds.length > 0 && !!tradeOption && !!meetupDate && !!meetupTime && (tradeOption === 'pickup' || !!resolvedMeetupAddress) && (!selectedTargetsNeedLocationPlan || locationPlanAcknowledged) && (selectedTargetProducts.length === 0 || scheduleAgreed)
   const mobileSteps = ['Trading For', 'My Offered Items', 'Trade Details', 'Review']
 
   const selectedSummary = selectedProducts.length > 0 ? (
@@ -856,9 +929,24 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
       {isTargetLoading ? <Box p={2.5} bg="gray.50" borderWidth="1px" borderColor={borderColor} borderRadius="md" mb={3}><HStack spacing={2}><Spinner size="sm" /><Text fontSize="10px" color={mutedTextColor}>Loading trade methods...</Text></HStack></Box> : (
         <>
           <HStack spacing={2} mb={3} align="stretch">
-            <Button flex={1} size="sm" minH="44px" variant={tradeOption === 'pickup' ? 'solid' : 'outline'} bg={tradeOption === 'pickup' ? '#E67E22' : 'transparent'} color={tradeOption === 'pickup' ? 'white' : 'inherit'} borderColor={tradeOption === 'pickup' ? '#E67E22' : borderColor} _hover={{ bg: tradeOption === 'pickup' ? '#D35400' : undefined }} onClick={() => setTradeOption('pickup')} leftIcon={<Icon as={FaMapMarkerAlt} boxSize={4} />} fontSize="12px" fontWeight="700" isDisabled={!hasFixedLocation} title={!hasFixedLocation ? 'Pickup unavailable - trader has no fixed location' : undefined}>Pickup</Button>
-            <Button flex={1} size="sm" minH="44px" variant={tradeOption === 'meetup' ? 'solid' : 'outline'} bg={tradeOption === 'meetup' ? selectedBorder : 'transparent'} color={tradeOption === 'meetup' ? 'white' : 'inherit'} borderColor={tradeOption === 'meetup' ? selectedBorder : borderColor} _hover={{ bg: tradeOption === 'meetup' ? '#158A63' : undefined }} onClick={() => setTradeOption('meetup')} leftIcon={<Icon as={FaHandshake} boxSize={4} />} fontSize="12px" fontWeight="700">Meetup</Button>
+            <Button flex={1} size="sm" minH="44px" variant={tradeOption === 'pickup' ? 'solid' : 'outline'} bg={tradeOption === 'pickup' ? '#E67E22' : 'transparent'} color={tradeOption === 'pickup' ? 'white' : 'inherit'} borderColor={tradeOption === 'pickup' ? '#E67E22' : borderColor} _hover={{ bg: tradeOption === 'pickup' ? '#D35400' : undefined }} onClick={() => setTradeOption('pickup')} leftIcon={<Icon as={FaMapMarkerAlt} boxSize={4} />} fontSize="12px" fontWeight="700" isDisabled={!pickupEnabled || !hasFixedLocation} title={!pickupEnabled ? 'Pickup is not enabled for this product' : !hasFixedLocation ? 'Pickup unavailable - trader has no fixed location' : undefined}>Pickup</Button>
+            <Button flex={1} size="sm" minH="44px" variant={tradeOption === 'meetup' ? 'solid' : 'outline'} bg={tradeOption === 'meetup' ? selectedBorder : 'transparent'} color={tradeOption === 'meetup' ? 'white' : 'inherit'} borderColor={tradeOption === 'meetup' ? selectedBorder : borderColor} _hover={{ bg: tradeOption === 'meetup' ? '#158A63' : undefined }} onClick={() => setTradeOption('meetup')} leftIcon={<Icon as={FaHandshake} boxSize={4} />} fontSize="12px" fontWeight="700" isDisabled={!meetupEnabled}>Meetup</Button>
           </HStack>
+          <Box p={2.5} bg="gray.50" borderWidth="1px" borderColor="gray.200" borderRadius="md" mb={3}>
+            <Text fontSize="10px" fontWeight="800" color="gray.600" textTransform="uppercase" mb={1.5}>Owner Collection Setup</Text>
+            <VStack align="stretch" spacing={1}>
+              {pickupEnabled && (
+                <Text fontSize="10px" color="gray.700">
+                  <Text as="span" fontWeight="700">Pickup:</Text> {formatCollectionDays(collectionSetup.pickup?.days)} · {formatCollectionWindow(collectionSetup.pickup?.time_start, collectionSetup.pickup?.time_end)}
+                </Text>
+              )}
+              {meetupEnabled && (
+                <Text fontSize="10px" color="gray.700">
+                  <Text as="span" fontWeight="700">Meetup:</Text> {preferredMeetupLocations.length > 0 ? preferredMeetupLocations.join(', ') : 'No preferred spots'} · {formatCollectionDays(collectionSetup.meetup?.days)} · {formatCollectionWindow(collectionSetup.meetup?.time_start, collectionSetup.meetup?.time_end)}
+                </Text>
+              )}
+            </VStack>
+          </Box>
           {tradeOption === 'meetup' && (
             <VStack spacing={2.5} align="stretch" mb={3}>
               {/* Header */}
@@ -872,6 +960,23 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
 
               {/* Location option cards */}
               <VStack spacing={1.5} align="stretch">
+                {preferredMeetupLocations.map((location) => (
+                  <HStack
+                    key={`owner-meetup-${location}`}
+                    p={2.5} bg={meetupChoice === 'custom' && customMeetupAddress === location ? 'teal.50' : 'white'}
+                    borderWidth={meetupChoice === 'custom' && customMeetupAddress === location ? '2px' : '1px'}
+                    borderColor={meetupChoice === 'custom' && customMeetupAddress === location ? 'teal.400' : borderColor}
+                    borderRadius="md" spacing={2} align="center" cursor="pointer" w="full"
+                    onClick={() => { setMeetupChoice('custom'); setCustomMeetupAddress(location) }} role="button"
+                  >
+                    <Icon as={FaMapMarkerAlt} color="teal.500" boxSize={3} flexShrink={0} />
+                    <VStack spacing={0} align="start" flex={1} minW={0}>
+                      <Text fontSize="10px" fontWeight="700" color="gray.800">Owner preferred location</Text>
+                      <Text fontSize="9px" color="gray.500" noOfLines={1}>{location}</Text>
+                    </VStack>
+                    {meetupChoice === 'custom' && customMeetupAddress === location && <Icon as={FaCheckCircle} color="teal.500" boxSize={3} flexShrink={0} />}
+                  </HStack>
+                ))}
                 {/* Near my item */}
                 {getProductLocationLabel(myProductForMeetup) && (
                   <HStack
@@ -883,7 +988,7 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
                   >
                     <Icon as={FaBoxOpen} color="green.500" boxSize={3} flexShrink={0} />
                     <VStack spacing={0} align="start" flex={1} minW={0}>
-                      <Text fontSize="10px" fontWeight="700" color="gray.800">Near my item</Text>
+                      <Text fontSize="10px" fontWeight="700" color="gray.800">Suggested by trader</Text>
                       <Text fontSize="9px" color="gray.500" noOfLines={1}>{getProductLocationLabel(myProductForMeetup)}</Text>
                     </VStack>
                     {meetupChoice === 'my_product' && <Icon as={FaCheckCircle} color="green.500" boxSize={3} flexShrink={0} />}
@@ -901,7 +1006,7 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
                   >
                     <Icon as={FaMapMarkerAlt} color="blue.500" boxSize={3} flexShrink={0} />
                     <VStack spacing={0} align="start" flex={1} minW={0}>
-                      <Text fontSize="10px" fontWeight="700" color="gray.800">Near their item</Text>
+                      <Text fontSize="10px" fontWeight="700" color="gray.800">Suggested by trader</Text>
                       <Text fontSize="9px" color="gray.500" noOfLines={1}>{getProductLocationLabel(targetProduct)}</Text>
                     </VStack>
                     {meetupChoice === 'their_product' && <Icon as={FaCheckCircle} color="blue.500" boxSize={3} flexShrink={0} />}
@@ -919,7 +1024,7 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
                   >
                     <Icon as={FaLocationArrow} color="purple.500" boxSize={3} flexShrink={0} />
                     <VStack spacing={0} align="start" flex={1} minW={0}>
-                      <Text fontSize="10px" fontWeight="700" color="gray.800">Suggested midpoint</Text>
+                      <Text fontSize="10px" fontWeight="700" color="gray.800">Suggested by trader</Text>
                       <Text fontSize="9px" color="gray.500" noOfLines={1}>
                         {loadingMidpoint ? 'Calculating…' : midpointLabel || 'Between both product locations'}
                       </Text>
@@ -936,9 +1041,9 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
                   borderRadius="md" spacing={2} align="center" cursor="pointer" w="full"
                   onClick={() => setMeetupChoice('custom')} role="button"
                 >
-                  <Icon as={FaTruck} color="orange.500" boxSize={3} flexShrink={0} />
-                  <VStack spacing={0} align="start" flex={1} minW={0}>
-                    <Text fontSize="10px" fontWeight="700" color="gray.800">Choose custom location</Text>
+                    <Icon as={FaTruck} color="orange.500" boxSize={3} flexShrink={0} />
+                    <VStack spacing={0} align="start" flex={1} minW={0}>
+                    <Text fontSize="10px" fontWeight="700" color="gray.800">Suggested by trader</Text>
                     <Text fontSize="9px" color="gray.500">Mall, school, terminal, or landmark</Text>
                   </VStack>
                   {meetupChoice === 'custom' && <Icon as={FaCheckCircle} color="orange.500" boxSize={3} flexShrink={0} />}
@@ -1078,6 +1183,30 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
                   </Text>
                 </Box>
               </Alert>
+              <Box p={2.5} bg="orange.50" borderWidth="1px" borderColor="orange.100" borderRadius="md">
+                <Text fontSize="10px" fontWeight="700" color="orange.800" mb={1}>
+                  Available: {formatCollectionDays(collectionSetup.pickup?.days)} · {formatCollectionWindow(collectionSetup.pickup?.time_start, collectionSetup.pickup?.time_end)}
+                </Text>
+                <HStack spacing={2}>
+                  <Input
+                    type="date"
+                    value={meetupDate}
+                    onChange={(e) => setMeetupDate(e.target.value)}
+                    fontSize="11px"
+                    size="sm"
+                    bg="white"
+                    min={new Date().toISOString().split('T')[0]}
+                  />
+                  <Input
+                    type="time"
+                    value={meetupTime}
+                    onChange={(e) => setMeetupTime(e.target.value)}
+                    fontSize="11px"
+                    size="sm"
+                    bg="white"
+                  />
+                </HStack>
+              </Box>
               <Checkbox size="md" colorScheme="orange" isChecked={pickupAcknowledged} onChange={(e) => setPickupAcknowledged(e.target.checked)}>
                 <Text fontSize="11px" color="gray.700">I understand and I'm willing to go to the pickup location.</Text>
               </Checkbox>
@@ -1090,13 +1219,6 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
   )
 
   // Helper: format a time string "HH:MM" → "3:00 PM"
-  const fmtTime = (t: string) => {
-    const [h, m] = t.split(':').map(Number)
-    const ampm = h >= 12 ? 'PM' : 'AM'
-    const hour = h % 12 || 12
-    return m === 0 ? `${hour}:00 ${ampm}` : `${hour}:${String(m).padStart(2, '0')} ${ampm}`
-  }
-
   const locationSection = selectedTargetProducts.length > 0 ? (
     <Box borderWidth="1px" borderColor={selectedTargetsNeedLocationPlan ? 'orange.200' : 'gray.200'} borderRadius="lg" overflow="hidden">
       {/* Header */}

@@ -61,7 +61,7 @@ import {
   FiClock,
   FiPackage,
 } from 'react-icons/fi'
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
+import { Circle, MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
 
@@ -104,6 +104,21 @@ const ModalMapFix = () => {
     return () => timers.forEach(t => clearTimeout(t))
   }, [map])
   return null
+}
+
+const MEETUP_CONFIRM_RADIUS_M = 100
+const MAX_GPS_ACCURACY_M = 100
+
+const calculateDistanceMeters = (lat1: number, lng1: number, lat2: number, lng2: number) => {
+  const toRad = (value: number) => value * Math.PI / 180
+  const earthRadiusM = 6371000
+  const dLat = toRad(lat2 - lat1)
+  const dLng = toRad(lng2 - lng1)
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2)
+  return earthRadiusM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
 import { Trade, Product, TradeOption, Delivery } from '../types'
@@ -1159,6 +1174,10 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
   const [sellerMeetupLocation, setSellerMeetupLocation] = useState<string | null>(null)
   const [sellerMeetupDate, setSellerMeetupDate] = useState<string | null>(null)
   const [sellerMeetupTime, setSellerMeetupTime] = useState<string | null>(null)
+  const [meetupPoint, setMeetupPoint] = useState<{ lat: number; lng: number } | null>(null)
+  const [userGeoPoint, setUserGeoPoint] = useState<{ lat: number; lng: number; accuracy: number } | null>(null)
+  const [geoChecking, setGeoChecking] = useState(false)
+  const [geoMessage, setGeoMessage] = useState<string | null>(null)
   const [confirmingMeetupDone, setConfirmingMeetupDone] = useState(false)
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false)
   const [showCancelDialog, setShowCancelDialog] = useState(false) // New: cancel trade confirmation
@@ -1202,6 +1221,18 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
     }
   }, [isOpen, tabIndex])
 
+  useEffect(() => {
+    const lat = Number((trade as any)?.meetup_lat)
+    const lng = Number((trade as any)?.meetup_lng)
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      setMeetupPoint({ lat, lng })
+    } else {
+      setMeetupPoint(null)
+    }
+    setUserGeoPoint(null)
+    setGeoMessage(null)
+  }, [trade?.id, (trade as any)?.meetup_lat, (trade as any)?.meetup_lng])
+
   // Auto-confirm COD payment when delivery type is selected
   useEffect(() => {
     if (deliveryState.deliveryType && !deliveryState.paymentConfirmed) {
@@ -1218,6 +1249,93 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
   const previousMessageCountRef = useRef(0)  // Track message count to detect new messages
   const messagesRequestSeqRef = useRef(0)
   const shownMessageNotificationsRef = useRef<Set<string>>(new Set())  // Track which message IDs have shown notifications
+
+  const meetupDistanceM = useMemo(() => {
+    if (!meetupPoint || !userGeoPoint) return null
+    return calculateDistanceMeters(userGeoPoint.lat, userGeoPoint.lng, meetupPoint.lat, meetupPoint.lng)
+  }, [meetupPoint, userGeoPoint])
+
+  const meetupLocationVerified = !!userGeoPoint && !!meetupPoint && userGeoPoint.accuracy <= MAX_GPS_ACCURACY_M && meetupDistanceM !== null && meetupDistanceM <= MEETUP_CONFIRM_RADIUS_M
+  const meetupDisplayLabel = (trade as any)?.meetup_label || trade?.meetup_location || buyerMeetupLocation || sellerMeetupLocation || 'Agreed meetup point'
+  const resolveMeetupPointFromLabel = async () => {
+    if (meetupPoint) return meetupPoint
+    const label = meetupDisplayLabel === 'Agreed meetup point' ? '' : meetupDisplayLabel.trim()
+    if (!label) {
+      setGeoMessage('Meetup location has not been set yet.')
+      return null
+    }
+    try {
+      const response = await api.get('/api/places/search', { params: { q: label } })
+      const places = response.data?.data || []
+      const first = Array.isArray(places) ? places[0] : null
+      const lat = Number(first?.latitude)
+      const lng = Number(first?.longitude)
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        const point = { lat, lng }
+        setMeetupPoint(point)
+        return point
+      }
+    } catch (error) {
+      console.warn('Failed to resolve meetup point from label:', error)
+    }
+    setGeoMessage('Meetup location is missing. You cannot confirm until a mapped meetup point is set.')
+    return null
+  }
+
+  const checkMeetupLocation = async (): Promise<{ lat: number; lng: number; accuracy: number } | null> => {
+    const activeMeetupPoint = meetupPoint || await resolveMeetupPointFromLabel()
+    if (!activeMeetupPoint) {
+      return null
+    }
+    if (!navigator.geolocation) {
+      setGeoMessage('Location access is required to confirm meetup.')
+      return null
+    }
+
+    setGeoChecking(true)
+    setGeoMessage(null)
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 12000,
+          maximumAge: 0,
+        })
+      })
+      const point = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+      }
+      setUserGeoPoint(point)
+      const distance = calculateDistanceMeters(point.lat, point.lng, activeMeetupPoint.lat, activeMeetupPoint.lng)
+      if (point.accuracy > MAX_GPS_ACCURACY_M) {
+        setGeoMessage('We could not verify your location accurately. Please try again.')
+      } else if (distance > MEETUP_CONFIRM_RADIUS_M) {
+        setGeoMessage('You must be near the meetup point to confirm that you met.')
+      } else {
+        setGeoMessage(`Location verified. You are within ${Math.round(distance)}m of the meetup point.`)
+      }
+      return point
+    } catch {
+      setGeoMessage('Location access is required to confirm meetup.')
+      return null
+    } finally {
+      setGeoChecking(false)
+    }
+  }
+
+  const openGoogleMapsDirections = async () => {
+    const activeMeetupPoint = meetupPoint || await resolveMeetupPointFromLabel()
+    if (!activeMeetupPoint) {
+      return
+    }
+    const point = userGeoPoint || await checkMeetupLocation()
+    const url = point
+      ? `https://www.google.com/maps/dir/?api=1&origin=${point.lat},${point.lng}&destination=${activeMeetupPoint.lat},${activeMeetupPoint.lng}&travelmode=walking`
+      : `https://www.google.com/maps/search/?api=1&query=${activeMeetupPoint.lat},${activeMeetupPoint.lng}`
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
   const cardBg = useColorModeValue('white', 'gray.800')
   const borderColor = useColorModeValue('gray.200', 'gray.700')
   const locationTextColor = useColorModeValue('gray.800', 'gray.100')
@@ -1245,6 +1363,12 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
   const bothMetConfirmed = buyerMetConfirmed && sellerMetConfirmed
   const userMetConfirmed = (isUserBuyer && buyerMetConfirmed) || (isUserSeller && sellerMetConfirmed)
   const currentUserMeetupConfirmed = (isUserBuyer && buyerMeetupConfirmed) || (isUserSeller && sellerMeetupConfirmed)
+
+  useEffect(() => {
+    if (!isOpen || !meetupAgreed || bothMetConfirmed || userMetConfirmed) return
+    void checkMeetupLocation()
+  }, [isOpen, meetupAgreed, bothMetConfirmed, userMetConfirmed, meetupPoint?.lat, meetupPoint?.lng])
+
   const incomingMeetupProposal = useMemo(() => {
     if (meetupAgreed) return null
     // Seller always sees buyer's proposal (from trade creation or separate confirm_meetup action)
@@ -1963,6 +2087,11 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
       // Set met confirmation status
       setBuyerMetConfirmed(!!tradeData?.buyer_met)
       setSellerMetConfirmed(!!tradeData?.seller_met)
+      const latestMeetupLat = Number(tradeData?.meetup_lat)
+      const latestMeetupLng = Number(tradeData?.meetup_lng)
+      if (Number.isFinite(latestMeetupLat) && Number.isFinite(latestMeetupLng)) {
+        setMeetupPoint({ lat: latestMeetupLat, lng: latestMeetupLng })
+      }
 
       // Also set selected location/time if it exists (for display)
       if (tradeData?.meetup_location) {
@@ -2506,8 +2635,17 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
 
     try {
       setConfirmingMeetupDone(true)
+      const point = await checkMeetupLocation()
+      if (!point) return
+      const distance = meetupPoint ? calculateDistanceMeters(point.lat, point.lng, meetupPoint.lat, meetupPoint.lng) : Number.POSITIVE_INFINITY
+      if (!meetupPoint || point.accuracy > MAX_GPS_ACCURACY_M || distance > MEETUP_CONFIRM_RADIUS_M) {
+        return
+      }
       await api.put(`/api/trades/${trade.id}`, {
         action: 'confirm_meetup_done',
+        user_lat: point.lat,
+        user_lng: point.lng,
+        location_accuracy_m: point.accuracy,
       })
 
       if (isUserBuyer) {
@@ -4452,16 +4590,68 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
                                         </Text>
                                       </Box>
 
+                                      <Box p={3} bg="gray.50" borderWidth="1px" borderColor="gray.200" borderRadius="md">
+                                        <HStack justify="space-between" align="start" mb={2}>
+                                          <VStack align="start" spacing={0}>
+                                            <Text fontSize="xs" fontWeight="700" color="gray.700">Meetup Location</Text>
+                                            <Text fontSize="xs" color="gray.600">You are heading to the agreed meetup point.</Text>
+                                            <Text fontSize="xs" color="gray.600">Both users must meet at this same location.</Text>
+                                            <Text fontSize="xs" color="gray.800" fontWeight="700" noOfLines={1}>{meetupDisplayLabel}</Text>
+                                            <Text fontSize="xs" color={meetupLocationVerified ? 'green.600' : 'orange.600'}>
+                                              {geoMessage || (meetupPoint ? 'Check your GPS location before confirming.' : 'Meetup location has not been set yet.')}
+                                            </Text>
+                                            {meetupDistanceM !== null && (
+                                              <Text fontSize="2xs" color="gray.500">
+                                                Distance: {Math.round(meetupDistanceM)}m · Accuracy: ±{Math.round(userGeoPoint?.accuracy || 0)}m
+                                              </Text>
+                                            )}
+                                          </VStack>
+                                          <VStack spacing={1} align="stretch">
+                                            <Button size="xs" variant="outline" colorScheme="blue" onClick={checkMeetupLocation} isLoading={geoChecking}>
+                                              Check Location
+                                            </Button>
+                                            <Button size="xs" colorScheme="green" onClick={openGoogleMapsDirections}>
+                                              Open in Google Maps
+                                            </Button>
+                                          </VStack>
+                                        </HStack>
+                                        {meetupPoint && (
+                                          <Box h="190px" borderRadius="md" overflow="hidden" borderWidth="1px" borderColor="gray.200">
+                                            <MapContainer center={[meetupPoint.lat, meetupPoint.lng]} zoom={17} style={{ height: '100%', width: '100%' }} scrollWheelZoom={false}>
+                                              <ModalMapFix />
+                                              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                                              <Circle center={[meetupPoint.lat, meetupPoint.lng]} radius={MEETUP_CONFIRM_RADIUS_M} pathOptions={{ color: '#16A34A', fillColor: '#BBF7D0', fillOpacity: 0.25 }} />
+                                              {userGeoPoint && (
+                                                <Polyline positions={[[userGeoPoint.lat, userGeoPoint.lng], [meetupPoint.lat, meetupPoint.lng]]} pathOptions={{ color: '#2563EB', weight: 4, opacity: 0.8 }} />
+                                              )}
+                                              <Marker position={[meetupPoint.lat, meetupPoint.lng]}>
+                                                <Popup>Meetup point</Popup>
+                                              </Marker>
+                                              {userGeoPoint && (
+                                                <Marker position={[userGeoPoint.lat, userGeoPoint.lng]}>
+                                                  <Popup>Your current location</Popup>
+                                                </Marker>
+                                              )}
+                                            </MapContainer>
+                                          </Box>
+                                        )}
+                                        {!userGeoPoint && meetupPoint && (
+                                          <Text fontSize="xs" color="gray.500" mt={2}>
+                                            Allow location access to see your route.
+                                          </Text>
+                                        )}
+                                      </Box>
+
                                       <Button
                                         colorScheme="green"
                                         size={["sm", "md"]}
                                         onClick={confirmMeetupDone}
-                                        isLoading={confirmingMeetupDone}
+                                        isLoading={confirmingMeetupDone || geoChecking}
                                         leftIcon={<FaCheckCircle />}
                                         w="full"
-                                        isDisabled={userMetConfirmed}
+                                        isDisabled={userMetConfirmed || !meetupLocationVerified}
                                       >
-                                        {userMetConfirmed ? 'Confirmed G��' : 'Confirm You Met'}
+                                        {userMetConfirmed ? 'Confirmed' : 'Confirm You Met'}
                                       </Button>
 
                                       {userMetConfirmed && (

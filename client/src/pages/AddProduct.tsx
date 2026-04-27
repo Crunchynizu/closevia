@@ -88,6 +88,23 @@ export interface ProductFormData {
   // Availability schedule
   availability_slots?: AvailabilitySlot[]
   availability_type?: 'flexible' | 'strict'
+  collection_setup: {
+    methods: Array<'pickup' | 'meetup'>
+    pickup: {
+      days: string[]
+      time_start: string
+      time_end: string
+      notes: string
+    }
+    meetup: {
+      locations: string[]
+      days: string[]
+      time_start: string
+      time_end: string
+      distance_km: string
+      notes: string
+    }
+  }
 }
 
 import { useAuth } from '../contexts/AuthContext'
@@ -311,12 +328,51 @@ const AddProduct: React.FC = () => {
     desired_product: '',
     availability_slots: [],
     availability_type: 'flexible',
+    collection_setup: {
+      methods: ['pickup'],
+      pickup: { days: ['weekdays'], time_start: '09:00', time_end: '17:00', notes: '' },
+      meetup: { locations: [''], days: ['weekends'], time_start: '09:00', time_end: '17:00', distance_km: '', notes: '' },
+    },
   })
 
   // Availability slot editor state
   const [avNewDate, setAvNewDate] = useState('')
   const [avNewStart, setAvNewStart] = useState('')
   const [avNewEnd, setAvNewEnd] = useState('')
+  const dayOptions = [
+    { value: 'weekdays', label: 'Weekdays' },
+    { value: 'weekends', label: 'Weekends' },
+    { value: 'monday', label: 'Mon' },
+    { value: 'tuesday', label: 'Tue' },
+    { value: 'wednesday', label: 'Wed' },
+    { value: 'thursday', label: 'Thu' },
+    { value: 'friday', label: 'Fri' },
+    { value: 'saturday', label: 'Sat' },
+    { value: 'sunday', label: 'Sun' },
+  ]
+
+  const toggleCollectionMethod = (method: 'pickup' | 'meetup') => {
+    const current = formData.collection_setup.methods
+    const next = current.includes(method)
+      ? current.filter(m => m !== method)
+      : [...current, method]
+    handleField('collection_setup', {
+      ...formData.collection_setup,
+      methods: next.length > 0 ? next : [method],
+    })
+  }
+
+  const toggleCollectionDay = (section: 'pickup' | 'meetup', day: string) => {
+    const current = formData.collection_setup[section].days || []
+    const next = current.includes(day) ? current.filter(d => d !== day) : [...current, day]
+    handleField('collection_setup', {
+      ...formData.collection_setup,
+      [section]: {
+        ...formData.collection_setup[section],
+        days: next,
+      },
+    })
+  }
 
   const [uploadedImages, setUploadedImages] = useState<File[]>([])
   const [imagePreviewUrls, setImagePreviewUrls] = useState<string[]>([])
@@ -1058,6 +1114,7 @@ const AddProduct: React.FC = () => {
         fd.append('availability_slots', JSON.stringify(formData.availability_slots))
       }
       fd.append('availability_type', formData.availability_type || 'flexible')
+      fd.append('collection_setup', JSON.stringify(formData.collection_setup))
       
       // Add organization IDs for tagging
       if (selectedOrganizationIds.length > 0) {
@@ -2212,6 +2269,89 @@ const AddProduct: React.FC = () => {
               <FormHelperText fontSize="10px" color="gray.500">Your asking price in PHP, whole pesos only.</FormHelperText>
             )}
           </FormControl>
+
+          <Box pt={2} borderTopWidth="1px" borderTopColor="gray.100">
+            <HStack justify="space-between" mb={2}>
+              <HStack spacing={2}>
+                <Text fontSize="xs" fontWeight="bold" color="gray.700">Collection Setup</Text>
+                <Badge colorScheme="green" fontSize="8px">Required</Badge>
+              </HStack>
+            </HStack>
+            <Text fontSize="10px" color="gray.500" mb={2}>
+              Set the logistics buyers choose from when they send an offer.
+            </Text>
+
+            <HStack spacing={2} mb={3}>
+              {(['pickup', 'meetup'] as const).map(method => (
+                <Button
+                  key={method}
+                  size="sm"
+                  flex={1}
+                  fontSize="11px"
+                  colorScheme={formData.collection_setup.methods.includes(method) ? (method === 'pickup' ? 'orange' : 'teal') : 'gray'}
+                  variant={formData.collection_setup.methods.includes(method) ? 'solid' : 'outline'}
+                  onClick={() => toggleCollectionMethod(method)}
+                >
+                  {method === 'pickup' ? 'Pickup' : 'Meetup'}
+                </Button>
+              ))}
+            </HStack>
+
+            {formData.collection_setup.methods.includes('pickup') && (
+              <VStack align="stretch" spacing={2} p={2} bg="orange.50" borderRadius="md" borderWidth="1px" borderColor="orange.100" mb={3}>
+                <Text fontSize="11px" fontWeight="700" color="orange.800">Pickup</Text>
+                <Text fontSize="10px" color="orange.700">Uses this product's saved location. Do not enter a private/home label.</Text>
+                <Wrap spacing={1}>
+                  {dayOptions.map(day => (
+                    <WrapItem key={`pickup-${day.value}`}>
+                      <Button size="xs" fontSize="9px" h="22px" variant={formData.collection_setup.pickup.days.includes(day.value) ? 'solid' : 'outline'} colorScheme="orange" onClick={() => toggleCollectionDay('pickup', day.value)}>
+                        {day.label}
+                      </Button>
+                    </WrapItem>
+                  ))}
+                </Wrap>
+                <HStack>
+                  <Input type="time" size="sm" bg="white" value={formData.collection_setup.pickup.time_start} onChange={(e) => handleField('collection_setup', { ...formData.collection_setup, pickup: { ...formData.collection_setup.pickup, time_start: e.target.value } })} />
+                  <Text fontSize="10px" color="gray.500">to</Text>
+                  <Input type="time" size="sm" bg="white" value={formData.collection_setup.pickup.time_end} onChange={(e) => handleField('collection_setup', { ...formData.collection_setup, pickup: { ...formData.collection_setup.pickup, time_end: e.target.value } })} />
+                </HStack>
+                <Textarea size="sm" bg="white" fontSize="11px" placeholder="Pickup notes (optional)" value={formData.collection_setup.pickup.notes} onChange={(e) => handleField('collection_setup', { ...formData.collection_setup, pickup: { ...formData.collection_setup.pickup, notes: e.target.value } })} />
+              </VStack>
+            )}
+
+            {formData.collection_setup.methods.includes('meetup') && (
+              <VStack align="stretch" spacing={2} p={2} bg="teal.50" borderRadius="md" borderWidth="1px" borderColor="teal.100">
+                <Text fontSize="11px" fontWeight="700" color="teal.800">Meetup</Text>
+                {(formData.collection_setup.meetup.locations || ['']).map((location, index) => (
+                  <HStack key={`meetup-location-${index}`}>
+                    <Input size="sm" bg="white" fontSize="11px" placeholder="Preferred meetup location" value={location} onChange={(e) => {
+                      const locations = [...formData.collection_setup.meetup.locations]
+                      locations[index] = e.target.value
+                      handleField('collection_setup', { ...formData.collection_setup, meetup: { ...formData.collection_setup.meetup, locations } })
+                    }} />
+                    <IconButton aria-label="Remove meetup location" icon={<CloseIcon boxSize={2} />} size="xs" isDisabled={formData.collection_setup.meetup.locations.length <= 1} onClick={() => handleField('collection_setup', { ...formData.collection_setup, meetup: { ...formData.collection_setup.meetup, locations: formData.collection_setup.meetup.locations.filter((_, i) => i !== index) } })} />
+                  </HStack>
+                ))}
+                <Button size="xs" alignSelf="start" leftIcon={<AddIcon boxSize={2} />} onClick={() => handleField('collection_setup', { ...formData.collection_setup, meetup: { ...formData.collection_setup.meetup, locations: [...formData.collection_setup.meetup.locations, ''] } })}>Add location</Button>
+                <Wrap spacing={1}>
+                  {dayOptions.map(day => (
+                    <WrapItem key={`meetup-${day.value}`}>
+                      <Button size="xs" fontSize="9px" h="22px" variant={formData.collection_setup.meetup.days.includes(day.value) ? 'solid' : 'outline'} colorScheme="teal" onClick={() => toggleCollectionDay('meetup', day.value)}>
+                        {day.label}
+                      </Button>
+                    </WrapItem>
+                  ))}
+                </Wrap>
+                <HStack>
+                  <Input type="time" size="sm" bg="white" value={formData.collection_setup.meetup.time_start} onChange={(e) => handleField('collection_setup', { ...formData.collection_setup, meetup: { ...formData.collection_setup.meetup, time_start: e.target.value } })} />
+                  <Text fontSize="10px" color="gray.500">to</Text>
+                  <Input type="time" size="sm" bg="white" value={formData.collection_setup.meetup.time_end} onChange={(e) => handleField('collection_setup', { ...formData.collection_setup, meetup: { ...formData.collection_setup.meetup, time_end: e.target.value } })} />
+                </HStack>
+                <Input size="sm" bg="white" fontSize="11px" placeholder="Distance preference, e.g. within 2km (optional)" value={formData.collection_setup.meetup.distance_km} onChange={(e) => handleField('collection_setup', { ...formData.collection_setup, meetup: { ...formData.collection_setup.meetup, distance_km: e.target.value } })} />
+                <Textarea size="sm" bg="white" fontSize="11px" placeholder="Meetup notes (optional)" value={formData.collection_setup.meetup.notes} onChange={(e) => handleField('collection_setup', { ...formData.collection_setup, meetup: { ...formData.collection_setup.meetup, notes: e.target.value } })} />
+              </VStack>
+            )}
+          </Box>
 
           {/* ──────── AVAILABILITY SCHEDULE ──────── */}
           <Box pt={2} borderTopWidth="1px" borderTopColor="gray.100">

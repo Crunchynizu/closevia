@@ -244,9 +244,10 @@ type Product struct {
 	BoostedAt            *time.Time        `json:"boosted_at,omitempty"`
 	BoostDurationHours   int               `json:"boost_duration_hours,omitempty"`
 	FeaturedOrder        *int              `json:"featured_order,omitempty"`
-	OrganizationTags     []Organization    `json:"organization_tags,omitempty"` // Tagged organizations
+	OrganizationTags     []Organization    `json:"organization_tags,omitempty"`  // Tagged organizations
 	AvailabilitySlots    string            `json:"availability_slots,omitempty"` // JSON array of {id,date,start_time,end_time}
 	AvailabilityType     string            `json:"availability_type,omitempty"`  // "flexible" or "strict"
+	CollectionSetup      string            `json:"collection_setup,omitempty"`   // JSON object for pickup/meetup methods and availability
 }
 
 // ProductCreate represents data for creating a product
@@ -371,18 +372,21 @@ type Trade struct {
 	BuyerPhotoIsCamera  bool   `json:"buyer_photo_is_camera"`
 	SellerPhotoIsCamera bool   `json:"seller_photo_is_camera"`
 	// Meetup-related fields
-	MeetupLocation        string `json:"meetup_location,omitempty"`
-	MeetupTime            string `json:"meetup_time,omitempty"`
-	BuyerMeetupConfirmed  bool   `json:"buyer_meetup_confirmed"`
-	SellerMeetupConfirmed bool   `json:"seller_meetup_confirmed"`
-	BuyerMeetupLocation   string `json:"buyer_meetup_location,omitempty"`
-	BuyerMeetupTime       string `json:"buyer_meetup_time,omitempty"`
-	SellerMeetupLocation  string `json:"seller_meetup_location,omitempty"`
-	SellerMeetupTime      string `json:"seller_meetup_time,omitempty"`
-	BuyerName             string `json:"buyer_name,omitempty"`
-	SellerName            string `json:"seller_name,omitempty"`
-	ProductTitle          string `json:"product_title,omitempty"`
-	ProductImageURL       string `json:"product_image_url,omitempty"`
+	MeetupLocation        string   `json:"meetup_location,omitempty"`
+	MeetupLabel           string   `json:"meetup_label,omitempty"`
+	MeetupTime            string   `json:"meetup_time,omitempty"`
+	MeetupLat             *float64 `json:"meetup_lat,omitempty"`
+	MeetupLng             *float64 `json:"meetup_lng,omitempty"`
+	BuyerMeetupConfirmed  bool     `json:"buyer_meetup_confirmed"`
+	SellerMeetupConfirmed bool     `json:"seller_meetup_confirmed"`
+	BuyerMeetupLocation   string   `json:"buyer_meetup_location,omitempty"`
+	BuyerMeetupTime       string   `json:"buyer_meetup_time,omitempty"`
+	SellerMeetupLocation  string   `json:"seller_meetup_location,omitempty"`
+	SellerMeetupTime      string   `json:"seller_meetup_time,omitempty"`
+	BuyerName             string   `json:"buyer_name,omitempty"`
+	SellerName            string   `json:"seller_name,omitempty"`
+	ProductTitle          string   `json:"product_title,omitempty"`
+	ProductImageURL       string   `json:"product_image_url,omitempty"`
 	// Pickup address of the target (seller's) product, surfaced at trade level
 	// so the pickup UI can show it without relying on trade_items rows.
 	TargetProductPickupAddress string `json:"target_product_pickup_address,omitempty"`
@@ -472,27 +476,38 @@ type TradeCreate struct {
 	PaymentMethod              string   `json:"payment_method,omitempty" validate:"omitempty,oneof=cod upfront"`
 	AdditionalTargetProductIDs []int    `json:"additional_target_product_ids,omitempty" validate:"omitempty,dive,gt=0"`
 	MeetupLocation             string   `json:"meetup_location,omitempty"`
+	MeetupLabel                string   `json:"meetup_label,omitempty"`
 	MeetupDate                 string   `json:"meetup_date,omitempty"`
 	MeetupTime                 string   `json:"meetup_time,omitempty"`
+	MeetupLat                  *float64 `json:"meetup_lat,omitempty"`
+	MeetupLng                  *float64 `json:"meetup_lng,omitempty"`
+	SelectedAvailabilitySlotID string   `json:"selected_availability_slot_id,omitempty"`
 }
 
 // TradeAction represents accept/decline/counter actions
 type TradeAction struct {
-	Action                   string   `json:"action" validate:"required,oneof=accept decline counter edit_offer complete cancel confirm_meetup confirm_meetup_done reset_meetup_selection update_delivery_state request_option_change approve_option_change reject_option_change convert_to_multiway"`
-	OfferedProductIDs        []int    `json:"offered_product_ids,omitempty"`
-	OfferedCashAmount        *float64 `json:"offered_cash_amount,omitempty"`
-	Message                  string   `json:"message,omitempty"`
-	CounterOfferedProductIDs []int    `json:"counter_offered_product_ids,omitempty"`
-	CounterOfferedCashAmount *float64 `json:"counter_offered_cash_amount,omitempty"`
-	TradeOption              string   `json:"trade_option,omitempty" validate:"omitempty,oneof=meetup delivery"`
-	MeetingType              string   `json:"meeting_type,omitempty" validate:"omitempty,oneof=meetup pickup"`
-	MeetupLocation           string   `json:"meetup_location,omitempty"`
-	MeetupTime               string   `json:"meetup_time,omitempty"`
-	MeetupDate               string   `json:"meetup_date,omitempty"`
-	RequestedOption          string   `json:"requested_option,omitempty"`
-	DeliveryAddress          string   `json:"delivery_address,omitempty"`
-	PaymentMethod            string   `json:"payment_method,omitempty"`
-	CancellationReason       string   `json:"cancellation_reason,omitempty"`
+	Action                     string   `json:"action" validate:"required,oneof=accept decline counter edit_offer complete cancel confirm_meetup confirm_meetup_done reset_meetup_selection update_delivery_state request_option_change approve_option_change reject_option_change convert_to_multiway"`
+	OfferedProductIDs          []int    `json:"offered_product_ids,omitempty"`
+	OfferedCashAmount          *float64 `json:"offered_cash_amount,omitempty"`
+	Message                    string   `json:"message,omitempty"`
+	CounterOfferedProductIDs   []int    `json:"counter_offered_product_ids,omitempty"`
+	CounterOfferedCashAmount   *float64 `json:"counter_offered_cash_amount,omitempty"`
+	TradeOption                string   `json:"trade_option,omitempty" validate:"omitempty,oneof=meetup delivery"`
+	MeetingType                string   `json:"meeting_type,omitempty" validate:"omitempty,oneof=meetup pickup"`
+	MeetupLocation             string   `json:"meetup_location,omitempty"`
+	MeetupLabel                string   `json:"meetup_label,omitempty"`
+	MeetupTime                 string   `json:"meetup_time,omitempty"`
+	MeetupDate                 string   `json:"meetup_date,omitempty"`
+	MeetupLat                  *float64 `json:"meetup_lat,omitempty"`
+	MeetupLng                  *float64 `json:"meetup_lng,omitempty"`
+	UserLat                    *float64 `json:"user_lat,omitempty"`
+	UserLng                    *float64 `json:"user_lng,omitempty"`
+	LocationAccuracyM          *float64 `json:"location_accuracy_m,omitempty"`
+	SelectedAvailabilitySlotID string   `json:"selected_availability_slot_id,omitempty"`
+	RequestedOption            string   `json:"requested_option,omitempty"`
+	DeliveryAddress            string   `json:"delivery_address,omitempty"`
+	PaymentMethod              string   `json:"payment_method,omitempty"`
+	CancellationReason         string   `json:"cancellation_reason,omitempty"`
 }
 
 // ChatConversation represents a conversation between a buyer and seller about a product
