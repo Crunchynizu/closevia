@@ -1,20 +1,23 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Box, Heading, VStack, HStack, Text, Badge, Button, Center, useToast, Tabs, TabList, TabPanels, Tab, TabPanel, Select, Image, Link, useColorModeValue, Slide, ScaleFade, Icon, Modal, ModalOverlay, ModalContent, ModalBody, ModalCloseButton, Textarea, VisuallyHidden, SimpleGrid, IconButton, Tooltip, Skeleton } from '@chakra-ui/react'
+import { Box, Heading, VStack, HStack, Text, Badge, Button, useToast, Tabs, TabList, TabPanels, Tab, TabPanel, Select, useColorModeValue, Slide, ScaleFade, Icon, Modal, ModalOverlay, ModalContent, ModalBody, ModalCloseButton, Textarea, VisuallyHidden, SimpleGrid, IconButton, Tooltip, Skeleton } from '@chakra-ui/react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FaHandshake, FaTimes, FaMapMarkerAlt, FaTruck } from 'react-icons/fa'
 import { FiGrid, FiList } from 'react-icons/fi'
 import { api } from '../services/api'
+import { fetchTrades as fetchTradesList } from '../services/tradeService'
 import { Trade, TradeAction } from '../types'
-import { getFirstImage } from '../utils/imageUtils'
 import OfferDetailsModal from '../components/OfferDetailsModal'
 import TradeCompletionModal from '../components/TradeCompletionModal'
 import ViewTradeModal from '../components/ViewTradeModal'
 
+const getErrorMessage = (error: unknown, fallback: string): string => {
+  const apiError = error as { response?: { data?: { error?: string } } }
+  return apiError.response?.data?.error || fallback
+}
+
 const Offers: React.FC = () => {
   const navigate = useNavigate()
-  const [incoming, setIncoming] = useState<Trade[]>([])
-  const [outgoing, setOutgoing] = useState<Trade[]>([])
-  const [loading, setLoading] = useState(true)
   const [sort, setSort] = useState<'newest' | 'oldest'>('newest')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list')
   const [selectedTrade, setSelectedTrade] = useState<Trade | null>(null)
@@ -28,88 +31,50 @@ const Offers: React.FC = () => {
   const [declineFeedback, setDeclineFeedback] = useState('')
   const [activeTab, setActiveTab] = useState(0)
   const [isProcessing, setIsProcessing] = useState(false)
-  const [currentUserId, setCurrentUserId] = useState<number | undefined>()
-  const [productTitles, setProductTitles] = useState<Map<number, string>>(new Map())
+  const [currentUserId] = useState<number | undefined>(() => {
+    const userId = localStorage.getItem('userId')
+    return userId ? parseInt(userId, 10) : undefined
+  })
   const toast = useToast()
+  const queryClient = useQueryClient()
   
-  const bgColor = useColorModeValue('#FEFEFE', 'gray.900')
   const cardBg = useColorModeValue('#FDFDFD', 'gray.800')
   const softAccent = useColorModeValue('#F8F9FA', 'gray.700')
 
-  const fetchAll = async (isBackground = false) => {
-    try {
-      if (!isBackground) setLoading(true)
-      const [incRes, outRes] = await Promise.all([
-        api.get('/api/trades', { params: { direction: 'incoming' } }),
-        api.get('/api/trades', { params: { direction: 'outgoing' } }),
+  const offersQuery = useQuery({
+    queryKey: ['offers', 'trades'],
+    queryFn: async () => {
+      const [incomingTrades, outgoingTrades] = await Promise.all([
+        fetchTradesList({ direction: 'incoming', limit: 100 }),
+        fetchTradesList({ direction: 'outgoing', limit: 100 }),
       ])
-      setIncoming(Array.isArray(incRes.data?.data) ? incRes.data.data : [])
-      setOutgoing(Array.isArray(outRes.data?.data) ? outRes.data.data : [])
-      
-      // Fetch product titles for all trades
-      await fetchProductTitles([...incRes.data?.data || [], ...outRes.data?.data || []])
-    } catch (e: any) {
-      toast({
-        id: "offers-error", title: 'Error', description: e?.response?.data?.error || 'Failed to load offers', status: 'error' })
-    } finally {
-      if (!isBackground) setLoading(false)
-    }
-  }
 
-  const fetchProductTitles = async (trades: Trade[]) => {
-    const productIds = new Set<number>()
-    
-    // Collect all unique product IDs from trades
-    trades.forEach(trade => {
-      if (trade.target_product_id) {
-        productIds.add(trade.target_product_id)
+      return {
+        incoming: incomingTrades,
+        outgoing: outgoingTrades,
       }
-      // Also collect from offered items
-      if (trade.items) {
-        trade.items.forEach((item: any) => {
-          const pid = item.product_id ?? item.productId
-          if (pid) {
-            productIds.add(Number(pid))
-          }
-        })
-      }
-    })
+    },
+    refetchInterval: 30000,
+    staleTime: 30000,
+  })
 
-    // Fetch titles for products we don't have yet
-    const titlesToFetch = Array.from(productIds).filter(id => !productTitles.has(id))
-    
-    if (titlesToFetch.length > 0) {
-      try {
-        const titlePromises = titlesToFetch.map(async (id) => {
-          try {
-            const response = await api.get(`/api/products/${id}`)
-            const title = response.data?.data?.title
-            return { id, title: title || 'Unnamed Item' }
-          } catch {
-            return { id, title: 'Unnamed Item' }
-          }
-        })
-        
-        const results = await Promise.all(titlePromises)
-        const newTitles = new Map(productTitles)
-        results.forEach(({ id, title }) => {
-          newTitles.set(id, title)
-        })
-        setProductTitles(newTitles)
-      } catch (error) {
-        console.error('Failed to fetch product titles:', error)
-      }
-    }
+  const incoming = offersQuery.data?.incoming || []
+  const outgoing = offersQuery.data?.outgoing || []
+  const loading = offersQuery.isLoading
+
+  const fetchAll = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['offers', 'trades'] })
   }
 
   const getProductTitle = (productId: number, fallbackTitle?: string): string => {
     if (fallbackTitle) return fallbackTitle
-    return productTitles.get(productId) || 'Unnamed Item'
+    return `Item #${productId}`
   }
 
   const getSellerRequestedItems = (trade: Trade) => {
-    return (trade.items || []).filter((item: any) => {
-      const offeredBy = (item?.offered_by ?? item?.offeredBy ?? '').toLowerCase()
+    return (trade.items || []).filter((item) => {
+      const itemWithAliases = item as typeof item & { offeredBy?: string }
+      const offeredBy = (itemWithAliases.offered_by ?? itemWithAliases.offeredBy ?? '').toLowerCase()
       return offeredBy === 'seller'
     })
   }
@@ -122,21 +87,11 @@ const Offers: React.FC = () => {
     return count > 1 ? `${title} + ${count - 1} more` : title
   }
 
-  useEffect(() => { 
-    fetchAll()
-    // Get current user ID from localStorage or API
-    const userId = localStorage.getItem('userId')
-    if (userId) {
-      setCurrentUserId(parseInt(userId))
-    }
-
-    // Set up real-time background polling every 5 seconds
-    const interval = setInterval(() => {
-      fetchAll(true)
-    }, 5000)
-
-    return () => clearInterval(interval)
-  }, [])
+  useEffect(() => {
+    if (!offersQuery.error) return
+    toast({
+      id: "offers-error", title: 'Error', description: getErrorMessage(offersQuery.error, 'Failed to load offers'), status: 'error' })
+  }, [offersQuery.error, toast])
 
   const updateTrade = async (id: number, action: TradeAction) => {
     // Prevent multiple concurrent requests
@@ -150,9 +105,9 @@ const Offers: React.FC = () => {
         id: "offers-success", title: 'Success', description: 'Offer updated', status: 'success' })
       fetchAll()
       return response.data
-    } catch (e: any) {
+    } catch (e: unknown) {
       toast({
-        id: "offers-error-2", title: 'Error', description: e?.response?.data?.error || 'Failed to update offer', status: 'error' })
+        id: "offers-error-2", title: 'Error', description: getErrorMessage(e, 'Failed to update offer'), status: 'error' })
       throw e
     } finally {
       setIsProcessing(false)
@@ -193,11 +148,11 @@ const Offers: React.FC = () => {
         status: 'success',
         duration: 3000
       })
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         id: "offers-error-3",
         title: 'Error',
-        description: error?.response?.data?.error || 'Failed to cancel offer',
+        description: getErrorMessage(error, 'Failed to cancel offer'),
         status: 'error'
       })
     } finally {
@@ -230,11 +185,11 @@ const Offers: React.FC = () => {
         status: 'success',
         duration: 3000
       })
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         id: "offers-error-4",
         title: 'Error',
-        description: error?.response?.data?.error || 'Failed to decline offer',
+        description: getErrorMessage(error, 'Failed to decline offer'),
         status: 'error'
       })
     } finally {
@@ -291,10 +246,10 @@ const Offers: React.FC = () => {
       setTimeout(() => {
         setIsProcessing(false)
       }, 1000)
-    } catch (error: any) {
+    } catch (error: unknown) {
       setIsProcessing(false)
 
-      const errorMsg = error?.response?.data?.error || 'Failed to convert to multi-way'
+      const errorMsg = getErrorMessage(error, 'Failed to convert to multi-way')
 
       toast({
         id: 'error-convert-multiway',
@@ -390,79 +345,6 @@ const Offers: React.FC = () => {
     trade.status === 'pending_multiway' ||
     needsCurrentUserAcceptance(trade)
   )
-
-  // Resolve image for an item coming from /api/trades (robust to various shapes)
-  const resolveItemImage = (it: any): string | undefined => {
-    if (!it) return undefined
-    // common single-field
-    if (it.product_image_url) return it.product_image_url
-    if (it.productImageUrl) return it.productImageUrl
-    // combined/title fields might include an array string
-    const maybeImgs = it.product_image_urls ?? it.productImages ?? null
-    if (Array.isArray(maybeImgs) && maybeImgs.length > 0) return getFirstImage(maybeImgs)
-    if (typeof maybeImgs === 'string' && maybeImgs.trim().startsWith('[')) {
-      try {
-        const parsed = JSON.parse(maybeImgs)
-        if (Array.isArray(parsed) && parsed.length > 0) return getFirstImage(parsed)
-      } catch {}
-    }
-    return undefined
-  }
-
-  // small cache to avoid refetching product details repeatedly
-  const productImageCache = useRef<Map<number, string | null>>(new Map())
-
-  // helper component: show thumbnail from existing url or fetch product by id
-  const ProductThumb: React.FC<{ pid: number; src?: string; alt?: string }> = ({ pid, src, alt }) => {
-    const [img, setImg] = useState<string | null>(src ?? null)
-
-    useEffect(() => {
-      let mounted = true
-      if (src) {
-        setImg(src)
-        return
-      }
-      const cached = productImageCache.current.get(pid)
-      if (cached !== undefined) {
-        setImg(cached)
-        return
-      }
-      ;(async () => {
-        try {
-          const res = await api.get(`/api/products/${pid}`)
-          const prod = res.data?.data
-          const maybeImgs: any = prod?.image_urls ?? prod?.images ?? null
-          let resolved: string | undefined
-          if (Array.isArray(maybeImgs) && maybeImgs.length > 0) resolved = getFirstImage(maybeImgs)
-          else if (typeof maybeImgs === 'string' && maybeImgs.trim().startsWith('[')) {
-            try {
-              const parsed = JSON.parse(maybeImgs)
-              if (Array.isArray(parsed) && parsed.length > 0) resolved = getFirstImage(parsed)
-            } catch {}
-          } else if (prod?.image_url) resolved = prod.image_url
-          else if (prod?.imageUrl) resolved = prod.imageUrl
-          if (mounted) {
-            productImageCache.current.set(pid, resolved ?? null)
-            setImg(resolved ?? null)
-          }
-        } catch {
-          productImageCache.current.set(pid, null)
-          if (mounted) setImg(null)
-        }
-      })()
-      return () => { mounted = false }
-    }, [pid, src])
-
-    return (
-      <Image
-        src={img ?? ''}
-        alt={alt ?? 'Product Image'}
-        boxSize="40px"
-        objectFit="cover"
-        fallbackSrc="/no-image.svg"
-      />
-    )
-  }
 
   if (loading) {
     return (
@@ -642,49 +524,6 @@ const Offers: React.FC = () => {
       location,
       schedule: [date ? new Date(`${date}T00:00:00`).toLocaleDateString('en-PH', { weekday: 'long', month: 'short', day: 'numeric' }) : '', time ? formatTimePH(time) : ''].filter(Boolean).join(', '),
     }
-  }
-
-  const renderOfferedItems = (t: Trade) => {
-    const offered = (t.items || []).filter((i: any) => {
-      const ob = (i?.offered_by ?? i?.offeredBy ?? i?.sender ?? i?.from_user_role)
-      if (typeof ob === 'string') {
-        const v = ob.toLowerCase()
-        return v === 'buyer' || v === 'from_buyer' || v === 'sender'
-      }
-      return false
-    })
-    if (offered.length === 0) return <Text color="gray.500" fontSize="sm">No items attached</Text>
-    return (
-      <HStack spacing={2} mt={2} wrap="wrap">
-        {offered.map((it: any) => {
-          const pid = it.product_id ?? it.productId
-          const ptitle = it.product_title ?? it.productTitle
-          const pimg = it.product_image_url ?? it.productImageUrl
-          const pstatus = it.product_status ?? it.productStatus
-          return (
-            <HStack key={it.id} spacing={2} borderWidth="1px" borderColor="gray.200" rounded="md" p={2} align="center">
-              {/* Use ProductThumb: if pimg exists it's used, otherwise it will fetch product by id */}
-              <ProductThumb pid={Number(pid)} src={pimg} alt={getProductTitle(Number(pid), ptitle)} />
-              <VStack spacing={0} align="start">
-                <Link 
-                  href={`/products/${it.product_slug || pid}`} 
-                  color="brand.600" 
-                  fontSize="sm"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    const slug = it.product_slug || pid
-                    window.location.href = `/products/${slug}`
-                  }}
-                >
-                  {getProductTitle(Number(pid), ptitle)}
-                </Link>
-                <Text fontSize="xs" color="gray.500">{pstatus}</Text>
-              </VStack>
-            </HStack>
-          )
-        })}
-      </HStack>
-    )
   }
 
   // Grid Card Component for offers
@@ -896,7 +735,7 @@ const Offers: React.FC = () => {
                 title="Sort offers"
                 size="sm" 
                 value={sort} 
-                onChange={e => setSort(e.target.value as any)} 
+                onChange={e => setSort(e.target.value as 'newest' | 'oldest')}
                 w="140px"
                 bg={cardBg}
                 borderColor="gray.200"
