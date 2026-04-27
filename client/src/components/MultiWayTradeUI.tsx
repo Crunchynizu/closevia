@@ -99,8 +99,6 @@ const MultiWayTradeUI: React.FC<MultiWayTradeUIProps> = ({
   const { isOpen, onOpen, onClose } = useDisclosure()
   const cardBg = useColorModeValue('white', 'gray.800')
   const borderColor = useColorModeValue('gray.200', 'gray.700')
-  const loopBg = useColorModeValue('blue.50', 'blue.900')
-  const loopBorderColor = useColorModeValue('blue.200', 'blue.700')
   const arrowColor = useColorModeValue('blue.500', 'blue.400')
 
   // Validate participants count
@@ -137,65 +135,87 @@ const MultiWayTradeUI: React.FC<MultiWayTradeUIProps> = ({
     <VStack spacing={3} align="stretch" w="full">
       {/* Main Message - Collapsed View */}
       <Box
-        p={{ base: 3, md: 4 }}
-        bg={loopBg}
+        p={{ base: 2.5, md: 3 }}
+        bg={cardBg}
         borderRadius="lg"
-        borderWidth="2px"
-        borderColor={loopBorderColor}
+        borderWidth="1px"
+        borderColor={borderColor}
+        borderLeftWidth="4px"
+        borderLeftColor={viewMode === 'initiator' ? 'purple.400' : 'teal.400'}
         cursor="pointer"
         onClick={() => setIsExpanded(!isExpanded)}
-        transition="all 0.2s"
-        _hover={{ shadow: 'md' }}
+        transition="all 0.2s ease"
+        _hover={{ bg: useColorModeValue('gray.50', 'gray.700'), shadow: 'sm', transform: 'translateY(-1px)' }}
       >
-        <Flex justify="space-between" align="flex-start" gap={2}>
+        <Flex
+          align={{ base: 'stretch', md: 'center' }}
+          direction={{ base: 'column', md: 'row' }}
+          gap={{ base: 2, md: 3 }}
+          minW={0}
+        >
           <VStack align="start" spacing={1} flex={1} minW={0}>
-            <Text fontSize="sm" fontWeight="bold" color={useColorModeValue('blue.900', 'blue.100')}>
-              {viewMode === 'initiator'
-                ? 'Loop Status Tracker'
-                : "You've been invited to a Multi-way Loop!"}
-            </Text>
-            <Badge colorScheme={viewMode === 'initiator' ? 'purple' : 'teal'} variant="subtle" fontSize="10px">
-              {participantTitle}
-            </Badge>
-            {initiatorName && viewMode === 'participant' && (
-              <Text fontSize="xs" color={useColorModeValue('blue.800', 'blue.200')} noOfLines={1}>
-                Initiated by: {initiatorName}
-              </Text>
-            )}
-            <Text fontSize={{ base: 'xs', md: 'sm' }} color={useColorModeValue('blue.800', 'blue.200')} noOfLines={1}>
-              You give: {yourGive || 'Item in your trade offer'}
-            </Text>
-            <Text fontSize={{ base: 'xs', md: 'sm' }} color={useColorModeValue('blue.800', 'blue.200')} noOfLines={1}>
-              You get: {yourGet || 'Matched item from the loop'}
-            </Text>
-            <Text fontSize={{ base: 'xs', md: 'sm' }} color={useColorModeValue('blue.700', 'blue.300')} noOfLines={2} wordBreak="break-word">
-              Chain: {chainLabel || 'Participants connected in a closed loop'}
-            </Text>
-            <HStack spacing={1}>
-              <Badge colorScheme="purple" fontSize="10px">NEW</Badge>
-              <Text fontSize="xs" color={useColorModeValue('blue.700', 'blue.200')}>
-                {loopLength} participants ready to trade
-              </Text>
-              {loopStatus && (
-                <Badge colorScheme={loopStatus && detailStatuses.includes(loopStatus) ? 'green' : 'yellow'} fontSize="10px">
-                  {loopStatus}
+            <HStack spacing={1.5} flexWrap="wrap">
+              <Badge colorScheme={viewMode === 'initiator' ? 'purple' : 'teal'} variant="solid" fontSize="2xs" px={1.5} py={0.5}>
+                {viewMode === 'initiator' ? 'Loop Tracker' : 'Loop Invite'}
+              </Badge>
+              <Badge colorScheme={loopStatus && detailStatuses.includes(loopStatus) ? 'green' : 'orange'} variant="subtle" fontSize="2xs" px={1.5} py={0.5}>
+                {loopStatus || participantTitle}
+              </Badge>
+              {expiryLabel && (
+                <Badge colorScheme="gray" variant="subtle" fontSize="2xs" px={1.5} py={0.5}>
+                  Expires {expiryLabel}
                 </Badge>
               )}
             </HStack>
-            {expiryLabel && (
-              <Text fontSize="10px" color={useColorModeValue('blue.700', 'blue.300')}>
-                Expires: {expiryLabel}
+
+            <Text fontSize={{ base: 'sm', md: 'md' }} fontWeight="700" color={useColorModeValue('gray.800', 'gray.100')} noOfLines={1}>
+              {yourGive || 'Item in your trade offer'}
+            </Text>
+            <Text fontSize="xs" color={useColorModeValue('gray.600', 'gray.300')} noOfLines={1}>
+              for {yourGet || 'Matched item from the loop'}
+            </Text>
+            <HStack spacing={2} color={useColorModeValue('gray.500', 'gray.400')} minW={0}>
+              <HStack spacing={-2}>
+                {validParticipants.slice(0, 3).map((participant, index) => (
+                  <Avatar
+                    key={`compact-participant-${participant.id || index}`}
+                    name={participant.user_name}
+                    size="2xs"
+                    bg={`${getAvatarColor(index)}.500`}
+                    color="white"
+                    boxShadow={`0 0 0 2px ${cardBg}`}
+                  />
+                ))}
+              </HStack>
+              <Text fontSize="xs" noOfLines={1}>
+                {loopLength} participant{loopLength === 1 ? '' : 's'}
+                {initiatorName && viewMode === 'participant' ? ` · by ${initiatorName}` : ''}
               </Text>
-            )}
+            </HStack>
           </VStack>
-          <Icon
-            as={FaChevronDown}
-            color={arrowColor}
-            transition="transform 0.2s"
-            transform={isExpanded ? 'rotate(180deg)' : 'rotate(0deg)'}
-            boxSize={5}
-            flexShrink={0}
-          />
+
+          <HStack justify={{ base: 'space-between', md: 'flex-end' }} spacing={2} flexShrink={0}>
+            <Button
+              size="sm"
+              variant="outline"
+              colorScheme={viewMode === 'initiator' ? 'purple' : 'teal'}
+              minW={{ base: '84px', md: '88px' }}
+              onClick={(event) => {
+                event.stopPropagation()
+                onOpen()
+              }}
+            >
+              View
+            </Button>
+            <Icon
+              as={FaChevronDown}
+              color={useColorModeValue('gray.500', 'gray.400')}
+              transition="transform 0.2s"
+              transform={isExpanded ? 'rotate(180deg)' : 'rotate(0deg)'}
+              boxSize={4}
+              flexShrink={0}
+            />
+          </HStack>
         </Flex>
       </Box>
 
