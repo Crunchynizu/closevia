@@ -8,12 +8,6 @@ import {
   useColorModeValue,
   useColorMode,
   Image,
-  Drawer,
-  DrawerOverlay,
-  DrawerContent,
-  DrawerCloseButton,
-  DrawerBody,
-  DrawerHeader,
   Button,
   Divider,
   Avatar,
@@ -22,6 +16,7 @@ import {
   Text,
   Icon,
 } from '@chakra-ui/react'
+import { motion, AnimatePresence, useDragControls } from 'framer-motion'
 import {
   AddIcon,
   BellIcon,
@@ -56,10 +51,7 @@ const Sidebar: React.FC = () => {
   const [riderStatus, setRiderStatus] = useState<{ is_rider: boolean; status?: string } | null>(null)
   const [touchStart, setTouchStart] = useState<number | null>(null)
   const [isStandalone, setIsStandalone] = useState(false)
-  const dragStartYRef = useRef<number | null>(null)
-  const dragDeltaRef = useRef(0)
-  const [dragOffset, setDragOffset] = useState(0)
-  const [isDraggingSheet, setIsDraggingSheet] = useState(false)
+  const dragControls = useDragControls()
 
   useEffect(() => {
     setIsStandalone(isRunningStandalone())
@@ -145,31 +137,6 @@ const Sidebar: React.FC = () => {
     }
   }, [isOpen, onClose])
 
-  const finishSheetDrag = useCallback(() => {
-    const delta = dragDeltaRef.current
-    dragStartYRef.current = null
-    dragDeltaRef.current = 0
-    setIsDraggingSheet(false)
-    setDragOffset(0)
-    if (delta > 110) {
-      onClose()
-    }
-  }, [onClose])
-
-  const handleSheetPointerDown = useCallback((event: React.PointerEvent) => {
-    dragStartYRef.current = event.clientY
-    dragDeltaRef.current = 0
-    setIsDraggingSheet(true)
-    event.currentTarget.setPointerCapture(event.pointerId)
-  }, [])
-
-  const handleSheetPointerMove = useCallback((event: React.PointerEvent) => {
-    if (dragStartYRef.current === null) return
-    const delta = Math.max(0, event.clientY - dragStartYRef.current)
-    dragDeltaRef.current = delta
-    setDragOffset(delta)
-  }, [])
-
   // Memoize callback handlers to prevent unnecessary re-renders
   const handleLogoClick = useCallback(() => {
     navigate('/landing')
@@ -242,191 +209,227 @@ const Sidebar: React.FC = () => {
 
   return (
     <>
-      {/* Bottom Sheet Drawer for mobile */}
-      <Drawer isOpen={isOpen} placement="bottom" onClose={onClose} closeOnOverlayClick={true}>
-        <DrawerOverlay bg="blackAlpha.600" backdropFilter="blur(2px)" />
-        <DrawerContent
-          display="flex"
-          flexDirection="column"
-          maxH="90vh"
-          borderTopRadius="3xl"
-          bg="#FAFAFA"
-          boxShadow="0 -10px 40px rgba(0,0,0,0.1)"
-          sx={{ '& [data-testid="chakra-modal.close-button"]': { display: 'none' } }}
-          style={{
-            transform: dragOffset ? `translateY(${dragOffset}px)` : undefined,
-            transition: isDraggingSheet ? 'none' : 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)',
-          }}
-        >
-          {/* Swipe Indicator Handle — also the swipe-down grab area */}
-          <Center
-            pt={3}
-            pb={1}
-            w="full"
-            onPointerDown={handleSheetPointerDown}
-            onPointerMove={handleSheetPointerMove}
-            onPointerUp={finishSheetDrag}
-            onPointerCancel={finishSheetDrag}
-            style={{ touchAction: 'none', cursor: 'grab' }}
-          >
-            <Box w="40px" h="5px" bg="gray.300" borderRadius="full" />
-          </Center>
+      {/* Mobile bottom sheet — framer-motion, fully draggable */}
+      <AnimatePresence>
+        {isOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              key="sidebar-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              onClick={onClose}
+              style={{
+                position: 'fixed',
+                inset: 0,
+                backgroundColor: 'rgba(0,0,0,0.55)',
+                backdropFilter: 'blur(2px)',
+                zIndex: 1300,
+              }}
+            />
 
-          {/* Clean Header - Logo & Close */}
-          <DrawerHeader borderBottom="1px solid" borderColor="gray.100" py={3} px={5}>
-            <Flex justify="center" align="center" width="full">
-              <Box display="flex" alignItems="center" gap={2}>
-                <Image
-                  src={logo}
-                  alt="Clovia"
-                  w="36px"
-                  h="36px"
-                  objectFit="contain"
-                  cursor="pointer"
-                  loading="lazy"
-                  onClick={handleLogoClick}
-                  _hover={{ opacity: 0.8 }}
-                />
-                <Box fontWeight="bold" fontSize="lg" color="gray.800">Clovia</Box>
-              </Box>
-            </Flex>
-          </DrawerHeader>
+            {/* Sheet */}
+            <motion.div
+              key="sidebar-sheet"
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', stiffness: 380, damping: 36 }}
+              drag="y"
+              dragControls={dragControls}
+              dragListener={false}
+              dragConstraints={{ top: 0 }}
+              dragElastic={{ top: 0, bottom: 0.25 }}
+              onDragEnd={(_: any, info: any) => {
+                if (info.offset.y > 80 || info.velocity.y > 500) {
+                  onClose()
+                }
+              }}
+              style={{
+                position: 'fixed',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                zIndex: 1301,
+                maxHeight: '90dvh',
+                borderTopLeftRadius: '28px',
+                borderTopRightRadius: '28px',
+                backgroundColor: '#FFFDF1',
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+                boxShadow: '0 -12px 48px rgba(0,0,0,0.12)',
+                willChange: 'transform',
+              }}
+            >
+              {/* Drag handle — triggers drag on entire handle strip */}
+              <Center
+                pt={3}
+                pb={1}
+                w="full"
+                cursor="grab"
+                flexShrink={0}
+                style={{ touchAction: 'none' }}
+                onPointerDown={(e: React.PointerEvent) => dragControls.start(e)}
+              >
+                <Box w="40px" h="5px" bg="gray.300" borderRadius="full" />
+              </Center>
 
-          {/* Main Content Area */}
-          <DrawerBody flex={1} overflowY="auto" pb={user ? 8 : 8} px={4} mt={2}>
-            <VStack spacing={4} align="stretch">
-
-              {/* User Profile Card - Premium layout */}
-              {user && (
-                <Box
-                  as={RouterLink}
-                  to="/profile"
-                  onClick={onClose}
-                  bg="white"
-                  p={4}
-                  borderRadius="2xl"
-                  border="1px solid"
-                  borderColor="gray.100"
-                  shadow="sm"
-                  _hover={{ shadow: 'md', transform: 'translateY(-1px)', textDecoration: 'none' }}
-                  transition="all 0.2s"
-                  display="block"
-                >
-                  <Flex align="center" gap={4}>
-                    <VerifiedAvatar
-                      size="lg"
-                      name={user.name || 'User'}
-                      src={getImageUrl(user.profile_picture)}
-                      isVerified={user?.verification_status === 'verified' || user?.verified || false}
+              {/* Header */}
+              <Box borderBottom="1px solid" borderColor="gray.100" py={3} px={5} flexShrink={0}>
+                <Flex justify="center" align="center" width="full">
+                  <Box display="flex" alignItems="center" gap={2}>
+                    <Image
+                      src={logo}
+                      alt="Clovia"
+                      w="36px"
+                      h="36px"
+                      objectFit="contain"
+                      cursor="pointer"
+                      loading="lazy"
+                      onClick={handleLogoClick}
+                      _hover={{ opacity: 0.8 }}
+                      borderRadius="lg"
                     />
-                    <Box flex={1}>
-                      <Text fontWeight="bold" fontSize="md" color="gray.900" noOfLines={1}>{user.name}</Text>
-                      <Text fontSize="sm" color="gray.500" noOfLines={1}>{user.email}</Text>
-                    </Box>
-                  </Flex>
-                </Box>
-              )}
-
-              {/* Menu Items mapped in a sleek card */}
-              <Box bg="white" borderRadius="2xl" overflow="hidden" shadow="sm" border="1px" borderColor="gray.100">
-                <VStack spacing={0} align="stretch">
-                  {mobileNavItems.map((item: any, index: number) => {
-                    const Icon = item.icon
-                    const isActive = location.pathname === item.path
-
-                    return (
-                      <React.Fragment key={item.path}>
-                        {index > 0 && <Divider borderColor="gray.50" />}
-                        <Button
-                          as={RouterLink}
-                          to={item.path}
-                          justifyContent="flex-start"
-                          onClick={onClose}
-                          bg={isActive ? 'brand.50' : 'white'}
-                          color={isActive ? 'brand.600' : 'gray.700'}
-                          fontWeight={isActive ? '600' : '500'}
-                          minH="56px"
-                          w="full"
-                          variant="ghost"
-                          borderRadius="none"
-                          px={5}
-                          _hover={{ bg: 'gray.50' }}
-                          _active={{ bg: 'gray.100' }}
-                        >
-                          <Flex align="center" w="full" gap={4}>
-                            <Icon size={22} color={isActive ? "var(--chakra-colors-brand-500)" : "var(--chakra-colors-gray-400)"} />
-                            <Text fontSize="md">{item.label}</Text>
-                          </Flex>
-                        </Button>
-                      </React.Fragment>
-                    )
-                  })}
-                </VStack>
-              </Box>
-
-              {/* Extras Card (ECODE + Install) */}
-              <Box bg="white" p={2} borderRadius="2xl" overflow="hidden" shadow="sm" border="1px" borderColor="gray.100">
-                {!isStandalone && (
-                  <Button
-                    as="a"
-                    href="/clovia.apk"
-                    download="clovia.apk"
-                    w="full"
-                    variant="ghost"
-                    minH="52px"
-                    justifyContent="flex-start"
-                    px={4}
-                    color="gray.600"
-                    _hover={{ bg: 'gray.50' }}
-                  >
-                    <Flex align="center" gap={3}>
-                      <Icon as={FiDownload} size={18} />
-                      <Text fontSize="md" fontWeight="500">Install Clovia (Android)</Text>
-                    </Flex>
-                  </Button>
-                )}
-                <InstallAppPrompt variant="mobile-menu" onInstalled={onClose} />
-                
-                <Flex
-                  px={4}
-                  py={3}
-                  align="center"
-                  justify="center"
-                  gap={2}
-                  cursor="pointer"
-                  onClick={handleCompanyClick}
-                  _hover={{ bg: 'gray.50', borderRadius: 'xl' }}
-                  mt={1}
-                >
-                  <Image src="/logoimage.png" alt="ECODE" h="20px" objectFit="contain" loading="lazy" />
-                  <Text fontSize="xs" fontWeight="bold" color="gray.400" letterSpacing="wider">POWERED BY ECODE</Text>
+                    <Box fontWeight="bold" fontSize="lg" color="gray.800">Clovia</Box>
+                  </Box>
                 </Flex>
               </Box>
 
-              {/* Logout Button */}
-              {user && (
-                <Button
-                  w="full"
-                  colorScheme="red"
-                  variant="subtle"
-                  bg="red.50"
-                  color="red.600"
-                  leftIcon={<FiLogOut size={20} />}
-                  onClick={handleLogout}
-                  size="lg"
-                  minH="56px"
-                  borderRadius="2xl"
-                  fontWeight="bold"
-                  _hover={{ bg: 'red.100' }}
-                  _active={{ bg: 'red.200' }}
-                >
-                  Log out safely
-                </Button>
-              )}
-            </VStack>
-          </DrawerBody>
-        </DrawerContent>
-      </Drawer>
+              {/* Scrollable content */}
+              <Box flex={1} overflowY="auto" px={4} mt={2} pb={10}>
+                <VStack spacing={4} align="stretch">
+
+                  {/* User Profile Card */}
+                  {user && (
+                    <Box
+                      as={RouterLink}
+                      to="/profile"
+                      onClick={onClose}
+                      bg="white"
+                      p={4}
+                      borderRadius="2xl"
+                      border="1px solid"
+                      borderColor="gray.100"
+                      shadow="sm"
+                      _hover={{ shadow: 'md', transform: 'translateY(-1px)', textDecoration: 'none' }}
+                      transition="all 0.2s"
+                      display="block"
+                    >
+                      <Flex align="center" gap={4}>
+                        <VerifiedAvatar
+                          size="lg"
+                          name={user.name || 'User'}
+                          src={getImageUrl(user.profile_picture)}
+                          isVerified={user?.verification_status === 'verified' || user?.verified || false}
+                        />
+                        <Box flex={1}>
+                          <Text fontWeight="bold" fontSize="md" color="gray.900" noOfLines={1}>{user.name}</Text>
+                          <Text fontSize="sm" color="gray.500" noOfLines={1}>{user.email}</Text>
+                        </Box>
+                      </Flex>
+                    </Box>
+                  )}
+
+                  {/* Nav items */}
+                  <Box bg="white" borderRadius="2xl" overflow="hidden" shadow="sm" border="1px" borderColor="gray.100">
+                    <VStack spacing={0} align="stretch">
+                      {mobileNavItems.map((item: any, index: number) => {
+                        const NavIcon = item.icon
+                        const isActive = location.pathname === item.path
+                        return (
+                          <React.Fragment key={item.path}>
+                            {index > 0 && <Divider borderColor="gray.50" />}
+                            <Button
+                              as={RouterLink}
+                              to={item.path}
+                              justifyContent="flex-start"
+                              onClick={onClose}
+                              bg={isActive ? 'brand.50' : 'white'}
+                              color={isActive ? 'brand.600' : 'gray.700'}
+                              fontWeight={isActive ? '600' : '500'}
+                              minH="56px"
+                              w="full"
+                              variant="ghost"
+                              borderRadius="none"
+                              px={5}
+                              _hover={{ bg: 'gray.50' }}
+                              _active={{ bg: 'gray.100' }}
+                            >
+                              <Flex align="center" w="full" gap={4}>
+                                <NavIcon size={22} color={isActive ? 'var(--chakra-colors-brand-500)' : 'var(--chakra-colors-gray-400)'} />
+                                <Text fontSize="md">{item.label}</Text>
+                              </Flex>
+                            </Button>
+                          </React.Fragment>
+                        )
+                      })}
+                    </VStack>
+                  </Box>
+
+                  {/* Extras Card */}
+                  <Box bg="white" p={2} borderRadius="2xl" overflow="hidden" shadow="sm" border="1px" borderColor="gray.100">
+                    {!isStandalone && (
+                      <Button
+                        as="a"
+                        href="/clovia.apk"
+                        download="clovia.apk"
+                        w="full"
+                        variant="ghost"
+                        minH="52px"
+                        justifyContent="flex-start"
+                        px={4}
+                        color="gray.600"
+                        _hover={{ bg: 'gray.50' }}
+                      >
+                        <Flex align="center" gap={3}>
+                          <Icon as={FiDownload} size={18} />
+                          <Text fontSize="md" fontWeight="500">Install Clovia (Android)</Text>
+                        </Flex>
+                      </Button>
+                    )}
+                    <InstallAppPrompt variant="mobile-menu" onInstalled={onClose} />
+                    <Flex
+                      px={4} py={3}
+                      align="center" justify="center" gap={2}
+                      cursor="pointer"
+                      onClick={handleCompanyClick}
+                      _hover={{ bg: 'gray.50', borderRadius: 'xl' }}
+                      mt={1}
+                    >
+                      <Image src="/logoimage.png" alt="ECODE" h="20px" objectFit="contain" loading="lazy" />
+                      <Text fontSize="xs" fontWeight="bold" color="gray.400" letterSpacing="wider">POWERED BY ECODE</Text>
+                    </Flex>
+                  </Box>
+
+                  {/* Logout */}
+                  {user && (
+                    <Button
+                      w="full"
+                      colorScheme="red"
+                      variant="subtle"
+                      bg="red.50"
+                      color="red.600"
+                      leftIcon={<FiLogOut size={20} />}
+                      onClick={handleLogout}
+                      size="lg"
+                      minH="56px"
+                      borderRadius="2xl"
+                      fontWeight="bold"
+                      _hover={{ bg: 'red.100' }}
+                      _active={{ bg: 'red.200' }}
+                    >
+                      Log out safely
+                    </Button>
+                  )}
+                </VStack>
+              </Box>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* Desktop sidebar - hidden on small screens */}
       <Box
@@ -456,6 +459,7 @@ const Sidebar: React.FC = () => {
                 onClick={handleLogoClick}
                 _hover={{ opacity: 0.8 }}
                 transition="opacity 0.2s"
+                borderRadius="lg"
               />
               {/* <Image
                 src="/logoimage.png"

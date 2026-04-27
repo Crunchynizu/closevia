@@ -59,7 +59,7 @@ import {
   FiAlertTriangle,
   FiStar,
 } from 'react-icons/fi'
-import { FaHandshake } from 'react-icons/fa'
+import { FaHandshake, FaMapMarkerAlt } from 'react-icons/fa'
 import { useAuth } from '../contexts/AuthContext'
 import { useProducts } from '../contexts/ProductContext'
 import { Product, User } from '../types'
@@ -1483,18 +1483,30 @@ const ProductDetail: React.FC = () => {
 
                   {/* Product Info: Location, Condition, Category */}
                   <Box px={0} bg="transparent">
-                    <Wrap spacing={2} align="center">
-                      {product.location && (
-                        <WrapItem>
-                          <HStack spacing={1} px={3} py={1.5} borderRadius="full" bg="white" shadow="sm">
-                            <Text fontSize="xs" fontWeight="600" color="brand.500">
-                              {product.location_type === 'pickup_location' ? 'Pickup location:' : 'Product location:'}
+                    {product.location && (
+                      <Box
+                        mb={3}
+                        p={3}
+                        bg="white"
+                        borderRadius="xl"
+                        shadow="sm"
+                        borderWidth="1px"
+                        borderColor="gray.100"
+                      >
+                        <HStack spacing={3}>
+                          <Box p={2} bg="brand.50" borderRadius="full" flexShrink={0}>
+                            <Icon as={FaMapMarkerAlt} color="brand.500" boxSize={4} />
+                          </Box>
+                          <VStack align="start" spacing={0}>
+                            <Text fontSize="2xs" fontWeight="700" color="gray.400" textTransform="uppercase" letterSpacing="wide">
+                              {product.location_type === 'pickup_location' ? 'Pickup Location' : 'Product Location'}
                             </Text>
-                            <Text fontSize="xs" color={detailText} fontWeight="700">{product.location}</Text>
-                          </HStack>
-                        </WrapItem>
-                      )}
-                      
+                            <Text fontSize="sm" color={detailText} fontWeight="700">{product.location}</Text>
+                          </VStack>
+                        </HStack>
+                      </Box>
+                    )}
+                    <Wrap spacing={2} align="center">
                       {product.condition && (
                         <WrapItem>
                           <HStack spacing={1} px={3} py={1.5} borderRadius="full" bg="white" shadow="sm">
@@ -1503,7 +1515,7 @@ const ProductDetail: React.FC = () => {
                           </HStack>
                         </WrapItem>
                       )}
-                      
+
                       {product.category && (
                         <WrapItem>
                           <HStack spacing={1} px={3} py={1.5} borderRadius="full" bg="white" shadow="sm">

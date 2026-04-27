@@ -54,7 +54,7 @@ import {
   Checkbox,
   Skeleton,
 } from '@chakra-ui/react'
-import { AddIcon, EditIcon, DeleteIcon, SettingsIcon, WarningIcon, ChevronLeftIcon, ChevronRightIcon, CheckIcon, CloseIcon, SearchIcon, ViewIcon, StarIcon } from '@chakra-ui/icons'
+import { AddIcon, EditIcon, DeleteIcon, SettingsIcon, WarningIcon, ChevronLeftIcon, ChevronRightIcon, CheckIcon, CloseIcon, SearchIcon, ViewIcon, StarIcon, ChevronDownIcon } from '@chakra-ui/icons'
 import { useAuth } from '../contexts/AuthContext'
 import { useProducts } from '../contexts/ProductContext'
 import { useRealtime } from '../contexts/RealtimeContext'
@@ -63,7 +63,7 @@ import FloatingTab from '../components/FloatingTab'
 import { api } from '../services/api'
 import { getStoredToken } from '../utils/authStorage'
 import { FaCrown, FaHandshake, FaTimes, FaCheckCircle, FaClock, FaHistory, FaShoppingBag, FaExchangeAlt, FaComments, FaMapMarkerAlt, FaTruck, FaMoneyBillWave, FaArrowUp, FaRegLightbulb, FaRocket, FaCalendarAlt } from 'react-icons/fa'
-import { FiShoppingBag, FiRefreshCw, FiMessageCircle, FiGrid, FiList, FiSend, FiInbox, FiArchive, FiSliders } from 'react-icons/fi'
+import { FiShoppingBag, FiRefreshCw, FiMessageCircle, FiGrid, FiList, FiSend, FiInbox, FiArchive, FiSliders, FiMoreVertical } from 'react-icons/fi'
 import { formatPHP } from '../utils/currency'
 import { getFirstImage, getImageUrl } from '../utils/imageUtils'
 import { PRODUCT_CATEGORIES } from '../utils/categories'
@@ -111,7 +111,7 @@ const Dashboard: React.FC = () => {
   const shouldLoadOffersTab = activeTab === 1
   const shouldLoadSentOffers = shouldLoadOffersTab && offersSubTab === 1
   const shouldLoadReceivedOffers = shouldLoadOffersTab && offersSubTab === 0
-  const shouldLoadOngoingTrades = shouldLoadOffersTab && offersSubTab === 2
+  const shouldLoadOngoingTrades = true
   const shouldLoadArchivedTrades = shouldLoadOffersTab && offersSubTab === 3
   const shouldLoadMultiWay = activeTab === 2 || activeTab === 3 || shouldLoadOngoingTrades
   const shouldLoadTradeHistory = activeTab === 4
@@ -202,6 +202,8 @@ const Dashboard: React.FC = () => {
   const [productSort, setProductSort] = useState<'newest' | 'oldest'>('newest')
   const [productViewMode, setProductViewMode] = useState<'grid' | 'list'>('list')
   const [selectedProductIds, setSelectedProductIds] = useState<Set<number>>(new Set())
+  const [isProductSelectMode, setIsProductSelectMode] = useState(false)
+  const [tipDismissed, setTipDismissed] = useState(() => localStorage.getItem('clovia_product_tip_dismissed') === '1')
 
   // Unified search - searches across all content
   const [unifiedSearch, setUnifiedSearch] = useState('')
@@ -2482,18 +2484,45 @@ const Dashboard: React.FC = () => {
                 </HStack>
               </Heading>
               <HStack spacing={2} flexShrink={0}>
-
-
                 {shouldShowActions && (
-                  <IconButton
-                    as={RouterLink}
-                    to={`/edit-product/${product.id}`}
-                    aria-label="Edit"
-                    icon={<EditIcon />}
-                    variant="ghost"
-                    colorScheme="brand"
-                    size="sm"
-                  />
+                  <>
+                    {/* Mobile: ⋮ menu with Edit + Delete */}
+                    <Menu placement="bottom-end">
+                      <MenuButton
+                        as={IconButton}
+                        aria-label="More actions"
+                        icon={<Icon as={FiMoreVertical} />}
+                        variant="ghost"
+                        size="sm"
+                        colorScheme="gray"
+                        display={{ base: 'flex', md: 'none' }}
+                      />
+                      <MenuList fontSize="sm" minW="140px">
+                        <MenuItem icon={<EditIcon />} as={RouterLink} to={`/edit-product/${product.id}`}>
+                          Edit
+                        </MenuItem>
+                        <MenuItem
+                          icon={<DeleteIcon color="red.400" />}
+                          color="red.500"
+                          isDisabled={isLocked}
+                          onClick={() => handleDeleteProductClick(product)}
+                        >
+                          Delete
+                        </MenuItem>
+                      </MenuList>
+                    </Menu>
+                    {/* Desktop: plain edit icon */}
+                    <IconButton
+                      as={RouterLink}
+                      to={`/edit-product/${product.id}`}
+                      aria-label="Edit"
+                      icon={<EditIcon />}
+                      variant="ghost"
+                      colorScheme="brand"
+                      size="sm"
+                      display={{ base: 'none', md: 'flex' }}
+                    />
+                  </>
                 )}
               </HStack>
             </Flex>
@@ -2557,46 +2586,42 @@ const Dashboard: React.FC = () => {
               </HStack>
               </VStack>
           </CardBody>
-          {shouldShowActions && (
-            <CardFooter pt={0}>
-              <HStack spacing={2} w="full">
+          {shouldShowActions && (isAvailable || !isLocked) && (
+            <CardFooter pt={0} pb={3} px={3}>
+              <VStack spacing={1.5} w="full">
                 {isAvailable && (
                   <Button
-                    size="sm"
-                    colorScheme="yellow"
-                    variant="outline"
-                    leftIcon={<Icon as={FaRegLightbulb} boxSize={3} />}
+                    h={{ base: '44px', md: '38px' }}
+                    colorScheme="brand"
+                    variant="solid"
+                    leftIcon={<Icon as={FaHandshake} boxSize={3.5} />}
                     onClick={() => handleFindTradesClick(product)}
+                    w="full"
+                    fontWeight="700"
                     fontSize="sm"
-                    flex={1}
-                    whiteSpace="nowrap"
-                    _hover={{ transform: 'scale(1.02)' }}
-                    transition="all 0.2s"
+                    borderRadius="xl"
+                    _hover={{ opacity: 0.9 }}
+                    transition="opacity 0.15s"
                   >
                     Find Trades
                   </Button>
                 )}
-                <Tooltip
-                  label={isLocked ? 'Cannot delete locked products' : ''}
-                  isDisabled={!isLocked}
-                  hasArrow
+                {/* Desktop-only Delete — mobile uses ⋮ menu */}
+                <Button
+                  display={{ base: 'none', md: 'flex' }}
+                  leftIcon={<DeleteIcon />}
+                  variant="ghost"
+                  colorScheme="red"
+                  size="xs"
+                  w="full"
+                  fontSize="xs"
+                  onClick={() => handleDeleteProductClick(product)}
+                  isDisabled={isLocked}
+                  _hover={{ bg: 'red.50' }}
                 >
-                  <Button
-                    leftIcon={<DeleteIcon />}
-                    variant="outline"
-                    colorScheme="red"
-                    size="sm"
-                    flex={1}
-                    onClick={() => handleDeleteProductClick(product)}
-                    isDisabled={isLocked}
-                    whiteSpace="nowrap"
-                    _hover={{ transform: 'scale(1.02)' }}
-                    transition="all 0.2s"
-                  >
-                    Delete
-                  </Button>
-                </Tooltip>
-              </HStack>
+                  Delete
+                </Button>
+              </VStack>
             </CardFooter>
           )}
         </Card>
@@ -2611,7 +2636,8 @@ const Dashboard: React.FC = () => {
     onToggleSelect,
     onDelete,
     offersCount,
-
+    isSelectMode = false,
+    onEnterSelectMode,
   }: {
     product: Product
     showActions: boolean
@@ -2619,13 +2645,36 @@ const Dashboard: React.FC = () => {
     onToggleSelect: () => void
     onDelete: () => void
     offersCount: number
-
+    isSelectMode?: boolean
+    onEnterSelectMode?: () => void
   }) => {
     const normalizedStatus = String(product.status || '').toLowerCase().trim()
     const isAvailable = normalizedStatus === 'available'
     const isLocked = normalizedStatus === 'locked'
     const statusColor = isAvailable ? 'green' : isLocked ? 'orange' : normalizedStatus === 'sold' ? 'red' : 'blue'
-    
+
+    const [isPressing, setIsPressing] = React.useState(false)
+    const longPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+
+    const startLongPress = React.useCallback((e: React.PointerEvent) => {
+      if (e.pointerType === 'mouse') return
+      setIsPressing(true)
+      longPressTimerRef.current = setTimeout(() => {
+        setIsPressing(false)
+        navigator.vibrate?.(50)
+        onEnterSelectMode?.()
+        onToggleSelect()
+      }, 500)
+    }, [onEnterSelectMode, onToggleSelect])
+
+    const cancelLongPress = React.useCallback(() => {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current)
+        longPressTimerRef.current = null
+      }
+      setIsPressing(false)
+    }, [])
+
     const boostRemaining = React.useMemo(() => {
       if (!product.boosted_at) return null;
       const boostedAtRaw = String(product.boosted_at)
@@ -2635,7 +2684,7 @@ const Dashboard: React.FC = () => {
       const expiresAt = boostedTime + 3 * 60 * 60 * 1000
       const remaining = expiresAt - new Date().getTime()
       if (remaining <= 0) return null
-      
+
       const hours = Math.floor(remaining / (60 * 60 * 1000))
       const minutes = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000))
       return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`
@@ -2647,7 +2696,17 @@ const Dashboard: React.FC = () => {
         py={{ base: 2.5, md: 3 }}
         borderBottom="1px"
         borderColor={borderColor}
-        _hover={{ bg: 'gray.50' }}
+        bg={isPressing ? 'brand.50' : (isSelectMode && isSelected ? 'brand.50' : undefined)}
+        _hover={{ bg: isSelectMode && isSelected ? 'brand.50' : 'gray.50' }}
+        onClick={isSelectMode ? onToggleSelect : undefined}
+        cursor={isSelectMode ? 'pointer' : undefined}
+        userSelect="none"
+        transition="background 0.15s, box-shadow 0.15s"
+        sx={isSelectMode && isSelected ? { boxShadow: 'inset 3px 0 0 var(--chakra-colors-brand-500)' } : undefined}
+        onPointerDown={startLongPress}
+        onPointerUp={cancelLongPress}
+        onPointerLeave={cancelLongPress}
+        onPointerCancel={cancelLongPress}
       >
         <Flex
           align="center"
@@ -2656,9 +2715,12 @@ const Dashboard: React.FC = () => {
         >
           {showActions && (isAvailable || isLocked) && (
             <Checkbox
+              display={isSelectMode ? { base: 'flex', md: 'flex' } : { base: 'none', md: 'flex' }}
               isChecked={isSelected}
               onChange={onToggleSelect}
+              onClick={(e) => e.stopPropagation()}
               flexShrink={0}
+              colorScheme="brand"
               aria-label={`Select ${product.title}`}
             />
           )}
@@ -2706,20 +2768,22 @@ const Dashboard: React.FC = () => {
               </Badge>
             )}
           </Box>
-          <VStack align="start" spacing={{ base: 1.5, md: 0 }} flex={1} minW={0}>
-            <Flex
-              w="full"
-              align={{ base: 'flex-start', sm: 'center' }}
-              gap={{ base: 1, sm: 3 }}
-              direction={{ base: 'column', sm: 'row' }}
-              minW={0}
-            >
-              <Text fontWeight="semibold" noOfLines={2} fontSize={{ base: 'sm', md: 'md' }} lineHeight="1.25" minW={0}>
+          <VStack align="start" spacing={1.5} flex={1} minW={0}>
+            {/* Title + offers count: one horizontal row, title truncates */}
+            <Flex w="full" align="center" justify="space-between" gap={2} minW={0}>
+              <Text
+                fontWeight="semibold"
+                noOfLines={1}
+                fontSize={{ base: 'sm', md: 'md' }}
+                lineHeight="1.3"
+                flex={1}
+                minW={0}
+              >
                 {product.title}
               </Text>
-              <HStack spacing={1} fontSize="xs" color="gray.500" flexShrink={0} lineHeight="1">
+              <HStack spacing={1} fontSize="xs" color="gray.400" flexShrink={0}>
                 <Icon as={FaHandshake} boxSize={3} />
-                <Text>{offersCount} offers</Text>
+                <Text whiteSpace="nowrap">{offersCount} offers</Text>
               </HStack>
             </Flex>
             {!isAvailable && (
@@ -2729,54 +2793,67 @@ const Dashboard: React.FC = () => {
                 </Badge>
               </HStack>
             )}
-            {showActions && (
-              <HStack spacing={1.5} display={{ base: 'flex', md: 'none' }} flexWrap="wrap" align="center">
+            {/* Mobile action row — hidden when in selection mode */}
+            {showActions && !isSelectMode && (
+              <Flex w="full" gap={1.5} display={{ base: 'flex', md: 'none' }} align="center">
                 {isAvailable && (
                   <Button
-                    size="sm"
-                    h="32px"
-                    colorScheme="yellow"
-                    variant="outline"
-                    leftIcon={<Icon as={FaRegLightbulb} boxSize={3} />}
-                    onClick={() => handleFindTradesClick(product)}
-                    fontSize="xs"
-                    px={2.5}
-                    whiteSpace="nowrap"
+                    h="40px"
+                    colorScheme="brand"
+                    variant="solid"
+                    leftIcon={<Icon as={FaHandshake} boxSize={3.5} />}
+                    onClick={(e) => { e.stopPropagation(); handleFindTradesClick(product) }}
+                    fontSize="sm"
+                    fontWeight="700"
+                    flex={1}
+                    borderRadius="xl"
+                    _hover={{ opacity: 0.88 }}
+                    transition="opacity 0.15s"
                   >
                     Find Trades
                   </Button>
                 )}
-                <Button
-                  as={RouterLink}
-                  to={`/edit-product/${product.id}`}
-                  leftIcon={<EditIcon />}
-                  variant="outline"
-                  colorScheme="brand"
-                  size="sm"
-                  h="32px"
-                  fontSize="xs"
-                  px={2.5}
-                >
-                  Edit
-                </Button>
-                <Tooltip
-                  label={product.status === 'locked' ? 'Cannot delete locked products' : ''}
-                  isDisabled={product.status !== 'locked'}
-                  hasArrow
-                >
-                  <IconButton
-                    aria-label="Delete"
-                    icon={<DeleteIcon />}
+                <Menu placement="bottom-end">
+                  <MenuButton
+                    as={IconButton}
+                    aria-label="More actions"
+                    icon={<Icon as={FiMoreVertical} boxSize={4} />}
                     variant="outline"
-                    colorScheme="red"
                     size="sm"
                     h="32px"
+                    w="32px"
                     minW="32px"
-                    isDisabled={product.status === 'locked'}
-                    onClick={onDelete}
+                    borderRadius="lg"
+                    color="gray.500"
+                    borderColor="gray.200"
+                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                    _hover={{ bg: 'gray.50' }}
                   />
-                </Tooltip>
-              </HStack>
+                  <MenuList fontSize="sm" minW="150px">
+                    <MenuItem icon={<EditIcon />} as={RouterLink} to={`/edit-product/${product.id}`}>
+                      Edit
+                    </MenuItem>
+                    <MenuItem
+                      icon={<Icon as={FiMoreVertical} boxSize={3} color="brand.500" />}
+                      onClick={(e: React.MouseEvent) => {
+                        e.stopPropagation()
+                        onEnterSelectMode?.()
+                      }}
+                    >
+                      Select items
+                    </MenuItem>
+                    <MenuDivider />
+                    <MenuItem
+                      icon={<DeleteIcon color="red.400" />}
+                      color="red.500"
+                      isDisabled={isLocked}
+                      onClick={(e: React.MouseEvent) => { e.stopPropagation(); onDelete() }}
+                    >
+                      Delete
+                    </MenuItem>
+                  </MenuList>
+                </Menu>
+              </Flex>
             )}
           </VStack>
           {/* Desktop: show actions inline */}
@@ -2787,9 +2864,9 @@ const Dashboard: React.FC = () => {
                 {isAvailable && (
                   <Button
                     size="sm"
-                    colorScheme="yellow"
-                    variant="outline"
-                    leftIcon={<Icon as={FaRegLightbulb} boxSize={3} />}
+                    colorScheme="brand"
+                    variant="solid"
+                    leftIcon={<Icon as={FaHandshake} boxSize={3} />}
                     onClick={() => handleFindTradesClick(product)}
                     fontSize="sm"
                     px={3}
@@ -3124,7 +3201,7 @@ const Dashboard: React.FC = () => {
           role="article"
           bg="white"
         >
-          <Box position="relative" w="full" h={{ base: '120px', md: '140px' }} display="flex" gap={1} p={2} bg="gray.50" flexWrap="nowrap" alignContent="flex-start" overflow="hidden">
+          <Box position="relative" w="full" h={{ base: '96px', md: '130px' }} display="flex" gap={1} p={2} bg="gray.50" flexWrap="nowrap" alignContent="flex-start" overflow="hidden">
             {/* Requested seller items: primary target plus optional multi-product bundle items */}
             <Box flex={1} display="flex" gap={1} minW="0" position="relative">
               {[{ product_id: trade.target_product_id, product_title: trade.product_title, product_image_url: trade.product_image_url }, ...requestedItems].slice(0, 3).map((item: any, idx: number) => (
@@ -3196,56 +3273,52 @@ const Dashboard: React.FC = () => {
             </Box>
           </Box>
 
-          <CardHeader pb={3} pt={4} flex={1}>
-            <VStack spacing={3} align="stretch">
-              <Flex justify="space-between" align="start">
-                <HStack spacing={1.5} flexWrap="wrap">
-                  <Badge colorScheme={tradeKind === 'Buyout' ? 'orange' : 'brand'} variant="solid" fontSize="10px" px={3} py={1} borderRadius="md" fontWeight="700" letterSpacing="wider" textTransform="uppercase">
-                    {tradeKind}
-                  </Badge>
-                  <Badge colorScheme={statusBadge.color} bg={`${statusBadge.color}.100`} color={`${statusBadge.color}.700`} variant="solid" fontSize="10px" px={3} py={1} borderRadius="md" fontWeight="700" letterSpacing="wider" textTransform="uppercase">
-                    {statusBadge.text}
-                  </Badge>
-                </HStack>
-              </Flex>
+          <CardHeader pb={{ base: 2, md: 3 }} pt={{ base: 3, md: 4 }} px={{ base: 3, md: 5 }} flex={1}>
+            <VStack spacing={{ base: 2, md: 3 }} align="stretch">
+              <HStack spacing={1.5} flexWrap="wrap">
+                <Badge colorScheme={tradeKind === 'Buyout' ? 'orange' : 'brand'} variant="solid" fontSize="10px" px={2} py={0.5} borderRadius="md" fontWeight="700" letterSpacing="wider" textTransform="uppercase">
+                  {tradeKind}
+                </Badge>
+                <Badge colorScheme={statusBadge.color} bg={`${statusBadge.color}.100`} color={`${statusBadge.color}.700`} variant="solid" fontSize="10px" px={2} py={0.5} borderRadius="md" fontWeight="700" letterSpacing="wider" textTransform="uppercase">
+                  {statusBadge.text}
+                </Badge>
+              </HStack>
 
-              <Box>
-                <Heading fontSize="md" fontWeight="700" color="gray.800" noOfLines={2} lineHeight="1.3" letterSpacing="tight">
-                  {getRequestedBundleTitle(trade)}
-                </Heading>
-              </Box>
+              <Heading fontSize={{ base: 'sm', md: 'md' }} fontWeight="700" color="gray.800" noOfLines={2} lineHeight="1.3" letterSpacing="tight">
+                {getRequestedBundleTitle(trade)}
+              </Heading>
 
-              <HStack spacing={2} mt={1}>
+              <HStack spacing={2}>
                 <Avatar
                   name={userName}
-                  size="sm"
+                  size="xs"
                   bg={isIncoming ? 'green.500' : 'blue.500'}
                   color="white"
                 />
                 <Box flex={1} minW={0}>
-                  <Text fontSize="sm" fontWeight="600" color="gray.800" noOfLines={1} letterSpacing="tight">
+                  <Text fontSize="xs" fontWeight="600" color="gray.700" noOfLines={1}>
                     {userName}
                   </Text>
-                  <Text fontSize="10px" fontWeight="500" color="gray.400" textTransform="uppercase" letterSpacing="wider">
-                    Accepted {timeAgo}
+                  <Text fontSize="10px" color="gray.400" textTransform="uppercase" letterSpacing="wider">
+                    {timeAgo}
                   </Text>
                 </Box>
               </HStack>
             </VStack>
           </CardHeader>
 
-          <CardFooter pt={0} pb={4} px={4}>
+          <CardFooter pt={0} pb={{ base: 3, md: 4 }} px={{ base: 3, md: 4 }} borderTopWidth="1px" borderTopColor="gray.100">
             <Button
-              size="md"
+              size={{ base: 'sm', md: 'md' }}
               borderRadius="2xl"
               fontWeight="600"
               colorScheme="brand"
               w="full"
               onClick={() => onView(trade)}
-              leftIcon={<Icon as={ViewIcon} />}
+              leftIcon={<Icon as={ViewIcon} boxSize={{ base: 3, md: 4 }} />}
               _hover={{ transform: 'translateY(-2px)' }}
               transition="all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1)"
-              shadow="md"
+              shadow="sm"
             >
               View Trade
             </Button>
@@ -4406,18 +4479,30 @@ const Dashboard: React.FC = () => {
                 {/* Products Tab */}
                 <TabPanel px={{ base: 2, md: 4 }} py={{ base: 3, md: 4 }}>
                   <VStack spacing={6} align="stretch">
-                    <Box p={3} bg="blue.50" border="1px solid" borderColor="blue.200" borderRadius="lg">
-                      <VStack align="start" spacing={1}>
-                        <Text fontSize="xs" color="blue.800">
-                          Tip: Products shown here are available products. Use "Find Trades" to connect your product to other products.
-                        </Text>
-                        {!user?.is_premium && (
-                          <Text fontSize="xs" color="blue.900" fontWeight="semibold">
-                            Upgrade to Premium to be able to boost your products.
+                    {!tipDismissed && (
+                      <Box p={2.5} bg="blue.50" border="1px solid" borderColor="blue.200" borderRadius="lg">
+                        <Flex justify="space-between" align="flex-start" gap={2}>
+                          <Text fontSize="xs" color="blue.800" lineHeight="1.5">
+                            Tap <strong>Find Trades</strong> to connect your product with others.
+                            {!user?.is_premium && (
+                              <Box as="span" color="blue.900" fontWeight="semibold"> Upgrade to Premium to boost your products.</Box>
+                            )}
                           </Text>
-                        )}
-                      </VStack>
-                    </Box>
+                          <IconButton
+                            aria-label="Dismiss tip"
+                            icon={<CloseIcon boxSize={2} />}
+                            size="xs"
+                            variant="ghost"
+                            colorScheme="blue"
+                            flexShrink={0}
+                            onClick={() => {
+                              setTipDismissed(true)
+                              localStorage.setItem('clovia_product_tip_dismissed', '1')
+                            }}
+                          />
+                        </Flex>
+                      </Box>
+                    )}
 
 
                     {/* Products Grid or List - Apply Sort */}
@@ -4480,14 +4565,82 @@ const Dashboard: React.FC = () => {
                     ) : productViewMode === 'list' ? (
                       <>
                         <Box border="1px" borderColor={borderColor} borderRadius="lg" overflow="hidden" bg={cardBg}>
-                          {/* Select All header row - only in list view */}
+                          {/* Mobile: selection mode bar (only when active) */}
+                          {isProductSelectMode && (
+                            <Flex
+                              display={{ base: 'flex', md: 'none' }}
+                              align="center"
+                              justify="space-between"
+                              px={3}
+                              py={2.5}
+                              bg="brand.500"
+                              color="white"
+                              borderBottom="1px"
+                              borderColor="brand.600"
+                            >
+                              <HStack spacing={2}>
+                                <Text fontSize="sm" fontWeight="semibold">
+                                  {selectedProductIds.size} selected
+                                </Text>
+                                <Button
+                                  size="xs"
+                                  variant="ghost"
+                                  color="white"
+                                  fontWeight="medium"
+                                  px={2}
+                                  h="26px"
+                                  _hover={{ bg: 'whiteAlpha.200' }}
+                                  onClick={toggleSelectAllProducts}
+                                >
+                                  All
+                                </Button>
+                              </HStack>
+                              <HStack spacing={1}>
+                                {selectedProductIds.size > 0 && (
+                                  <Button
+                                    size="xs"
+                                    bg="red.500"
+                                    color="white"
+                                    fontWeight="semibold"
+                                    px={3}
+                                    h="28px"
+                                    borderRadius="lg"
+                                    _hover={{ bg: 'red.400' }}
+                                    leftIcon={<DeleteIcon boxSize={2.5} />}
+                                    onClick={handleBatchDelete}
+                                    isLoading={deleting}
+                                  >
+                                    Delete
+                                  </Button>
+                                )}
+                                <Button
+                                  size="xs"
+                                  variant="ghost"
+                                  color="white"
+                                  fontWeight="semibold"
+                                  px={2}
+                                  h="28px"
+                                  _hover={{ bg: 'whiteAlpha.200' }}
+                                  onClick={() => {
+                                    setSelectedProductIds(new Set())
+                                    setIsProductSelectMode(false)
+                                  }}
+                                >
+                                  Cancel
+                                </Button>
+                              </HStack>
+                            </Flex>
+                          )}
+                          {/* Desktop: select-all row + bulk actions */}
                           <Flex
+                            display={{ base: 'none', md: 'flex' }}
                             align="center"
-                            gap={{ base: 2, md: 4 }}
-                            p={3}
+                            gap={3}
+                            px={3} py={2.5}
                             borderBottom="1px"
-                            borderColor={borderColor}
-                            bg="gray.50"
+                            borderColor={selectedProductIds.size > 0 ? 'brand.200' : borderColor}
+                            bg={selectedProductIds.size > 0 ? 'brand.50' : 'gray.50'}
+                            transition="background 0.2s"
                           >
                             <Checkbox
                               isChecked={currentPageSelectableProducts.length > 0 && currentPageSelectableProducts.every(p => selectedProductIds.has(p.id))}
@@ -4496,11 +4649,45 @@ const Dashboard: React.FC = () => {
                                 !currentPageSelectableProducts.every(p => selectedProductIds.has(p.id))
                               }
                               onChange={toggleSelectAllProducts}
+                              colorScheme="brand"
                               flexShrink={0}
                             />
-                            <Text fontSize="sm" color="gray.600" fontWeight="medium">
-                              Select all on page
+                            <Text fontSize="sm" color={selectedProductIds.size > 0 ? 'brand.700' : 'gray.600'} fontWeight={selectedProductIds.size > 0 ? '600' : 'medium'} flex={1}>
+                              {selectedProductIds.size > 0 ? `${selectedProductIds.size} item${selectedProductIds.size > 1 ? 's' : ''} selected` : 'Select all on page'}
                             </Text>
+                            {selectedProductIds.size > 0 && (
+                              <HStack spacing={2}>
+                                <Button
+                                  size="sm"
+                                  colorScheme="red"
+                                  variant="solid"
+                                  leftIcon={<DeleteIcon />}
+                                  onClick={handleBatchDelete}
+                                  isLoading={deleting}
+                                  borderRadius="lg"
+                                >
+                                  Delete Selected
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  colorScheme="brand"
+                                  variant="outline"
+                                  onClick={handleBatchLock}
+                                  isLoading={deleting}
+                                  borderRadius="lg"
+                                >
+                                  Lock / Unlock
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  colorScheme="gray"
+                                  onClick={() => setSelectedProductIds(new Set())}
+                                >
+                                  Clear
+                                </Button>
+                              </HStack>
+                            )}
                           </Flex>
                           {paginatedProducts.map((product) => (
                             <ProductListRow
@@ -4511,6 +4698,8 @@ const Dashboard: React.FC = () => {
                               onToggleSelect={() => toggleProductSelection(product.id)}
                               onDelete={() => handleDeleteProductClick(product)}
                               offersCount={getProductOffersCount(product.id)}
+                              isSelectMode={isProductSelectMode}
+                              onEnterSelectMode={() => setIsProductSelectMode(true)}
                             />
                           ))}
                         </Box>
@@ -4554,11 +4743,13 @@ const Dashboard: React.FC = () => {
                       isLazy
                       lazyBehavior="keepMounted"
                     >
+                      <Flex align="center" gap={1.5}>
                       <TabList
                         flexWrap="nowrap"
-                        overflowX={{ base: 'auto', md: 'visible' }}
-                        justifyContent={{ base: 'flex-start', md: 'flex-start' }}
-                        w="100%"
+                        overflowX="auto"
+                        justifyContent="flex-start"
+                        flex={1}
+                        minW={0}
                         sx={{
                           '&::-webkit-scrollbar': { display: 'none' },
                           scrollbarWidth: 'none',
@@ -4656,26 +4847,36 @@ const Dashboard: React.FC = () => {
                           )}
                         </Tab>
                       </TabList>
-
-                      <HStack spacing={1.5} flexWrap="wrap" pt={3}>
-                        {(['all', 'trade', 'buyout'] as const).map((type) => (
-                          <Button
-                            key={type}
+                      {/* Filter dropdown — inline with tabs, always visible */}
+                      <Box flexShrink={0}>
+                        <Menu placement="bottom-end">
+                          <MenuButton
+                            as={Button}
                             size="xs"
                             h="30px"
                             px={3}
                             borderRadius="full"
-                            variant={offersTypeFilter === type ? 'solid' : 'outline'}
-                            colorScheme={type === 'buyout' ? 'orange' : 'brand'}
-                            onClick={() => {
-                              setOffersTypeFilter(type)
-                              setOffersPage(1)
-                            }}
+                            variant={offersTypeFilter === 'all' ? 'outline' : 'solid'}
+                            colorScheme={offersTypeFilter === 'buyout' ? 'orange' : 'brand'}
+                            rightIcon={<ChevronDownIcon />}
                           >
-                            {type === 'all' ? 'All' : type === 'trade' ? 'Trade' : 'Buyout'}
-                          </Button>
-                        ))}
-                      </HStack>
+                            {offersTypeFilter === 'all' ? 'All' : offersTypeFilter === 'trade' ? 'Trade' : 'Buyout'}
+                          </MenuButton>
+                          <MenuList fontSize="sm" minW="130px">
+                            {(['all', 'trade', 'buyout'] as const).map((type) => (
+                              <MenuItem
+                                key={type}
+                                fontWeight={offersTypeFilter === type ? 'semibold' : 'normal'}
+                                color={offersTypeFilter === type ? (type === 'buyout' ? 'orange.600' : 'brand.600') : 'inherit'}
+                                onClick={() => { setOffersTypeFilter(type); setOffersPage(1) }}
+                              >
+                                {type === 'all' ? 'All' : type === 'trade' ? 'Trade' : 'Buyout'}
+                              </MenuItem>
+                            ))}
+                          </MenuList>
+                        </Menu>
+                      </Box>
+                      </Flex>
 
                       <TabPanels>
                         {/* Inbox */}
@@ -5116,98 +5317,91 @@ const Dashboard: React.FC = () => {
                                       h="100%"
                                       display="flex"
                                       flexDirection="column"
-                                      _hover={{
-                                        shadow: 'lg',
-                                        transform: 'translateY(-4px)',
-                                        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                                        borderColor: 'purple.400',
-                                      }}
-                                      transition="all 0.3s cubic-bezier(0.4, 0, 0.2, 1)"
+                                      borderRadius="2xl"
+                                      overflow="hidden"
+                                      borderWidth="0"
                                       borderLeftWidth="4px"
                                       borderLeftColor="purple.400"
+                                      shadow="sm"
+                                      _hover={{
+                                        shadow: 'md',
+                                        transform: 'translateY(-3px)',
+                                        transition: 'all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)',
+                                      }}
+                                      transition="all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)"
                                       role="article"
+                                      bg="white"
                                     >
-                                      <Box position="relative" w="full" h={{ base: '120px', md: '140px' }} display="flex" gap={1} p={1} bg="gray.50" flexWrap="nowrap" alignContent="flex-start" overflow="hidden">
-                                        {/* Your Item */}
+                                      {/* Image area */}
+                                      <Box position="relative" w="full" h={{ base: '96px', md: '130px' }} display="flex" gap={1} p={2} bg="gray.50" flexWrap="nowrap" overflow="hidden">
                                         <Box flex={1} position="relative" borderRadius="xl" overflow="hidden" shadow="sm" minW="0">
                                           {yourProductImage ? (
-                                            <Image src={yourProductImage} alt="Your Item" objectFit="cover" w="100%" h="100%" fallback={
-                                              <Box w="100%" h="100%" bg="gray.200" />
-                                            } />
+                                            <Image src={yourProductImage} alt="Your Item" objectFit="cover" w="100%" h="100%" />
                                           ) : (
-                                            <Box w="100%" h="100%" bg="gray.200" display="flex" alignItems="center" justifyContent="center">
-                                              <Text fontSize="xs" color="gray.600" fontWeight="semibold">Your Item</Text>
+                                            <Box w="100%" h="100%" bg="gray.100" display="flex" alignItems="center" justifyContent="center">
+                                              <Icon as={FaHandshake} color="gray.300" boxSize={5} />
                                             </Box>
                                           )}
                                           <Badge position="absolute" top={1} left={1} bg="blue.500" color="white" fontSize="9px" fontWeight="700" px={2} py={0.5} borderRadius="md" shadow="sm">Your Item</Badge>
                                         </Box>
-
-                                        {/* Their Items */}
                                         <Box flex={1} position="relative" borderRadius="xl" overflow="hidden" shadow="sm" minW="0">
                                           {incomingProductImage ? (
-                                            <Image src={incomingProductImage} alt="Their Item" objectFit="cover" w="100%" h="100%" fallback={
-                                              <Box w="100%" h="100%" bg="gray.200" />
-                                            }/>
+                                            <Image src={incomingProductImage} alt="Their Item" objectFit="cover" w="100%" h="100%" />
                                           ) : (
-                                            <Box w="100%" h="100%" bg="gray.200" display="flex" alignItems="center" justifyContent="center">
-                                              <Text fontSize="xs" color="gray.600" fontWeight="semibold">{loopLabel}</Text>
+                                            <Box w="100%" h="100%" bg="gray.100" display="flex" alignItems="center" justifyContent="center">
+                                              <Icon as={FaHandshake} color="gray.300" boxSize={5} />
                                             </Box>
                                           )}
-                                          <Badge position="absolute" top={1} right={1} bg={loopLabel === 'Multi-Way' ? 'brand.500' : 'purple.500'} color="white" fontSize="9px" fontWeight="700" px={2} py={0.5} borderRadius="md" shadow="sm">{loopLabel}</Badge>
+                                          <Badge position="absolute" top={1} right={1} bg="purple.500" color="white" fontSize="9px" fontWeight="700" px={2} py={0.5} borderRadius="md" shadow="sm">{loopLabel}</Badge>
                                         </Box>
                                       </Box>
 
-                                      <CardHeader pb={3} pt={4} flex={1}>
-                                        <VStack spacing={3} align="stretch">
-                                          <Flex justify="space-between" align="start">
-                                            <HStack spacing={2}>
-                                              <Badge colorScheme="purple" bg="purple.100" color="purple.700" variant="solid" fontSize="10px" px={3} py={1} borderRadius="md" fontWeight="700" letterSpacing="wider" textTransform="uppercase">
-                                                Active Loop
-                                              </Badge>
-                                              <Badge colorScheme="purple" bg="purple.500" color="white" variant="solid" fontSize="10px" px={3} py={1} borderRadius="md" fontWeight="700" letterSpacing="wider" textTransform="uppercase">
-                                                {loopLabel}
-                                              </Badge>
-                                            </HStack>
-                                            {matchScore > 0 && (
-                                              <Badge colorScheme="purple" fontSize="10px" fontWeight="700" px={2} py={1} borderRadius="md">
-                                                {matchScore}% Fit
-                                              </Badge>
-                                            )}
-                                          </Flex>
+                                      <CardHeader pb={{ base: 2, md: 3 }} pt={{ base: 3, md: 4 }} px={{ base: 3, md: 5 }} flex={1}>
+                                        <VStack spacing={{ base: 2, md: 3 }} align="stretch">
+                                          <HStack spacing={1.5} flexWrap="wrap">
+                                            <Badge colorScheme="purple" variant="solid" fontSize="10px" px={2} py={0.5} borderRadius="md" fontWeight="700" letterSpacing="wider" textTransform="uppercase">
+                                              {loopLabel}
+                                            </Badge>
+                                            <Badge colorScheme="green" bg="green.100" color="green.700" variant="solid" fontSize="10px" px={2} py={0.5} borderRadius="md" fontWeight="700" letterSpacing="wider" textTransform="uppercase">
+                                              Active Loop
+                                            </Badge>
+                                          </HStack>
 
                                           <Box>
-                                            <HStack spacing={2} align="center" flexWrap="wrap">
-                                              <Heading fontSize="md" fontWeight="700" color="gray.800" noOfLines={2} lineHeight="1.3" letterSpacing="tight">
-                                                {summary.yourGive}
-                                              </Heading>
-                                              <Text fontSize="xs" fontWeight="700" color="gray.400">→</Text>
-                                              <Heading fontSize="md" fontWeight="700" color="gray.800" noOfLines={2} lineHeight="1.3" letterSpacing="tight">
-                                                {summary.yourGet}
-                                              </Heading>
-                                            </HStack>
+                                            <Heading fontSize={{ base: 'sm', md: 'md' }} fontWeight="700" color="gray.800" noOfLines={1} lineHeight="1.3" letterSpacing="tight">
+                                              {summary.yourGive}
+                                            </Heading>
+                                            <Text fontSize="xs" color="gray.500" mt={0.5} noOfLines={1}>→ for {summary.yourGet}</Text>
                                           </Box>
 
-                                          <SimpleGrid columns={participants.length > 3 ? 2 : 1} spacing={2}>
-                                            {participants.map((participant: any) => (
-                                              <HStack key={`${trade.id || trade.loop_id || trade.chain_id}-${participant.user_id || participant.id}`} spacing={2} minW={0} p={2} bg="purple.50" borderRadius="md">
-                                                <Avatar name={participant.user_name || 'User'} size="xs" bg="purple.500" color="white" />
-                                                <Box minW={0}>
-                                                  <Text fontSize="xs" fontWeight="700" noOfLines={1}>
-                                                    {participant.user_name || 'Unknown User'}
-                                                  </Text>
-                                                  <Text fontSize="10px" color="gray.500" noOfLines={1}>
-                                                    {participant.product_title || 'Trade item'}
-                                                  </Text>
-                                                </Box>
-                                              </HStack>
-                                            ))}
-                                          </SimpleGrid>
+                                          <HStack spacing={2}>
+                                            <HStack spacing={-2}>
+                                              {participants.slice(0, 3).map((p: any, i: number) => (
+                                                <Avatar
+                                                  key={p.user_id || p.id || i}
+                                                  name={p.user_name || 'User'}
+                                                  size="xs"
+                                                  bg="purple.500"
+                                                  color="white"
+                                                  boxShadow="0 0 0 2px white"
+                                                />
+                                              ))}
+                                            </HStack>
+                                            <Box flex={1} minW={0}>
+                                              <Text fontSize="xs" fontWeight="600" color="gray.700" noOfLines={1}>
+                                                {participants.length} traders in loop
+                                              </Text>
+                                              <Text fontSize="10px" color="gray.400" textTransform="uppercase" letterSpacing="wider">
+                                                {getTimeAgo(trade.updated_at || trade.created_at)}
+                                              </Text>
+                                            </Box>
+                                          </HStack>
                                         </VStack>
                                       </CardHeader>
 
-                                      <CardFooter pt={0} pb={4} px={4}>
+                                      <CardFooter pt={0} pb={{ base: 3, md: 4 }} px={{ base: 3, md: 4 }} borderTopWidth="1px" borderTopColor="gray.100">
                                         <Button
-                                          size="md"
+                                          size={{ base: 'sm', md: 'md' }}
                                           borderRadius="2xl"
                                           fontWeight="600"
                                           colorScheme="brand"
@@ -5216,10 +5410,10 @@ const Dashboard: React.FC = () => {
                                             e.stopPropagation()
                                             handleViewMultiWayTradeDetails(trade)
                                           }}
-                                          leftIcon={<Icon as={ViewIcon} />}
+                                          leftIcon={<Icon as={ViewIcon} boxSize={{ base: 3, md: 4 }} />}
                                           _hover={{ transform: 'translateY(-2px)' }}
                                           transition="all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1)"
-                                          shadow="md"
+                                          shadow="sm"
                                         >
                                           View Trade
                                         </Button>
@@ -5768,7 +5962,7 @@ const Dashboard: React.FC = () => {
                     ) : tradeHistoryViewMode === 'list' ? (
                       <>
                         {/* List View for Trade History */}
-                        <Box border="1px" borderColor={borderColor} borderRadius="lg" overflow="hidden" bg={cardBg}>
+                        <Box border="1px" borderColor={borderColor} borderRadius="lg" overflow="hidden" bg={cardBg} display={{ base: 'none', md: 'block' }}>
                           <Box
                             px={4}
                             py={3}
@@ -5779,7 +5973,6 @@ const Dashboard: React.FC = () => {
                             fontWeight="semibold"
                             color="gray.600"
                             textTransform="uppercase"
-                            display={{ base: 'none', md: 'flex' }}
                           >
                             What � Who � Where � When � Action
                           </Box>
@@ -5794,58 +5987,41 @@ const Dashboard: React.FC = () => {
                               <Flex
                                 key={trade.id}
                                 align="center"
-                                gap={{ base: 2, md: 4 }}
-                                p={3}
+                                gap={4}
+                                px={4} py={3}
                                 borderBottom={idx < paginatedTradeHistory.length - 1 ? '1px' : 'none'}
                                 borderColor={borderColor}
                                 _hover={{ bg: 'gray.50' }}
-                                minW={0}
-                                flexWrap="wrap"
                               >
-                                <Box
-                                  w="60px"
-                                  h="60px"
-                                  flexShrink={0}
-                                  borderRadius="md"
-                                  overflow="hidden"
-                                  bg="gray.100"
-                                >
+                                <Box w="52px" h="52px" flexShrink={0} borderRadius="lg" overflow="hidden" bg="gray.100">
                                   <ProductThumb
                                     pid={trade.target_product_id}
                                     src={trade.product_image_url}
-                                    alt={getProductTitle(trade.target_product_id, trade.product_title)}
+                                    alt={gaveTitle}
                                     size="100%"
                                   />
                                 </Box>
-                                <VStack align="start" spacing={1} flex={1} minW={0}>
-                                  <Text fontWeight="semibold" noOfLines={1} fontSize={{ base: 'sm', md: 'md' }}>
-                                    {gaveTitle}
-                                  </Text>
-                                  <Text fontSize="xs" color="gray.600" noOfLines={1}>
-                                    Received: {receivedTitle}
-                                  </Text>
-                                  <HStack spacing={2} flexWrap="wrap">
-                                    <Badge colorScheme={getTradeKindLabel(trade) === 'Buyout' ? 'orange' : 'brand'} fontSize="2xs" px={1.5}>
-                                      {getTradeKindLabel(trade)}
-                                    </Badge>
-                                    <Badge colorScheme={badgeColor(trade.status).color} variant="subtle" fontSize="2xs" px={1.5}>
-                                      {getTradeStatusLabel(trade)}
-                                    </Badge>
-                                    <Badge colorScheme="blue" fontSize="2xs" px={1.5}>WHO: {partner.name}</Badge>
-                                    <Badge colorScheme="purple" fontSize="2xs" px={1.5}>WHERE: {where}</Badge>
-                                    <Badge colorScheme="green" fontSize="2xs" px={1.5}>WHEN: {when.date}</Badge>
+                                <VStack align="start" spacing={0.5} flex={1} minW={0}>
+                                  <Text fontWeight="600" noOfLines={1} fontSize="sm" color="gray.800">{gaveTitle}</Text>
+                                  <Text fontSize="xs" color="gray.500" noOfLines={1}>Received: {receivedTitle}</Text>
+                                  <HStack spacing={3} mt={0.5}>
+                                    <Text fontSize="xs" color="gray.600">
+                                      <Text as="span" fontWeight="600" color="gray.500">Who:</Text>{' '}{partner.name}
+                                    </Text>
+                                    <Text fontSize="xs" color="gray.600" noOfLines={1} maxW="220px">
+                                      <Text as="span" fontWeight="600" color="gray.500">Where:</Text>{' '}{where}
+                                    </Text>
                                   </HStack>
                                 </VStack>
                                 <VStack align="end" spacing={0} flexShrink={0}>
-                                  <Text fontSize="xs" color="gray.600">{when.date}</Text>
-                                  <Text fontSize="2xs" color="gray.500">{when.time || 'N/A'}</Text>
+                                  <Text fontSize="xs" color="gray.500">{when.date}</Text>
+                                  <Text fontSize="2xs" color="gray.400">{when.time || '—'}</Text>
                                 </VStack>
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   colorScheme="brand"
-                                  fontSize={{ base: 'xs', md: 'sm' }}
-                                  px={{ base: 2, md: 3 }}
+                                  flexShrink={0}
                                   onClick={() => { setSelectedTrade(trade); setDetailsOpen(true) }}
                                 >
                                   View
@@ -5854,6 +6030,134 @@ const Dashboard: React.FC = () => {
                             )
                           })}
                         </Box>
+
+                        {/* Mobile: clean date-grouped cards */}
+                        <VStack spacing={0} align="stretch" display={{ base: 'flex', md: 'none' }}>
+                          {(() => {
+                            const getDateGroup = (t: Trade) => {
+                              const src = t.completed_at || t.updated_at || t.created_at
+                              const dt = new Date(src)
+                              if (Number.isNaN(dt.getTime())) return 'Unknown'
+                              const now = new Date()
+                              const todayMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+                              const tMs = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).getTime()
+                              const diff = Math.floor((todayMs - tMs) / 86400000)
+                              if (diff === 0) return 'Today'
+                              if (diff === 1) return 'Yesterday'
+                              if (diff < 7) return 'This Week'
+                              return dt.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+                            }
+                            const groups: Record<string, Trade[]> = {}
+                            const groupOrder: string[] = []
+                            paginatedTradeHistory.forEach(t => {
+                              const g = getDateGroup(t)
+                              if (!groups[g]) { groups[g] = []; groupOrder.push(g) }
+                              groups[g].push(t)
+                            })
+                            return groupOrder.map(group => (
+                              <Box key={group} mb={5}>
+                                <Text
+                                  fontSize="10px" fontWeight="700" color="gray.400"
+                                  textTransform="uppercase" letterSpacing="0.1em"
+                                  mb={2.5} px={0.5}
+                                >
+                                  {group}
+                                </Text>
+                                <VStack spacing={2.5} align="stretch">
+                                  {groups[group].map(trade => {
+                                    const partner = getTradePartnerInfo(trade)
+                                    const where = getTradeWhere(trade)
+                                    const when = getTradeWhen(trade)
+                                    const gaveTitle = getProductTitle(trade.target_product_id, trade.product_title)
+                                    const receivedTitle = getTradeReceivedTitle(trade)
+                                    const statusLabel = getTradeStatusLabel(trade)
+                                    const statusClr = badgeColor(trade.status).color
+                                    const src = trade.completed_at || trade.updated_at || trade.created_at
+                                    const dt2 = new Date(src)
+                                    const niceDate = !Number.isNaN(dt2.getTime())
+                                      ? dt2.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                      : when.date
+                                    return (
+                                      <Box
+                                        key={trade.id}
+                                        bg="white"
+                                        borderWidth="1px"
+                                        borderColor="gray.100"
+                                        borderRadius="2xl"
+                                        p={4}
+                                        boxShadow="0 1px 4px rgba(0,0,0,0.05)"
+                                        _hover={{ boxShadow: '0 3px 10px rgba(0,0,0,0.09)' }}
+                                        transition="box-shadow 0.15s"
+                                      >
+                                        {/* Row 1: image + name + date/time */}
+                                        <HStack spacing={3} align="flex-start" mb={2}>
+                                          <Box w="56px" h="56px" flexShrink={0} borderRadius="lg" overflow="hidden" bg="gray.100">
+                                            <ProductThumb pid={trade.target_product_id} src={trade.product_image_url} alt={gaveTitle} size="100%" />
+                                          </Box>
+                                          <Box flex={1} minW={0}>
+                                            <HStack justify="space-between" align="flex-start">
+                                              <Text fontWeight="700" fontSize="sm" color="gray.800" noOfLines={1} flex={1} mr={2}>
+                                                {gaveTitle}
+                                              </Text>
+                                              <VStack spacing={0} align="flex-end" flexShrink={0}>
+                                                <Text fontSize="10px" color="gray.400" fontWeight="500" whiteSpace="nowrap">{niceDate}</Text>
+                                                <Text fontSize="10px" color="gray.400">{when.time || '—'}</Text>
+                                              </VStack>
+                                            </HStack>
+                                            {/* Row 2: received */}
+                                            <Text fontSize="xs" color="gray.500" noOfLines={1} mt={0.5}>
+                                              Received:{' '}
+                                              <Text as="span" color="gray.700" fontWeight="500">{receivedTitle}</Text>
+                                            </Text>
+                                          </Box>
+                                        </HStack>
+                                        {/* Row 3: Who · Where as plain text */}
+                                        <HStack spacing={0} mb={3} flexWrap="wrap" gap={1}>
+                                          <Text fontSize="11px" color="gray.600">
+                                            <Text as="span" fontWeight="600" color="gray.500">Who:</Text>{' '}{partner.name}
+                                          </Text>
+                                          <Text fontSize="11px" color="gray.300" px={1.5}>·</Text>
+                                          <Text fontSize="11px" color="gray.600" noOfLines={1} maxW="52%">
+                                            <Text as="span" fontWeight="600" color="gray.500">Where:</Text>{' '}{where}
+                                          </Text>
+                                        </HStack>
+                                        {/* Row 4: status pill + view button */}
+                                        <HStack justify="space-between" align="center">
+                                          <Badge
+                                            colorScheme={statusClr}
+                                            variant="subtle"
+                                            rounded="full"
+                                            px={3} py={0.5}
+                                            fontSize="11px"
+                                            fontWeight="600"
+                                            textTransform="none"
+                                          >
+                                            {statusLabel}
+                                          </Badge>
+                                          <Button
+                                            size="xs"
+                                            variant="ghost"
+                                            colorScheme="gray"
+                                            color="gray.500"
+                                            fontSize="12px"
+                                            fontWeight="600"
+                                            px={3}
+                                            rightIcon={<ChevronRightIcon boxSize={3} />}
+                                            _hover={{ bg: 'gray.50', color: 'gray.700' }}
+                                            onClick={() => { setSelectedTrade(trade); setDetailsOpen(true) }}
+                                          >
+                                            View
+                                          </Button>
+                                        </HStack>
+                                      </Box>
+                                    )
+                                  })}
+                                </VStack>
+                              </Box>
+                            ))
+                          })()}
+                        </VStack>
+
                         <PaginationControls
                           currentPage={tradeHistoryPage}
                           totalPages={tradeHistoryTotalPages}
@@ -5993,96 +6297,126 @@ const Dashboard: React.FC = () => {
                         </VStack>
 
                         {/* Mobile Card View */}
-                        <VStack spacing={4} align="stretch" display={{ base: 'flex', md: 'none' }}>
-                          {paginatedTradeHistory.map((trade) => {
-                            const partner = getTradePartnerInfo(trade)
-                            const where = getTradeWhere(trade)
-                            const when = getTradeWhen(trade)
-
-                            return (
-                              <Box
-                                key={trade.id}
-                                p={4}
-                                bg="white"
-                                borderWidth="1px"
-                                borderColor={borderColor}
-                                borderRadius="lg"
-                                transition="all 0.2s"
-                                _hover={{ shadow: 'md' }}
-                              >
-                                <VStack align="stretch" spacing={3}>
-                                  {/* Header with product thumbnail and partner */}
-                                  <HStack spacing={3} justify="space-between">
-                                    <Box w="50px" h="50px" flexShrink={0} borderRadius="md" overflow="hidden" borderWidth="1px" borderColor={borderColor}>
-                                      <ProductThumb
-                                        pid={trade.target_product_id}
-                                        src={trade.product_image_url}
-                                        alt={getProductTitle(trade.target_product_id, trade.product_title)}
-                                        size="full"
-                                      />
-                                    </Box>
-                                    <VStack align="start" spacing={0} flex={1}>
-                                      <Text fontSize="xs" fontWeight="semibold" color="gray.600">WHO</Text>
-                                      <Text fontSize="sm" fontWeight="medium" color="gray.800" noOfLines={1}>
-                                        {partner.name}
-                                      </Text>
-                                      <Text fontSize="2xs" color="gray.500">{partner.direction}</Text>
-                                    </VStack>
-                                  </HStack>
-
-                                  <SimpleGrid columns={2} spacing={2}>
-                                    <Box bg="gray.50" p={2} borderRadius="md">
-                                      <Text fontSize="2xs" color="gray.500" textTransform="uppercase">Where</Text>
-                                      <Text fontSize="xs" color="gray.700" noOfLines={2}>{where}</Text>
-                                    </Box>
-                                    <Box bg="gray.50" p={2} borderRadius="md">
-                                      <Text fontSize="2xs" color="gray.500" textTransform="uppercase">When</Text>
-                                      <Text fontSize="xs" color="gray.700">{when.date}</Text>
-                                      <Text fontSize="2xs" color="gray.500">{when.time || 'N/A'}</Text>
-                                    </Box>
-                                  </SimpleGrid>
-
-                                  {/* Trade details */}
-                                  <Box bg="gray.50" p={3} borderRadius="md" borderWidth="1px" borderColor={borderColor}>
-                                    <VStack align="stretch" spacing={2}>
-                                      <VStack align="start" spacing={1}>
-                                        <Text fontSize="xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">
-                                          What: You Gave
-                                        </Text>
-                                        <Text fontSize="sm" color="gray.800">
-                                          {getProductTitle(trade.target_product_id, trade.product_title)}
-                                        </Text>
-                                      </VStack>
-
-                                      <HStack justify="center">
-                                        <Text fontSize="md" color="brand.400">?</Text>
-                                      </HStack>
-
-                                      <VStack align="start" spacing={1}>
-                                        <Text fontSize="xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">
-                                          What: You Received
-                                        </Text>
-                                        <Text fontSize="sm" color="gray.800">
-                                          {getTradeReceivedTitle(trade)}
-                                        </Text>
-                                      </VStack>
-                                    </VStack>
-                                  </Box>
-
-                                  {/* Action button */}
-                                  <Button
-                                    size="sm"
-                                    colorScheme="brand"
-                                    variant="outline"
-                                    w="full"
-                                    onClick={() => { setSelectedTrade(trade); setDetailsOpen(true) }}
-                                  >
-                                    View Details
-                                  </Button>
+                        <VStack spacing={0} align="stretch" display={{ base: 'flex', md: 'none' }}>
+                          {(() => {
+                            const getDateGroupG = (t: Trade) => {
+                              const src = t.completed_at || t.updated_at || t.created_at
+                              const dt = new Date(src)
+                              if (Number.isNaN(dt.getTime())) return 'Unknown'
+                              const now = new Date()
+                              const todayMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+                              const tMs = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).getTime()
+                              const diff = Math.floor((todayMs - tMs) / 86400000)
+                              if (diff === 0) return 'Today'
+                              if (diff === 1) return 'Yesterday'
+                              if (diff < 7) return 'This Week'
+                              return dt.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+                            }
+                            const groups: Record<string, Trade[]> = {}
+                            const groupOrder: string[] = []
+                            paginatedTradeHistory.forEach(t => {
+                              const g = getDateGroupG(t)
+                              if (!groups[g]) { groups[g] = []; groupOrder.push(g) }
+                              groups[g].push(t)
+                            })
+                            return groupOrder.map(group => (
+                              <Box key={group} mb={5}>
+                                <Text
+                                  fontSize="10px" fontWeight="700" color="gray.400"
+                                  textTransform="uppercase" letterSpacing="0.1em"
+                                  mb={2.5} px={0.5}
+                                >
+                                  {group}
+                                </Text>
+                                <VStack spacing={2.5} align="stretch">
+                                  {groups[group].map(trade => {
+                                    const partner = getTradePartnerInfo(trade)
+                                    const where = getTradeWhere(trade)
+                                    const when = getTradeWhen(trade)
+                                    const gaveTitle = getProductTitle(trade.target_product_id, trade.product_title)
+                                    const receivedTitle = getTradeReceivedTitle(trade)
+                                    const statusLabel = getTradeStatusLabel(trade)
+                                    const statusClr = badgeColor(trade.status).color
+                                    const src = trade.completed_at || trade.updated_at || trade.created_at
+                                    const dtG = new Date(src)
+                                    const niceDate = !Number.isNaN(dtG.getTime())
+                                      ? dtG.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                      : when.date
+                                    return (
+                                      <Box
+                                        key={trade.id}
+                                        bg="white"
+                                        borderWidth="1px"
+                                        borderColor="gray.100"
+                                        borderRadius="2xl"
+                                        p={4}
+                                        boxShadow="0 1px 4px rgba(0,0,0,0.05)"
+                                        _hover={{ boxShadow: '0 3px 10px rgba(0,0,0,0.09)' }}
+                                        transition="box-shadow 0.15s"
+                                      >
+                                        <HStack spacing={3} align="flex-start" mb={2}>
+                                          <Box w="56px" h="56px" flexShrink={0} borderRadius="lg" overflow="hidden" bg="gray.100">
+                                            <ProductThumb pid={trade.target_product_id} src={trade.product_image_url} alt={gaveTitle} size="100%" />
+                                          </Box>
+                                          <Box flex={1} minW={0}>
+                                            <HStack justify="space-between" align="flex-start">
+                                              <Text fontWeight="700" fontSize="sm" color="gray.800" noOfLines={1} flex={1} mr={2}>
+                                                {gaveTitle}
+                                              </Text>
+                                              <VStack spacing={0} align="flex-end" flexShrink={0}>
+                                                <Text fontSize="10px" color="gray.400" fontWeight="500" whiteSpace="nowrap">{niceDate}</Text>
+                                                <Text fontSize="10px" color="gray.400">{when.time || '—'}</Text>
+                                              </VStack>
+                                            </HStack>
+                                            <Text fontSize="xs" color="gray.500" noOfLines={1} mt={0.5}>
+                                              Received:{' '}
+                                              <Text as="span" color="gray.700" fontWeight="500">{receivedTitle}</Text>
+                                            </Text>
+                                          </Box>
+                                        </HStack>
+                                        <HStack spacing={0} mb={3} flexWrap="wrap" gap={1}>
+                                          <Text fontSize="11px" color="gray.600">
+                                            <Text as="span" fontWeight="600" color="gray.500">Who:</Text>{' '}{partner.name}
+                                          </Text>
+                                          <Text fontSize="11px" color="gray.300" px={1.5}>·</Text>
+                                          <Text fontSize="11px" color="gray.600" noOfLines={1} maxW="52%">
+                                            <Text as="span" fontWeight="600" color="gray.500">Where:</Text>{' '}{where}
+                                          </Text>
+                                        </HStack>
+                                        <HStack justify="space-between" align="center">
+                                          <Badge
+                                            colorScheme={statusClr}
+                                            variant="subtle"
+                                            rounded="full"
+                                            px={3} py={0.5}
+                                            fontSize="11px"
+                                            fontWeight="600"
+                                            textTransform="none"
+                                          >
+                                            {statusLabel}
+                                          </Badge>
+                                          <Button
+                                            size="xs"
+                                            variant="ghost"
+                                            colorScheme="gray"
+                                            color="gray.500"
+                                            fontSize="12px"
+                                            fontWeight="600"
+                                            px={3}
+                                            rightIcon={<ChevronRightIcon boxSize={3} />}
+                                            _hover={{ bg: 'gray.50', color: 'gray.700' }}
+                                            onClick={() => { setSelectedTrade(trade); setDetailsOpen(true) }}
+                                          >
+                                            View
+                                          </Button>
+                                        </HStack>
+                                      </Box>
+                                    )
+                                  })}
                                 </VStack>
                               </Box>
-                            )
-                          })}
+                            ))
+                          })()}
                         </VStack>
 
                         {/* Pagination */}
@@ -6446,6 +6780,78 @@ const Dashboard: React.FC = () => {
         imageUrl={zoomImageUrl}
         altText={zoomAltText}
       />
+
+      {/* ── Mobile sticky bulk action bar ── */}
+      <Box
+        display={{ base: 'block', md: 'none' }}
+        position="fixed"
+        bottom={0}
+        left={0}
+        right={0}
+        zIndex={150}
+        transform={selectedProductIds.size > 0 && activeTab === 0 ? 'translateY(0)' : 'translateY(110%)'}
+        transition="transform 0.25s cubic-bezier(0.4, 0, 0.2, 1)"
+        bg="white"
+        borderTop="2px solid"
+        borderColor="brand.500"
+        px={4}
+        pt={3}
+        pb="calc(12px + env(safe-area-inset-bottom, 0px))"
+        boxShadow="0 -6px 24px rgba(0,0,0,0.12)"
+      >
+        <HStack justify="space-between" align="center" mb={2}>
+          <HStack spacing={1.5}>
+            <Box w={5} h={5} bg="brand.500" borderRadius="full" display="flex" alignItems="center" justifyContent="center">
+              <Text fontSize="10px" color="white" fontWeight="800" lineHeight={1}>{selectedProductIds.size}</Text>
+            </Box>
+            <Text fontSize="sm" fontWeight="700" color="gray.800">
+              {selectedProductIds.size} item{selectedProductIds.size !== 1 ? 's' : ''} selected
+            </Text>
+          </HStack>
+          <Button
+            size="xs"
+            variant="ghost"
+            colorScheme="gray"
+            color="gray.500"
+            fontSize="xs"
+            onClick={() => {
+              setSelectedProductIds(new Set())
+              setIsProductSelectMode(false)
+            }}
+          >
+            Clear
+          </Button>
+        </HStack>
+        <HStack spacing={2}>
+          <Button
+            flex={1}
+            h="44px"
+            colorScheme="red"
+            variant="solid"
+            leftIcon={<DeleteIcon />}
+            onClick={handleBatchDelete}
+            isLoading={deleting}
+            fontWeight="700"
+            fontSize="sm"
+            borderRadius="xl"
+          >
+            Delete Selected
+          </Button>
+          <Button
+            h="44px"
+            colorScheme="brand"
+            variant="outline"
+            onClick={handleBatchLock}
+            isLoading={deleting}
+            fontWeight="600"
+            fontSize="sm"
+            borderRadius="xl"
+            px={4}
+          >
+            Lock / Unlock
+          </Button>
+        </HStack>
+      </Box>
 
     </Box>
   )

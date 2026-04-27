@@ -1911,7 +1911,7 @@ func (h *ProductHandler) GetProduct(c *fiber.Ctx) error {
 			&wantsNull, &wantedCategoriesRaw, &locationTypeNull, &pickupLatNull, &pickupLonNull, &pickupAddressNull, &priceReasoningNull,
 			&product.CreatedAt, &product.UpdatedAt,
 			&sellerNameNull, &sellerProfilePictureNull, &product.WantCount,
-			&availabilitySlotsNull, &availabilityTypeNull, &product.IsSaved)
+			&availabilitySlotsNull, &availabilityTypeNull)
 	} else {
 		err = h.db.QueryRow(fmt.Sprintf(`
 			SELECT p.id, p.slug, p.title, p.description, p.price, p.image_urls, p.video_url, p.seller_id, 

@@ -81,7 +81,7 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
 
   const handleSheetDragEnd = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     if (!isMobile) return
-    if (info.offset.y > 110 || info.velocity.y > 700) {
+    if (info.offset.y > 80 || info.velocity.y > 500) {
       onClose()
     }
   }
@@ -91,12 +91,12 @@ const TradeModal: React.FC<TradeModalProps> = ({ isOpen, onClose, targetProductI
     initial: { y: '100%', opacity: 1 },
     animate: { y: 0, opacity: 1 },
     exit: { y: '100%', opacity: 1 },
-    transition: { type: 'spring', stiffness: 360, damping: 34 },
+    transition: { type: 'spring', stiffness: 380, damping: 36 },
     drag: 'y',
     dragControls: sheetDragControls,
     dragListener: false,
-    dragConstraints: { top: 0, bottom: 420 },
-    dragElastic: { top: 0, bottom: 0.22 },
+    dragConstraints: { top: 0 },
+    dragElastic: { top: 0, bottom: 0.25 },
     onDragEnd: handleSheetDragEnd,
   } as any) : {}
 
