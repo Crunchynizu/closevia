@@ -630,6 +630,20 @@ const Offers: React.FC = () => {
     return { label: 'Pending Schedule', color: 'yellow' as const }
   }
 
+  const getStructuredLogistics = (trade: Trade) => {
+    const finalSelection = splitMeetupDateTime(trade.meetup_time || null)
+    const buyerSelection = splitMeetupDateTime(trade.buyer_meetup_time || null)
+    const sellerSelection = splitMeetupDateTime(trade.seller_meetup_time || null)
+    const location = trade.meetup_location || trade.buyer_meetup_location || trade.seller_meetup_location || trade.target_product_pickup_address || ''
+    const date = finalSelection.date || buyerSelection.date || sellerSelection.date || trade.meetup_date || ''
+    const time = finalSelection.time || buyerSelection.time || sellerSelection.time || trade.meetup_time || ''
+    return {
+      method: trade.meeting_type === 'pickup' ? 'Pickup' : 'Meetup',
+      location,
+      schedule: [date ? new Date(`${date}T00:00:00`).toLocaleDateString('en-PH', { weekday: 'long', month: 'short', day: 'numeric' }) : '', time ? formatTimePH(time) : ''].filter(Boolean).join(', '),
+    }
+  }
+
   const renderOfferedItems = (t: Trade) => {
     const offered = (t.items || []).filter((i: any) => {
       const ob = (i?.offered_by ?? i?.offeredBy ?? i?.sender ?? i?.from_user_role)
@@ -692,6 +706,7 @@ const Offers: React.FC = () => {
     }
     const borderColor = borderColorMap[trade.status.toLowerCase() as keyof typeof borderColorMap] || 'gray.200'
     const pickupInfo = getPickupScheduleInfo(trade)
+    const logistics = getStructuredLogistics(trade)
 
     return (
       <ScaleFade in={true}>
@@ -734,6 +749,15 @@ const Offers: React.FC = () => {
                     {getRequestedBundleCount(trade)} requested items
                   </Badge>
                 )}
+              </Box>
+
+              <Box w="100%" p={2} bg={type === 'received' ? 'green.50' : 'blue.50'} borderWidth="1px" borderColor={type === 'received' ? 'green.100' : 'blue.100'} borderRadius="md">
+                <Text fontSize="11px" fontWeight="700" color="gray.800" mb={1}>
+                  {type === 'received' ? `${trade.buyer_name || 'User'} wants to trade with you` : `Trade with ${trade.seller_name || trade.buyer_name || 'User'}`}
+                </Text>
+                <Text fontSize="10px" color="gray.700">Method: <strong>{logistics.method}</strong></Text>
+                <Text fontSize="10px" color="gray.700" noOfLines={1}>Location: <strong>{logistics.location || 'Not selected'}</strong></Text>
+                <Text fontSize="10px" color="gray.700">Schedule: <strong>{logistics.schedule || 'Not selected'}</strong></Text>
               </Box>
 
               {/* Trade Option Badge */}
@@ -818,6 +842,19 @@ const Offers: React.FC = () => {
                     h="28px"
                   >
                     Cancel
+                  </Button>
+                )}
+                {onSecondaryAction && type === 'received' && (
+                  <Button
+                    size="xs"
+                    colorScheme="purple"
+                    variant="outline"
+                    fontSize="10px"
+                    onClick={onViewDetails}
+                    isDisabled={!canActOnOffer(trade)}
+                    h="28px"
+                  >
+                    Suggest New
                   </Button>
                 )}
                 {onSecondaryAction && type === 'received' && (

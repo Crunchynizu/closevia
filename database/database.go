@@ -298,6 +298,7 @@ func CreateTables() error {
 		"pickup_longitude":     "DECIMAL(11,8) NULL",
 		"pickup_address":       "TEXT NULL",
 		"featured_order":       "INT NULL",
+		"collection_setup":     "TEXT NULL",
 	}
 
 	for col, def := range productCols {
@@ -493,6 +494,7 @@ func CreateTables() error {
 			view_count INT DEFAULT 0,
 			boosted_at TIMESTAMP NULL,
 			featured_order INT NULL,
+			collection_setup TEXT NULL,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 			FOREIGN KEY (seller_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -564,8 +566,11 @@ func CreateTables() error {
 			buyer_feedback TEXT NULL,
 			seller_feedback TEXT NULL,
 			meetup_location VARCHAR(500) NULL,
+			meetup_label VARCHAR(500) NULL,
 			buyer_meetup_confirmed BOOLEAN DEFAULT FALSE,
 			seller_meetup_confirmed BOOLEAN DEFAULT FALSE,
+			meetup_lat DECIMAL(10,8) NULL,
+			meetup_lng DECIMAL(11,8) NULL,
 			buyer_met BOOLEAN DEFAULT FALSE,
 			seller_met BOOLEAN DEFAULT FALSE,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1757,6 +1762,9 @@ func ensureTradeColumns() {
 		{"message", "TEXT NULL"},
 		{"offered_cash_amount", "DECIMAL(10,2) NULL"},
 		{"meetup_time", "VARCHAR(50) NULL"},
+		{"meetup_label", "VARCHAR(500) NULL"},
+		{"meetup_lat", "DECIMAL(10,8) NULL"},
+		{"meetup_lng", "DECIMAL(11,8) NULL"},
 		{"buyer_meetup_location", "VARCHAR(500) NULL"},
 		{"buyer_meetup_time", "VARCHAR(50) NULL"},
 		{"seller_meetup_location", "VARCHAR(500) NULL"},

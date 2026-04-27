@@ -24,6 +24,60 @@ type TradeHandler struct {
 	db *sql.DB
 }
 
+type productCollectionSetup struct {
+	Methods []string `json:"methods"`
+	Pickup  struct {
+		Days      []string `json:"days"`
+		TimeStart string   `json:"time_start"`
+		TimeEnd   string   `json:"time_end"`
+		Notes     string   `json:"notes"`
+	} `json:"pickup"`
+	Meetup struct {
+		Locations  []string `json:"locations"`
+		Days       []string `json:"days"`
+		TimeStart  string   `json:"time_start"`
+		TimeEnd    string   `json:"time_end"`
+		DistanceKM string   `json:"distance_km"`
+		Notes      string   `json:"notes"`
+	} `json:"meetup"`
+}
+
+func parseProductCollectionSetup(raw string) productCollectionSetup {
+	var setup productCollectionSetup
+	if strings.TrimSpace(raw) == "" || json.Unmarshal([]byte(raw), &setup) != nil {
+		setup.Methods = []string{"pickup", "meetup"}
+		return setup
+	}
+	return setup
+}
+
+func collectionMethodEnabled(setup productCollectionSetup, method string) bool {
+	for _, enabled := range setup.Methods {
+		if strings.EqualFold(strings.TrimSpace(enabled), method) {
+			return true
+		}
+	}
+	return false
+}
+
+const meetupConfirmRadiusMeters = 100.0
+const meetupMaxAccuracyMeters = 100.0
+
+func validCoordinate(lat, lng float64) bool {
+	return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 && !(lat == 0 && lng == 0)
+}
+
+func resolveMeetupCoordinates(location string, lat, lng *float64) (sql.NullFloat64, sql.NullFloat64, error) {
+	if lat != nil && lng != nil && validCoordinate(*lat, *lng) {
+		return sql.NullFloat64{Float64: *lat, Valid: true}, sql.NullFloat64{Float64: *lng, Valid: true}, nil
+	}
+	coords, err := services.GetCoordinates(location)
+	if err != nil {
+		return sql.NullFloat64{}, sql.NullFloat64{}, err
+	}
+	return sql.NullFloat64{Float64: coords.Latitude, Valid: true}, sql.NullFloat64{Float64: coords.Longitude, Valid: true}, nil
+}
+
 // Keep legacy trade-match and multiway helpers compiled and available while the
 // current request flow relies on explicit product likes and persisted loop rows.
 var (
@@ -173,7 +227,10 @@ func (h *TradeHandler) ensureTradeRuntimeColumns() {
 		{"seller_accepted", "BOOLEAN DEFAULT FALSE"},
 		{"parent_trade_id", "INT NULL"},
 		{"meetup_location", "VARCHAR(500) NULL"},
+		{"meetup_label", "VARCHAR(500) NULL"},
 		{"meetup_time", "VARCHAR(100) NULL"},
+		{"meetup_lat", "DECIMAL(10,8) NULL"},
+		{"meetup_lng", "DECIMAL(11,8) NULL"},
 		{"buyer_meetup_confirmed", "BOOLEAN DEFAULT FALSE"},
 		{"seller_meetup_confirmed", "BOOLEAN DEFAULT FALSE"},
 		{"buyer_meetup_location", "VARCHAR(500) NULL"},
@@ -1117,6 +1174,55 @@ func (h *TradeHandler) CreateTrade(c *fiber.Ctx) error {
 		return c.Status(400).JSON(models.APIResponse{Success: false, Error: "This product is no longer available for trading"})
 	}
 
+	var collectionSetupRaw, targetPickupAddress string
+	var targetPickupLat, targetPickupLng, targetLat, targetLng sql.NullFloat64
+	_ = h.db.QueryRow(`
+		SELECT COALESCE(collection_setup, ''), COALESCE(pickup_address, location, ''),
+		       pickup_latitude, pickup_longitude, latitude, longitude
+		FROM products WHERE id = ?
+	`, payload.TargetProductID).Scan(&collectionSetupRaw, &targetPickupAddress, &targetPickupLat, &targetPickupLng, &targetLat, &targetLng)
+	targetCollectionSetup := parseProductCollectionSetup(collectionSetupRaw)
+	meetingType := strings.TrimSpace(payload.MeetingType)
+	if meetingType == "" {
+		meetingType = "meetup"
+	}
+	if meetingType != "pickup" && meetingType != "meetup" {
+		return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Invalid collection method"})
+	}
+	if !collectionMethodEnabled(targetCollectionSetup, meetingType) {
+		return c.Status(400).JSON(models.APIResponse{Success: false, Error: "This product does not allow the selected collection method"})
+	}
+	if meetingType == "pickup" {
+		meetupLocation = strings.TrimSpace(targetPickupAddress)
+		if meetupLocation == "" {
+			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Pickup is unavailable because this product has no saved location"})
+		}
+	}
+	if meetupLocation == "" {
+		return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Collection location is required"})
+	}
+	if meetupDate == "" || meetupTime == "" {
+		return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Collection date and time are required"})
+	}
+	var meetupLat, meetupLng sql.NullFloat64
+	if meetingType == "pickup" {
+		if targetPickupLat.Valid && targetPickupLng.Valid {
+			meetupLat = targetPickupLat
+			meetupLng = targetPickupLng
+		} else if targetLat.Valid && targetLng.Valid {
+			meetupLat = targetLat
+			meetupLng = targetLng
+		}
+	}
+	if !meetupLat.Valid || !meetupLng.Valid {
+		var coordErr error
+		meetupLat, meetupLng, coordErr = resolveMeetupCoordinates(meetupLocation, payload.MeetupLat, payload.MeetupLng)
+		if coordErr != nil {
+			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Could not verify the collection location coordinates. Please choose a mapped location."})
+		}
+	}
+	payload.MeetingType = meetingType
+
 	// Validate selection limit
 	if maxItems > 0 && len(payload.OfferedProductIDs) > maxItems {
 		return c.Status(400).JSON(models.APIResponse{
@@ -1220,9 +1326,9 @@ func (h *TradeHandler) CreateTrade(c *fiber.Ctx) error {
 	log.Printf("Executing single-step trade insert for trade from %d to %d (seller)", userID, sellerID)
 	res, err := tx.Exec(`
 		INSERT INTO trades 
-		(buyer_id, seller_id, target_product_id, status, buyer_accepted, trade_option, meeting_type, delivery_address, delivery_type, delivery_instructions, message, offered_cash_amount, payment_method, buyer_meetup_confirmed, buyer_meetup_location, buyer_meetup_time) 
-		VALUES (?, ?, ?, 'pending', TRUE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		userID, sellerID, payload.TargetProductID, payload.TradeOption, payload.MeetingType, payload.DeliveryAddress, payload.DeliveryType, payload.DeliveryInstructions, payload.Message, payload.OfferedCashAmount, payload.PaymentMethod, meetupLocation != "" && meetupDateTime != "", sql.NullString{String: meetupLocation, Valid: meetupLocation != ""}, sql.NullString{String: meetupDateTime, Valid: meetupDateTime != ""})
+		(buyer_id, seller_id, target_product_id, status, buyer_accepted, trade_option, meeting_type, delivery_address, delivery_type, delivery_instructions, message, offered_cash_amount, payment_method, buyer_meetup_confirmed, buyer_meetup_location, buyer_meetup_time, meetup_location, meetup_label, meetup_time, meetup_lat, meetup_lng)
+		VALUES (?, ?, ?, 'pending', TRUE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		userID, sellerID, payload.TargetProductID, payload.TradeOption, payload.MeetingType, payload.DeliveryAddress, payload.DeliveryType, payload.DeliveryInstructions, payload.Message, payload.OfferedCashAmount, payload.PaymentMethod, meetupLocation != "" && meetupDateTime != "", sql.NullString{String: meetupLocation, Valid: meetupLocation != ""}, sql.NullString{String: meetupDateTime, Valid: meetupDateTime != ""}, sql.NullString{String: meetupLocation, Valid: meetupLocation != ""}, sql.NullString{String: meetupLocation, Valid: meetupLocation != ""}, sql.NullString{String: meetupDateTime, Valid: meetupDateTime != ""}, meetupLat, meetupLng)
 
 	if err != nil {
 		log.Printf("Trade creation failed: %v", err)
@@ -1806,7 +1912,8 @@ func (h *TradeHandler) GetTrades(c *fiber.Ctx) error {
 	}
 
 	query += `,
-          COALESCE(t.meetup_location, '') as meetup_location, COALESCE(t.buyer_meetup_confirmed, FALSE) as buyer_meetup_confirmed, COALESCE(t.seller_meetup_confirmed, FALSE) as seller_meetup_confirmed,
+          COALESCE(t.meetup_location, '') as meetup_location, COALESCE(t.meetup_label, '') as meetup_label, COALESCE(t.buyer_meetup_confirmed, FALSE) as buyer_meetup_confirmed, COALESCE(t.seller_meetup_confirmed, FALSE) as seller_meetup_confirmed,
+          t.meetup_lat, t.meetup_lng,
           COALESCE(t.buyer_meetup_location, '') as buyer_meetup_location, COALESCE(t.buyer_meetup_time, '') as buyer_meetup_time,
           COALESCE(t.seller_meetup_location, '') as seller_meetup_location, COALESCE(t.seller_meetup_time, '') as seller_meetup_time,
 		  COALESCE(t.buyer_met, FALSE) as buyer_met, COALESCE(t.seller_met, FALSE) as seller_met,
@@ -1839,8 +1946,15 @@ func (h *TradeHandler) GetTrades(c *fiber.Ctx) error {
 		var pimg, pimgs sql.NullString
 		var targetPickupAddr sql.NullString
 		var offeredCashNull sql.NullFloat64
+		var meetupLatNull, meetupLngNull sql.NullFloat64
 
-		if err := rows.Scan(&tr.ID, &tr.BuyerID, &tr.SellerID, &tr.TargetProductID, &tr.Status, &tr.Message, &offeredCashNull, &tr.CreatedAt, &tr.UpdatedAt, &tr.BuyerCompleted, &tr.SellerCompleted, &tr.BuyerAccepted, &tr.SellerAccepted, &tr.CompletedAt, &tr.TradeOption, &tr.MeetingType, &tr.DeliveryAddress, &deliveryType, &paymentMethod, &paymentConfirmed, &deliveryInstructions, &proofOfDelivery, &buyerConfirmedReceipt, &sellerConfirmedDelivery, &tr.MeetupLocation, &tr.BuyerMeetupConfirmed, &tr.SellerMeetupConfirmed, &tr.BuyerMeetupLocation, &tr.BuyerMeetupTime, &tr.SellerMeetupLocation, &tr.SellerMeetupTime, &tr.BuyerMet, &tr.SellerMet, &tr.CounteredBy, &tr.ParentTradeID, &tr.BuyerName, &tr.SellerName, &tr.ProductTitle, &pimg, &pimgs, &targetPickupAddr); err == nil {
+		if err := rows.Scan(&tr.ID, &tr.BuyerID, &tr.SellerID, &tr.TargetProductID, &tr.Status, &tr.Message, &offeredCashNull, &tr.CreatedAt, &tr.UpdatedAt, &tr.BuyerCompleted, &tr.SellerCompleted, &tr.BuyerAccepted, &tr.SellerAccepted, &tr.CompletedAt, &tr.TradeOption, &tr.MeetingType, &tr.DeliveryAddress, &deliveryType, &paymentMethod, &paymentConfirmed, &deliveryInstructions, &proofOfDelivery, &buyerConfirmedReceipt, &sellerConfirmedDelivery, &tr.MeetupLocation, &tr.MeetupLabel, &tr.BuyerMeetupConfirmed, &tr.SellerMeetupConfirmed, &meetupLatNull, &meetupLngNull, &tr.BuyerMeetupLocation, &tr.BuyerMeetupTime, &tr.SellerMeetupLocation, &tr.SellerMeetupTime, &tr.BuyerMet, &tr.SellerMet, &tr.CounteredBy, &tr.ParentTradeID, &tr.BuyerName, &tr.SellerName, &tr.ProductTitle, &pimg, &pimgs, &targetPickupAddr); err == nil {
+			if meetupLatNull.Valid {
+				tr.MeetupLat = &meetupLatNull.Float64
+			}
+			if meetupLngNull.Valid {
+				tr.MeetupLng = &meetupLngNull.Float64
+			}
 			if targetPickupAddr.Valid {
 				tr.TargetProductPickupAddress = targetPickupAddr.String
 			}
@@ -2124,7 +2238,23 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 				newTradeStatus = "active"
 			}
 
-			if _, err = tx.Exec(`
+			if finalized {
+				if _, err = tx.Exec(`
+					UPDATE trades
+					SET status=?, buyer_accepted=?, seller_accepted=?,
+					    meetup_location=COALESCE(NULLIF(meetup_location, ''), buyer_meetup_location),
+					    meetup_label=COALESCE(NULLIF(meetup_label, ''), buyer_meetup_location),
+					    meetup_time=COALESCE(NULLIF(meetup_time, ''), buyer_meetup_time),
+					    seller_meetup_location=COALESCE(NULLIF(seller_meetup_location, ''), buyer_meetup_location),
+					    seller_meetup_time=COALESCE(NULLIF(seller_meetup_time, ''), buyer_meetup_time),
+					    seller_meetup_confirmed=TRUE,
+					    updated_at=CURRENT_TIMESTAMP
+					WHERE id = ?
+				`, newTradeStatus, buyerAcceptedState, sellerAcceptedState, tradeID); err != nil {
+					_ = tx.Rollback()
+					return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to accept trade"})
+				}
+			} else if _, err = tx.Exec(`
 				UPDATE trades
 				SET status=?, buyer_accepted=?, seller_accepted=?, updated_at=CURRENT_TIMESTAMP
 				WHERE id = ?
@@ -2727,6 +2857,26 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 
 		// Update trade status, message, and cash amount. Record WHO countered so the
 		// OTHER party sees this trade in their "received offers" direction.
+		counterMeetupTime := strings.TrimSpace(payload.MeetupTime)
+		if strings.TrimSpace(payload.MeetupDate) != "" && counterMeetupTime != "" {
+			counterMeetupTime = strings.TrimSpace(payload.MeetupDate) + " " + counterMeetupTime
+		}
+		if strings.TrimSpace(payload.MeetupLocation) != "" || counterMeetupTime != "" {
+			locationColumn := "seller_meetup_location"
+			timeColumn := "seller_meetup_time"
+			if userID == buyerID {
+				locationColumn = "buyer_meetup_location"
+				timeColumn = "buyer_meetup_time"
+			}
+			if _, err := tx.Exec(
+				"UPDATE trades SET "+locationColumn+"=COALESCE(NULLIF(?, ''), "+locationColumn+"), "+timeColumn+"=COALESCE(NULLIF(?, ''), "+timeColumn+"), buyer_accepted=FALSE, seller_accepted=FALSE WHERE id = ?",
+				strings.TrimSpace(payload.MeetupLocation), counterMeetupTime, tradeID,
+			); err != nil {
+				_ = tx.Rollback()
+				return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to update counter logistics"})
+			}
+		}
+
 		if _, err := tx.Exec("UPDATE trades SET status='countered', message=?, offered_cash_amount=?, countered_by=?, buyer_accepted=FALSE, seller_accepted=FALSE, updated_at=CURRENT_TIMESTAMP WHERE id = ?", payload.Message, payload.CounterOfferedCashAmount, userID, tradeID); err != nil {
 			_ = tx.Rollback()
 			return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to update trade for counter offer"})
@@ -2972,20 +3122,24 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 		if payload.MeetupDate != "" {
 			meetupTimeValue = payload.MeetupDate + " " + payload.MeetupTime
 		}
+		meetupLat, meetupLng, coordErr := resolveMeetupCoordinates(payload.MeetupLocation, payload.MeetupLat, payload.MeetupLng)
+		if coordErr != nil {
+			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Could not verify the meetup location coordinates. Please choose a mapped location."})
+		}
 
 		// Store each party's meetup selection separately
 		var updateQuery string
 		switch userID {
 		case buyerID:
-			updateQuery = "UPDATE trades SET buyer_meetup_location=?, buyer_meetup_time=?, buyer_meetup_confirmed=TRUE, updated_at=CURRENT_TIMESTAMP WHERE id = ?"
+			updateQuery = "UPDATE trades SET buyer_meetup_location=?, buyer_meetup_time=?, buyer_meetup_confirmed=TRUE, meetup_label=?, meetup_lat=?, meetup_lng=?, updated_at=CURRENT_TIMESTAMP WHERE id = ?"
 		case sellerID:
-			updateQuery = "UPDATE trades SET seller_meetup_location=?, seller_meetup_time=?, seller_meetup_confirmed=TRUE, updated_at=CURRENT_TIMESTAMP WHERE id = ?"
+			updateQuery = "UPDATE trades SET seller_meetup_location=?, seller_meetup_time=?, seller_meetup_confirmed=TRUE, meetup_label=?, meetup_lat=?, meetup_lng=?, updated_at=CURRENT_TIMESTAMP WHERE id = ?"
 		default:
 			return c.Status(403).JSON(models.APIResponse{Success: false, Error: "Not authorized for this trade"})
 		}
 
 		// Update the trade with this party's meetup selection
-		_, err = h.db.Exec(updateQuery, payload.MeetupLocation, meetupTimeValue, tradeID)
+		_, err = h.db.Exec(updateQuery, payload.MeetupLocation, meetupTimeValue, payload.MeetupLocation, meetupLat, meetupLng, tradeID)
 		if err != nil {
 			log.Printf("Failed to update meetup confirmation for trade %d: %v", tradeID, err)
 			return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to confirm meetup"})
@@ -3032,9 +3186,10 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 					    buyer_accepted=TRUE,
 					    seller_accepted=TRUE,
 					    meetup_location=?,
+					    meetup_label=?,
 					    meetup_time=?,
 					    updated_at=CURRENT_TIMESTAMP
-					WHERE id = ?`, buyerLocation.String, buyerTime.String, tradeID)
+					WHERE id = ?`, buyerLocation.String, buyerLocation.String, buyerTime.String, tradeID)
 				if activateErr == nil {
 					_, _ = h.db.Exec(`
 						UPDATE products
@@ -3135,17 +3290,20 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 		}
 
 		var tradeOption, meetupLocation, meetupTime string
+		var meetupLat, meetupLng sql.NullFloat64
 		var buyerConfirmed, sellerConfirmed bool
 		var buyerLocation, buyerTime, sellerLocation, sellerTime sql.NullString
 		err = h.db.QueryRow(`
 			SELECT COALESCE(trade_option, 'meetup'),
 			       COALESCE(meetup_location, ''), COALESCE(meetup_time, ''),
+			       meetup_lat, meetup_lng,
 			       COALESCE(buyer_meetup_confirmed, FALSE), COALESCE(seller_meetup_confirmed, FALSE),
 			       buyer_meetup_location, buyer_meetup_time,
 			       seller_meetup_location, seller_meetup_time
 			FROM trades WHERE id = ?`, tradeID).Scan(
 			&tradeOption,
 			&meetupLocation, &meetupTime,
+			&meetupLat, &meetupLng,
 			&buyerConfirmed, &sellerConfirmed,
 			&buyerLocation, &buyerTime,
 			&sellerLocation, &sellerTime,
@@ -3169,12 +3327,38 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 		if bLoc == "" || bTime == "" || sLoc == "" || sTime == "" || bLoc != sLoc || bTime != sTime {
 			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Meetup selections must match before confirming you met"})
 		}
+		needsMeetupBackfill := strings.TrimSpace(meetupLocation) == "" || strings.TrimSpace(meetupTime) == ""
+		if strings.TrimSpace(meetupLocation) == "" {
+			meetupLocation = buyerLocation.String
+		}
+		if strings.TrimSpace(meetupTime) == "" {
+			meetupTime = buyerTime.String
+		}
+		if !meetupLat.Valid || !meetupLng.Valid {
+			var coordErr error
+			meetupLat, meetupLng, coordErr = resolveMeetupCoordinates(meetupLocation, nil, nil)
+			if coordErr != nil {
+				return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Meetup location is missing coordinates. Please set a mapped meetup point before confirming."})
+			}
+			_, _ = h.db.Exec("UPDATE trades SET meetup_label=COALESCE(NULLIF(meetup_label, ''), ?), meetup_lat=?, meetup_lng=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", meetupLocation, meetupLat, meetupLng, tradeID)
+		}
+		if payload.UserLat == nil || payload.UserLng == nil {
+			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Location access is required to confirm meetup."})
+		}
+		if payload.LocationAccuracyM == nil || *payload.LocationAccuracyM > meetupMaxAccuracyMeters {
+			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "We could not verify your location accurately. Please try again."})
+		}
+		if !validCoordinate(*payload.UserLat, *payload.UserLng) {
+			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Invalid current location."})
+		}
+		distance := services.CalculateDistance(*payload.UserLat, *payload.UserLng, meetupLat.Float64, meetupLng.Float64)
+		if distance.DistanceM > meetupConfirmRadiusMeters {
+			return c.Status(403).JSON(models.APIResponse{Success: false, Error: "You must be near the meetup point to confirm that you met."})
+		}
 
 		// Ensure final meetup fields exist; if not, backfill them from the agreed selections.
-		if strings.TrimSpace(meetupLocation) == "" || strings.TrimSpace(meetupTime) == "" {
-			meetupLocation = buyerLocation.String
-			meetupTime = buyerTime.String
-			_, _ = h.db.Exec("UPDATE trades SET meetup_location=?, meetup_time=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", meetupLocation, meetupTime, tradeID)
+		if needsMeetupBackfill {
+			_, _ = h.db.Exec("UPDATE trades SET meetup_location=?, meetup_label=COALESCE(NULLIF(meetup_label, ''), ?), meetup_time=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", meetupLocation, meetupLocation, meetupTime, tradeID)
 		}
 
 		// Auto-promote to active if needed so review/completion flows don't get blocked.
@@ -3874,7 +4058,9 @@ func (h *TradeHandler) GetTrade(c *fiber.Ctx) error {
 
 	query += `,
           COALESCE(t.meetup_location, '') as meetup_location,
+          COALESCE(t.meetup_label, '') as meetup_label,
           COALESCE(t.meetup_time, '') as meetup_time,
+          t.meetup_lat, t.meetup_lng,
           t.buyer_meetup_confirmed, t.seller_meetup_confirmed,
           COALESCE(t.buyer_meetup_location, '') as buyer_meetup_location,
           COALESCE(t.buyer_meetup_time, '') as buyer_meetup_time,
@@ -3897,7 +4083,14 @@ func (h *TradeHandler) GetTrade(c *fiber.Ctx) error {
 	var proofOfDelivery sql.NullString
 	var offeredCashNull sql.NullFloat64
 	var targetPickupAddr sql.NullString
-	err = h.db.QueryRow(query, tradeID).Scan(&tr.ID, &tr.BuyerID, &tr.SellerID, &tr.TargetProductID, &tr.Status, &tr.Message, &offeredCashNull, &tr.CreatedAt, &tr.UpdatedAt, &tr.BuyerCompleted, &tr.SellerCompleted, &tr.BuyerAccepted, &tr.SellerAccepted, &tr.CompletedAt, &tr.TradeOption, &tr.MeetingType, &tr.DeliveryAddress, &deliveryType, &paymentMethod, &paymentConfirmed, &deliveryInstructions, &proofOfDelivery, &buyerConfirmedReceipt, &sellerConfirmedDelivery, &tr.MeetupLocation, &tr.MeetupTime, &tr.BuyerMeetupConfirmed, &tr.SellerMeetupConfirmed, &tr.BuyerMeetupLocation, &tr.BuyerMeetupTime, &tr.SellerMeetupLocation, &tr.SellerMeetupTime, &tr.BuyerMet, &tr.SellerMet, &tr.CounteredBy, &tr.ParentTradeID, &tr.BuyerName, &tr.SellerName, &tr.ProductTitle, &targetPickupAddr)
+	var meetupLatNull, meetupLngNull sql.NullFloat64
+	err = h.db.QueryRow(query, tradeID).Scan(&tr.ID, &tr.BuyerID, &tr.SellerID, &tr.TargetProductID, &tr.Status, &tr.Message, &offeredCashNull, &tr.CreatedAt, &tr.UpdatedAt, &tr.BuyerCompleted, &tr.SellerCompleted, &tr.BuyerAccepted, &tr.SellerAccepted, &tr.CompletedAt, &tr.TradeOption, &tr.MeetingType, &tr.DeliveryAddress, &deliveryType, &paymentMethod, &paymentConfirmed, &deliveryInstructions, &proofOfDelivery, &buyerConfirmedReceipt, &sellerConfirmedDelivery, &tr.MeetupLocation, &tr.MeetupLabel, &tr.MeetupTime, &meetupLatNull, &meetupLngNull, &tr.BuyerMeetupConfirmed, &tr.SellerMeetupConfirmed, &tr.BuyerMeetupLocation, &tr.BuyerMeetupTime, &tr.SellerMeetupLocation, &tr.SellerMeetupTime, &tr.BuyerMet, &tr.SellerMet, &tr.CounteredBy, &tr.ParentTradeID, &tr.BuyerName, &tr.SellerName, &tr.ProductTitle, &targetPickupAddr)
+	if meetupLatNull.Valid {
+		tr.MeetupLat = &meetupLatNull.Float64
+	}
+	if meetupLngNull.Valid {
+		tr.MeetupLng = &meetupLngNull.Float64
+	}
 	if targetPickupAddr.Valid {
 		tr.TargetProductPickupAddress = targetPickupAddr.String
 	}
@@ -3919,6 +4112,27 @@ func (h *TradeHandler) GetTrade(c *fiber.Ctx) error {
 	}
 	if userID != tr.BuyerID && userID != tr.SellerID {
 		return c.Status(403).JSON(models.APIResponse{Success: false, Error: "Not authorized for this trade"})
+	}
+	if tr.MeetupLat == nil || tr.MeetupLng == nil {
+		label := strings.TrimSpace(tr.MeetupLabel)
+		if label == "" {
+			label = strings.TrimSpace(tr.MeetupLocation)
+		}
+		if label != "" {
+			if places, placeErr := services.SearchPlaces(label, nil, nil); placeErr == nil && len(places) > 0 {
+				lat := places[0].Latitude
+				lng := places[0].Longitude
+				tr.MeetupLat = &lat
+				tr.MeetupLng = &lng
+				if tr.MeetupLabel == "" {
+					tr.MeetupLabel = places[0].Name
+				}
+				_, _ = h.db.Exec(
+					"UPDATE trades SET meetup_label=COALESCE(NULLIF(meetup_label, ''), ?), meetup_lat=?, meetup_lng=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+					label, lat, lng, tr.ID,
+				)
+			}
+		}
 	}
 	itemRows, qerr := h.db.Query(`
                 SELECT ti.id, ti.trade_id, ti.product_id, ti.offered_by, ti.created_at,

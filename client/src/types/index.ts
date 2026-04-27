@@ -112,6 +112,27 @@ export interface Product {
   }>;
   availability_slots?: AvailabilitySlot[]
   availability_type?: 'flexible' | 'strict'
+  collection_setup?: CollectionSetup | string
+}
+
+export type CollectionMethod = 'pickup' | 'meetup'
+
+export interface CollectionSetup {
+  methods: CollectionMethod[]
+  pickup?: {
+    days: string[]
+    time_start: string
+    time_end: string
+    notes?: string
+  }
+  meetup?: {
+    locations: string[]
+    days: string[]
+    time_start: string
+    time_end: string
+    distance_km?: string
+    notes?: string
+  }
 }
 
 export interface Order {
@@ -254,8 +275,11 @@ export interface Trade {
   meetup_status?: 'pending' | 'accepted' | 'declined' | 'disputed' | string
   meetup_confirmed?: boolean
   meetup_location?: string
+  meetup_label?: string
   meetup_date?: string
   meetup_time?: string
+  meetup_lat?: number
+  meetup_lng?: number
   buyer_meetup_confirmed?: boolean
   seller_meetup_confirmed?: boolean
   buyer_meetup_location?: string
@@ -350,8 +374,12 @@ export interface TradeCreate {
   payment_method?: 'cod' | 'upfront' // Payment method preference for buyout offers
   additional_target_product_ids?: number[]
   meetup_location?: string
+  meetup_label?: string
   meetup_date?: string
   meetup_time?: string
+  meetup_lat?: number
+  meetup_lng?: number
+  selected_availability_slot_id?: string
 }
 
 export interface TradeAction {
@@ -364,8 +392,15 @@ export interface TradeAction {
   trade_option?: TradeOption
   meeting_type?: 'meetup' | 'pickup'
   meetup_location?: string
+  meetup_label?: string
   meetup_time?: string
   meetup_date?: string
+  meetup_lat?: number
+  meetup_lng?: number
+  user_lat?: number
+  user_lng?: number
+  location_accuracy_m?: number
+  selected_availability_slot_id?: string
   requested_option?: TradeOption // For option change requests
   delivery_address?: string // For delivery option
   payment_method?: 'gcash' | 'cod' | 'wallet' | 'online'

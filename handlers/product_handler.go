@@ -68,6 +68,7 @@ func (h *ProductHandler) ensureAvailabilityColumns() {
 		for _, col := range []struct{ name, def string }{
 			{"availability_slots", "TEXT NULL"},
 			{"availability_type", "VARCHAR(20) NULL DEFAULT 'flexible'"},
+			{"collection_setup", "TEXT NULL"},
 		} {
 			var exists int
 			h.db.QueryRow(`SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='products' AND COLUMN_NAME=?`, col.name).Scan(&exists)
@@ -78,6 +79,21 @@ func (h *ProductHandler) ensureAvailabilityColumns() {
 			}
 		}
 	})
+}
+
+func (h *ProductHandler) productColumnExists(column string) bool {
+	var exists int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='products' AND COLUMN_NAME=?`, column).Scan(&exists); err != nil {
+		return false
+	}
+	return exists > 0
+}
+
+func (h *ProductHandler) productTextColumnExpr(column string) string {
+	if h.productColumnExists(column) {
+		return "COALESCE(p." + column + ", '')"
+	}
+	return "''"
 }
 
 func (h *ProductHandler) showOwnProductsOnHome() bool {
@@ -644,6 +660,12 @@ func (h *ProductHandler) CreateProduct(c *fiber.Ctx) error {
 		placeholders = append(placeholders, "?")
 		args = append(args, availabilityType)
 	}
+	collectionSetup := c.FormValue("collection_setup")
+	if collectionSetup != "" && h.productColumnExists("collection_setup") {
+		cols = append(cols, "collection_setup")
+		placeholders = append(placeholders, "?")
+		args = append(args, collectionSetup)
+	}
 
 	sqlStr := fmt.Sprintf("INSERT INTO products (%s) VALUES (%s)", strings.Join(cols, ", "), strings.Join(placeholders, ", "))
 	result, err := h.db.Exec(sqlStr, args...)
@@ -1015,6 +1037,7 @@ func (h *ProductHandler) GetProducts(c *fiber.Ctx) error {
 		proBoostHours = 6
 	}
 	boostWindowHours := fmt.Sprintf("(CASE WHEN u.premium_tier = 'pro' THEN %d WHEN u.premium_tier IN ('plus', 'promo') THEN %d ELSE 0 END)", proBoostHours, plusBoostHours)
+	collectionSetupExpr := h.productTextColumnExpr("collection_setup")
 
 	// Use the full query with proper WHERE clause handling
 	query := `
@@ -1027,7 +1050,8 @@ func (h *ProductHandler) GetProducts(c *fiber.Ctx) error {
 		   (SELECT COUNT(*) FROM wishlists w WHERE w.product_id = p.id) as want_count,
 		   (SELECT COUNT(*) FROM trades t WHERE t.target_product_id = p.id AND t.status = 'pending') as offer_count,
 		   ` + haversineExpr + ` AS distance_km,
-		   COALESCE(p.availability_slots, '') as availability_slots, COALESCE(p.availability_type, 'flexible') as availability_type
+		   COALESCE(p.availability_slots, '') as availability_slots, COALESCE(p.availability_type, 'flexible') as availability_type,
+		   ` + collectionSetupExpr + ` as collection_setup
 	FROM products p
 	LEFT JOIN users u ON p.seller_id = u.id
 	` + whereClause
@@ -1093,6 +1117,7 @@ func (h *ProductHandler) GetProducts(c *fiber.Ctx) error {
 		var distKmNull sql.NullFloat64
 		var avSlotsNull sql.NullString
 		var avTypeNull sql.NullString
+		var collectionSetupNull sql.NullString
 		err := rows.Scan(&product.ID, &slugNull, &product.Title, &product.Description, &priceNull,
 			&imageURLsJSONStr, &product.SellerID, &product.Premium, &product.Status,
 			&product.AllowBuying, &product.BarterOnly, &product.Location,
@@ -1102,7 +1127,7 @@ func (h *ProductHandler) GetProducts(c *fiber.Ctx) error {
 			&locationTypeNull, &pickupLatNull, &pickupLonNull, &pickupAddressNull,
 			&latNull, &lonNull, &product.CreatedAt, &product.UpdatedAt, &boostedAtNull, &product.BoostDurationHours,
 			&product.SellerName, &sellerProfile, &product.SellerPremiumTier, &sLatNull, &sLonNull, &product.WantCount, &product.OfferCount,
-			&distKmNull, &avSlotsNull, &avTypeNull)
+			&distKmNull, &avSlotsNull, &avTypeNull, &collectionSetupNull)
 
 		if wantsNull.Valid {
 			product.Wants = wantsNull.String
@@ -1191,6 +1216,9 @@ func (h *ProductHandler) GetProducts(c *fiber.Ctx) error {
 
 		if avTypeNull.Valid {
 			product.AvailabilityType = avTypeNull.String
+		}
+		if collectionSetupNull.Valid {
+			product.CollectionSetup = collectionSetupNull.String
 		}
 		if avSlotsNull.Valid && avSlotsNull.String != "" {
 			today := time.Now().Format("2006-01-02")
@@ -1866,7 +1894,7 @@ func (h *ProductHandler) GetProduct(c *fiber.Ctx) error {
 
 	idOrSlug := c.Params("id")
 	viewerID, _ := middleware.GetUserIDFromContext(c)
-	savedExpr := savedProductSelectExpr(viewerID)
+	collectionSetupExpr := h.productTextColumnExpr("collection_setup")
 
 	// Try to parse as integer first (ID)
 	var product models.Product
@@ -1887,22 +1915,24 @@ func (h *ProductHandler) GetProduct(c *fiber.Ctx) error {
 	var wantedCategoriesRaw sql.NullString
 	var availabilitySlotsNull sql.NullString
 	var availabilityTypeNull sql.NullString
+	var collectionSetupNull sql.NullString
 	productID, parseErr := strconv.Atoi(idOrSlug)
 	if parseErr == nil {
 		// It's a numeric ID
-		err = h.db.QueryRow(fmt.Sprintf(`
+		query := `
 			SELECT p.id, p.slug, p.title, p.description, p.price, p.image_urls, p.video_url, p.seller_id,
-			       p.premium, p.status, p.allow_buying, p.barter_only, p.location, p.`+"condition"+`,
-			       p.suggested_value, p.category, p.estimated_value_min, p.estimated_value_max, COALESCE(p.show_estimated_value, TRUE), p.`+"`value`"+`, p.wants, p.wanted_categories,
+			       p.premium, p.status, p.allow_buying, p.barter_only, p.location, p.` + "condition" + `,
+			       p.suggested_value, p.category, p.estimated_value_min, p.estimated_value_max, COALESCE(p.show_estimated_value, TRUE), p.` + "`value`" + `, p.wants, p.wanted_categories,
 			       p.location_type, p.pickup_latitude, p.pickup_longitude, p.pickup_address,
 			       p.price_reasoning, p.created_at, p.updated_at,
 			       u.name as seller_name, u.profile_picture as seller_profile_picture,
 			       (SELECT COUNT(*) FROM wishlists w WHERE w.product_id = p.id) as want_count,
-			       p.availability_slots, p.availability_type
+			       p.availability_slots, p.availability_type, ` + collectionSetupExpr + `
 			FROM products p
 			LEFT JOIN users u ON p.seller_id = u.id
 			WHERE p.id = ?
-		`, savedExpr), productID).Scan(&product.ID, &slugNull, &product.Title, &product.Description, &priceNull,
+		`
+		err = h.db.QueryRow(query, productID).Scan(&product.ID, &slugNull, &product.Title, &product.Description, &priceNull,
 			&imageURLsJSON, &videoURLNull, &product.SellerID, &product.Premium, &product.Status,
 			&product.AllowBuying, &product.BarterOnly, &product.Location,
 			&product.Condition, &product.SuggestedValue, &product.Category,
@@ -1910,21 +1940,22 @@ func (h *ProductHandler) GetProduct(c *fiber.Ctx) error {
 			&wantsNull, &wantedCategoriesRaw, &locationTypeNull, &pickupLatNull, &pickupLonNull, &pickupAddressNull, &priceReasoningNull,
 			&product.CreatedAt, &product.UpdatedAt,
 			&sellerNameNull, &sellerProfilePictureNull, &product.WantCount,
-			&availabilitySlotsNull, &availabilityTypeNull)
+			&availabilitySlotsNull, &availabilityTypeNull, &collectionSetupNull)
 	} else {
-		err = h.db.QueryRow(fmt.Sprintf(`
-			SELECT p.id, p.slug, p.title, p.description, p.price, p.image_urls, p.video_url, p.seller_id, 
-			       p.premium, p.status, p.allow_buying, p.barter_only, p.location, p.`+"condition"+`, 
-			       p.suggested_value, p.category, p.estimated_value_min, p.estimated_value_max, COALESCE(p.show_estimated_value, TRUE), p.`+"`value`"+`, p.wants, p.wanted_categories,
+		query := `
+			SELECT p.id, p.slug, p.title, p.description, p.price, p.image_urls, p.video_url, p.seller_id,
+			       p.premium, p.status, p.allow_buying, p.barter_only, p.location, p.` + "condition" + `,
+			       p.suggested_value, p.category, p.estimated_value_min, p.estimated_value_max, COALESCE(p.show_estimated_value, TRUE), p.` + "`value`" + `, p.wants, p.wanted_categories,
 			       p.location_type, p.pickup_latitude, p.pickup_longitude, p.pickup_address,
 			       p.price_reasoning, p.created_at, p.updated_at,
 			       u.name as seller_name, u.profile_picture as seller_profile_picture,
 			       (SELECT COUNT(*) FROM wishlists w WHERE w.product_id = p.id) as want_count,
-			       p.availability_slots, p.availability_type
+			       p.availability_slots, p.availability_type, ` + collectionSetupExpr + `
 			FROM products p
 			LEFT JOIN users u ON p.seller_id = u.id
 			WHERE p.slug = ?
-		`, savedExpr), idOrSlug).Scan(&product.ID, &slugNull, &product.Title, &product.Description, &priceNull,
+		`
+		err = h.db.QueryRow(query, idOrSlug).Scan(&product.ID, &slugNull, &product.Title, &product.Description, &priceNull,
 			&imageURLsJSON, &videoURLNull, &product.SellerID, &product.Premium, &product.Status,
 			&product.AllowBuying, &product.BarterOnly, &product.Location,
 			&product.Condition, &product.SuggestedValue, &product.Category,
@@ -1932,7 +1963,7 @@ func (h *ProductHandler) GetProduct(c *fiber.Ctx) error {
 			&wantsNull, &wantedCategoriesRaw, &locationTypeNull, &pickupLatNull, &pickupLonNull, &pickupAddressNull, &priceReasoningNull,
 			&product.CreatedAt, &product.UpdatedAt,
 			&sellerNameNull, &sellerProfilePictureNull, &product.WantCount,
-			&availabilitySlotsNull, &availabilityTypeNull)
+			&availabilitySlotsNull, &availabilityTypeNull, &collectionSetupNull)
 	}
 
 	if err == nil {
@@ -2023,6 +2054,9 @@ func (h *ProductHandler) GetProduct(c *fiber.Ctx) error {
 	}
 	if availabilityTypeNull.Valid {
 		product.AvailabilityType = availabilityTypeNull.String
+	}
+	if collectionSetupNull.Valid {
+		product.CollectionSetup = collectionSetupNull.String
 	}
 	if availabilitySlotsNull.Valid && availabilitySlotsNull.String != "" {
 		// Filter out slots whose date has already passed
