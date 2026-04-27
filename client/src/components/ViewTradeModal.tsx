@@ -3545,6 +3545,19 @@ const ViewTradeModal: React.FC<ViewTradeModalProps> = ({
                                   </Box>
                                 </HStack>
                               </SimpleGrid>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                colorScheme="brand"
+                                w="full"
+                                mt={1}
+                                onClick={resetMeetupSelection}
+                                isLoading={resettingMeetup}
+                                loadingText="Resetting…"
+                                borderRadius="lg"
+                              >
+                                Change Proposal
+                              </Button>
                             </VStack>
                           </CardBody>
                         </Card>

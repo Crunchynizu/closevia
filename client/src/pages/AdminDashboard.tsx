@@ -2066,7 +2066,7 @@ const AdminDashboard: React.FC = () => {
 
   // â"€â"€ SECTION: Overview â"€â"€
   const OverviewSection = () => (
-    <VStack spacing={8} pr={20} align="stretch" w="full">
+    <VStack spacing={8} pr={{ base: 0, md: 6, xl: 16 }} align="stretch" w="full">
       <Card bg={cardBg} border="1px solid" borderColor={borderColor} borderRadius="xl">
         <CardHeader pb={2}>
           <Flex justify="space-between" gap={3} wrap="wrap" align="center">
@@ -2360,7 +2360,7 @@ const AdminDashboard: React.FC = () => {
     const [expandedReportId, setExpandedReportId] = React.useState<number | null>(null);
     const toggleExpand = (id: number) => setExpandedReportId(prev => prev === id ? null : id);
     return (
-      <VStack spacing={8} pr={20} align="stretch" w="full">
+      <VStack spacing={8} pr={{ base: 0, md: 6, xl: 16 }} align="stretch" w="full">
         {/* Report Summary Cards */}
         <Box w="full">
           <HStack mb={3} spacing={2}>
@@ -3111,7 +3111,7 @@ const AdminDashboard: React.FC = () => {
 
   // â"€â"€ SECTION: Management â"€â"€
   const ManagementSection = () => (
-    <VStack spacing={8} pr={20} align="stretch" w="full">
+    <VStack spacing={8} pr={{ base: 0, md: 6, xl: 16 }} align="stretch" w="full">
       {/* Users */}
       <Card bg={cardBg} border="1px solid" borderColor={borderColor} borderRadius="xl" w="full">
         <CardHeader pb={0}>
@@ -3243,7 +3243,7 @@ const AdminDashboard: React.FC = () => {
                           <Td textAlign="right" pl={6}>
                             <HStack spacing={1} justify="flex-end">
                               <Tooltip label="View Details" hasArrow>
-                                <IconButton as="a" href={`/product/${product.id}`} target="_blank" aria-label="View Details" size="sm" colorScheme="blue" variant="ghost" icon={<FiEye />} />
+                                <IconButton as="a" href={product.slug ? `/product/${product.slug}` : `/product/${product.id}`} target="_blank" aria-label="View Details" size="sm" colorScheme="blue" variant="ghost" icon={<FiEye />} />
                               </Tooltip>
                               <Tooltip label={isSuspended ? "Unsuspend listing" : "Suspend listing"} hasArrow>
                                 <IconButton
@@ -3351,7 +3351,7 @@ const AdminDashboard: React.FC = () => {
     const addPromo = () => setPremiumData((prev: any) => ({ ...prev, promotions: [{ title: 'New Premium Promo', plan_key: '', discounted_price: 49, start_at: '', end_at: '', capabilities: { monthly_boost_limit: 1, boost_duration_hours: 3, free_boost_enabled: true }, overrides_capabilities: false, is_active: true }, ...(prev.promotions || [])] }));
 
     return (
-      <VStack spacing={6} pr={20} align="stretch" w="full">
+      <VStack spacing={6} pr={{ base: 0, md: 6, xl: 16 }} align="stretch" w="full">
         <Card bg={cardBg} border="1px solid" borderColor={borderColor} borderRadius="xl">
           <CardHeader>
             <Flex justify="space-between" gap={3} wrap="wrap" align="center">
@@ -3456,7 +3456,7 @@ const AdminDashboard: React.FC = () => {
     );
   };
   const SystemSection = () => (
-    <VStack spacing={8} pr={20} align="stretch" w="full">
+    <VStack spacing={8} pr={{ base: 0, md: 6, xl: 16 }} align="stretch" w="full">
       <SimpleGrid columns={{ base: 1, md: 2, lg: 4 }} spacing={4}>
         <MetricCard icon={FiAlertTriangle} color="rose" label="Reports Filed" value={stats!.reports_filed} />
         <MetricCard icon={FiXCircle} color="red" label="Suspended Users" value={stats!.suspended_users} />
@@ -3695,7 +3695,7 @@ const AdminDashboard: React.FC = () => {
           </Box>
 
           {/* Content Area */}
-          <Box flex={1} p={{ base: 3, md: 5 }} maxW="1400px" w="full" mx="auto" overflow="hidden">
+          <Box flex={1} p={{ base: 3, md: 5 }} maxW="1400px" w="full" mx="auto" overflowX="hidden" overflowY="auto" minH={0}>
             {activeSection === 'overview' && <OverviewSection />}
             {activeSection === 'moderation' && <ModerationSection />}
             {activeSection === 'management' && <ManagementSection />}

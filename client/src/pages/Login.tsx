@@ -196,7 +196,7 @@ const Login: React.FC = () => {
         <Box
           position="absolute"
           inset={0}
-          bg="linear-gradient(170deg, rgba(0,0,0,0.08) 0%, rgba(0,0,0,0.55) 60%, rgba(0,0,0,0.78) 100%)"
+          bg="linear-gradient(170deg, rgba(0,0,0,0.14) 0%, rgba(0,0,0,0.62) 55%, rgba(0,0,0,0.88) 100%)"
         />
 
         {/* Hero content */}
@@ -223,7 +223,7 @@ const Login: React.FC = () => {
             Trade smarter,<br />live better.
           </Heading>
 
-          <Text fontSize="15.5px" color="whiteAlpha.750" mb={9} fontWeight="400" lineHeight="1.5">
+          <Text fontSize="15.5px" color="white" mb={9} fontWeight="400" lineHeight="1.5" opacity={0.92}>
             Clovia — the community marketplace for bartering.
           </Text>
 

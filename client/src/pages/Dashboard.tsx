@@ -2587,47 +2587,41 @@ const Dashboard: React.FC = () => {
               </VStack>
           </CardBody>
           {shouldShowActions && (isAvailable || !isLocked) && (
-            <CardFooter pt={0}>
-              <HStack spacing={2} w="full">
+            <CardFooter pt={0} pb={3} px={3}>
+              <VStack spacing={1.5} w="full">
                 {isAvailable && (
                   <Button
-                    size="sm"
+                    h={{ base: '44px', md: '38px' }}
                     colorScheme="brand"
                     variant="solid"
-                    leftIcon={<Icon as={FaHandshake} boxSize={3} />}
+                    leftIcon={<Icon as={FaHandshake} boxSize={3.5} />}
                     onClick={() => handleFindTradesClick(product)}
+                    w="full"
+                    fontWeight="700"
                     fontSize="sm"
-                    flex={1}
-                    whiteSpace="nowrap"
-                    _hover={{ transform: 'scale(1.02)' }}
-                    transition="all 0.2s"
+                    borderRadius="xl"
+                    _hover={{ opacity: 0.9 }}
+                    transition="opacity 0.15s"
                   >
                     Find Trades
                   </Button>
                 )}
-                {/* Desktop-only Delete button — accessible via ⋮ menu on mobile */}
-                <Tooltip
-                  label={isLocked ? 'Cannot delete locked products' : ''}
-                  isDisabled={!isLocked}
-                  hasArrow
+                {/* Desktop-only Delete — mobile uses ⋮ menu */}
+                <Button
+                  display={{ base: 'none', md: 'flex' }}
+                  leftIcon={<DeleteIcon />}
+                  variant="ghost"
+                  colorScheme="red"
+                  size="xs"
+                  w="full"
+                  fontSize="xs"
+                  onClick={() => handleDeleteProductClick(product)}
+                  isDisabled={isLocked}
+                  _hover={{ bg: 'red.50' }}
                 >
-                  <Button
-                    display={{ base: 'none', md: 'flex' }}
-                    leftIcon={<DeleteIcon />}
-                    variant="outline"
-                    colorScheme="red"
-                    size="sm"
-                    flex={1}
-                    onClick={() => handleDeleteProductClick(product)}
-                    isDisabled={isLocked}
-                    whiteSpace="nowrap"
-                    _hover={{ transform: 'scale(1.02)' }}
-                    transition="all 0.2s"
-                  >
-                    Delete
-                  </Button>
-                </Tooltip>
-              </HStack>
+                  Delete
+                </Button>
+              </VStack>
             </CardFooter>
           )}
         </Card>
@@ -2707,7 +2701,8 @@ const Dashboard: React.FC = () => {
         onClick={isSelectMode ? onToggleSelect : undefined}
         cursor={isSelectMode ? 'pointer' : undefined}
         userSelect="none"
-        transition="background 0.15s"
+        transition="background 0.15s, box-shadow 0.15s"
+        sx={isSelectMode && isSelected ? { boxShadow: 'inset 3px 0 0 var(--chakra-colors-brand-500)' } : undefined}
         onPointerDown={startLongPress}
         onPointerUp={cancelLongPress}
         onPointerLeave={cancelLongPress}
@@ -2803,17 +2798,17 @@ const Dashboard: React.FC = () => {
               <Flex w="full" gap={1.5} display={{ base: 'flex', md: 'none' }} align="center">
                 {isAvailable && (
                   <Button
-                    size="sm"
-                    h="32px"
+                    h="40px"
                     colorScheme="brand"
                     variant="solid"
-                    leftIcon={<Icon as={FaHandshake} boxSize={3} />}
+                    leftIcon={<Icon as={FaHandshake} boxSize={3.5} />}
                     onClick={(e) => { e.stopPropagation(); handleFindTradesClick(product) }}
-                    fontSize="xs"
+                    fontSize="sm"
+                    fontWeight="700"
                     flex={1}
-                    borderRadius="lg"
+                    borderRadius="xl"
                     _hover={{ opacity: 0.88 }}
-                    transition="all 0.2s"
+                    transition="opacity 0.15s"
                   >
                     Find Trades
                   </Button>
@@ -4583,7 +4578,7 @@ const Dashboard: React.FC = () => {
                               borderBottom="1px"
                               borderColor="brand.600"
                             >
-                              <HStack spacing={3}>
+                              <HStack spacing={2}>
                                 <Text fontSize="sm" fontWeight="semibold">
                                   {selectedProductIds.size} selected
                                 </Text>
@@ -4593,39 +4588,59 @@ const Dashboard: React.FC = () => {
                                   color="white"
                                   fontWeight="medium"
                                   px={2}
-                                  h="28px"
+                                  h="26px"
                                   _hover={{ bg: 'whiteAlpha.200' }}
                                   onClick={toggleSelectAllProducts}
                                 >
-                                  Select all
+                                  All
                                 </Button>
                               </HStack>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                color="white"
-                                fontWeight="semibold"
-                                px={2}
-                                h="28px"
-                                _hover={{ bg: 'whiteAlpha.200' }}
-                                onClick={() => {
-                                  setSelectedProductIds(new Set())
-                                  setIsProductSelectMode(false)
-                                }}
-                              >
-                                Cancel
-                              </Button>
+                              <HStack spacing={1}>
+                                {selectedProductIds.size > 0 && (
+                                  <Button
+                                    size="xs"
+                                    bg="red.500"
+                                    color="white"
+                                    fontWeight="semibold"
+                                    px={3}
+                                    h="28px"
+                                    borderRadius="lg"
+                                    _hover={{ bg: 'red.400' }}
+                                    leftIcon={<DeleteIcon boxSize={2.5} />}
+                                    onClick={handleBatchDelete}
+                                    isLoading={deleting}
+                                  >
+                                    Delete
+                                  </Button>
+                                )}
+                                <Button
+                                  size="xs"
+                                  variant="ghost"
+                                  color="white"
+                                  fontWeight="semibold"
+                                  px={2}
+                                  h="28px"
+                                  _hover={{ bg: 'whiteAlpha.200' }}
+                                  onClick={() => {
+                                    setSelectedProductIds(new Set())
+                                    setIsProductSelectMode(false)
+                                  }}
+                                >
+                                  Cancel
+                                </Button>
+                              </HStack>
                             </Flex>
                           )}
-                          {/* Desktop: always-visible select-all row */}
+                          {/* Desktop: select-all row + bulk actions */}
                           <Flex
                             display={{ base: 'none', md: 'flex' }}
                             align="center"
-                            gap={4}
-                            p={3}
+                            gap={3}
+                            px={3} py={2.5}
                             borderBottom="1px"
-                            borderColor={borderColor}
-                            bg="gray.50"
+                            borderColor={selectedProductIds.size > 0 ? 'brand.200' : borderColor}
+                            bg={selectedProductIds.size > 0 ? 'brand.50' : 'gray.50'}
+                            transition="background 0.2s"
                           >
                             <Checkbox
                               isChecked={currentPageSelectableProducts.length > 0 && currentPageSelectableProducts.every(p => selectedProductIds.has(p.id))}
@@ -4637,9 +4652,42 @@ const Dashboard: React.FC = () => {
                               colorScheme="brand"
                               flexShrink={0}
                             />
-                            <Text fontSize="sm" color="gray.600" fontWeight="medium">
-                              Select all on page
+                            <Text fontSize="sm" color={selectedProductIds.size > 0 ? 'brand.700' : 'gray.600'} fontWeight={selectedProductIds.size > 0 ? '600' : 'medium'} flex={1}>
+                              {selectedProductIds.size > 0 ? `${selectedProductIds.size} item${selectedProductIds.size > 1 ? 's' : ''} selected` : 'Select all on page'}
                             </Text>
+                            {selectedProductIds.size > 0 && (
+                              <HStack spacing={2}>
+                                <Button
+                                  size="sm"
+                                  colorScheme="red"
+                                  variant="solid"
+                                  leftIcon={<DeleteIcon />}
+                                  onClick={handleBatchDelete}
+                                  isLoading={deleting}
+                                  borderRadius="lg"
+                                >
+                                  Delete Selected
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  colorScheme="brand"
+                                  variant="outline"
+                                  onClick={handleBatchLock}
+                                  isLoading={deleting}
+                                  borderRadius="lg"
+                                >
+                                  Lock / Unlock
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  colorScheme="gray"
+                                  onClick={() => setSelectedProductIds(new Set())}
+                                >
+                                  Clear
+                                </Button>
+                              </HStack>
+                            )}
                           </Flex>
                           {paginatedProducts.map((product) => (
                             <ProductListRow
@@ -5914,7 +5962,7 @@ const Dashboard: React.FC = () => {
                     ) : tradeHistoryViewMode === 'list' ? (
                       <>
                         {/* List View for Trade History */}
-                        <Box border="1px" borderColor={borderColor} borderRadius="lg" overflow="hidden" bg={cardBg}>
+                        <Box border="1px" borderColor={borderColor} borderRadius="lg" overflow="hidden" bg={cardBg} display={{ base: 'none', md: 'block' }}>
                           <Box
                             px={4}
                             py={3}
@@ -5925,7 +5973,6 @@ const Dashboard: React.FC = () => {
                             fontWeight="semibold"
                             color="gray.600"
                             textTransform="uppercase"
-                            display={{ base: 'none', md: 'flex' }}
                           >
                             What � Who � Where � When � Action
                           </Box>
@@ -5940,58 +5987,41 @@ const Dashboard: React.FC = () => {
                               <Flex
                                 key={trade.id}
                                 align="center"
-                                gap={{ base: 2, md: 4 }}
-                                p={3}
+                                gap={4}
+                                px={4} py={3}
                                 borderBottom={idx < paginatedTradeHistory.length - 1 ? '1px' : 'none'}
                                 borderColor={borderColor}
                                 _hover={{ bg: 'gray.50' }}
-                                minW={0}
-                                flexWrap="wrap"
                               >
-                                <Box
-                                  w="60px"
-                                  h="60px"
-                                  flexShrink={0}
-                                  borderRadius="md"
-                                  overflow="hidden"
-                                  bg="gray.100"
-                                >
+                                <Box w="52px" h="52px" flexShrink={0} borderRadius="lg" overflow="hidden" bg="gray.100">
                                   <ProductThumb
                                     pid={trade.target_product_id}
                                     src={trade.product_image_url}
-                                    alt={getProductTitle(trade.target_product_id, trade.product_title)}
+                                    alt={gaveTitle}
                                     size="100%"
                                   />
                                 </Box>
-                                <VStack align="start" spacing={1} flex={1} minW={0}>
-                                  <Text fontWeight="semibold" noOfLines={1} fontSize={{ base: 'sm', md: 'md' }}>
-                                    {gaveTitle}
-                                  </Text>
-                                  <Text fontSize="xs" color="gray.600" noOfLines={1}>
-                                    Received: {receivedTitle}
-                                  </Text>
-                                  <HStack spacing={2} flexWrap="wrap">
-                                    <Badge colorScheme={getTradeKindLabel(trade) === 'Buyout' ? 'orange' : 'brand'} fontSize="2xs" px={1.5}>
-                                      {getTradeKindLabel(trade)}
-                                    </Badge>
-                                    <Badge colorScheme={badgeColor(trade.status).color} variant="subtle" fontSize="2xs" px={1.5}>
-                                      {getTradeStatusLabel(trade)}
-                                    </Badge>
-                                    <Badge colorScheme="blue" fontSize="2xs" px={1.5}>WHO: {partner.name}</Badge>
-                                    <Badge colorScheme="purple" fontSize="2xs" px={1.5}>WHERE: {where}</Badge>
-                                    <Badge colorScheme="green" fontSize="2xs" px={1.5}>WHEN: {when.date}</Badge>
+                                <VStack align="start" spacing={0.5} flex={1} minW={0}>
+                                  <Text fontWeight="600" noOfLines={1} fontSize="sm" color="gray.800">{gaveTitle}</Text>
+                                  <Text fontSize="xs" color="gray.500" noOfLines={1}>Received: {receivedTitle}</Text>
+                                  <HStack spacing={3} mt={0.5}>
+                                    <Text fontSize="xs" color="gray.600">
+                                      <Text as="span" fontWeight="600" color="gray.500">Who:</Text>{' '}{partner.name}
+                                    </Text>
+                                    <Text fontSize="xs" color="gray.600" noOfLines={1} maxW="220px">
+                                      <Text as="span" fontWeight="600" color="gray.500">Where:</Text>{' '}{where}
+                                    </Text>
                                   </HStack>
                                 </VStack>
                                 <VStack align="end" spacing={0} flexShrink={0}>
-                                  <Text fontSize="xs" color="gray.600">{when.date}</Text>
-                                  <Text fontSize="2xs" color="gray.500">{when.time || 'N/A'}</Text>
+                                  <Text fontSize="xs" color="gray.500">{when.date}</Text>
+                                  <Text fontSize="2xs" color="gray.400">{when.time || '—'}</Text>
                                 </VStack>
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   colorScheme="brand"
-                                  fontSize={{ base: 'xs', md: 'sm' }}
-                                  px={{ base: 2, md: 3 }}
+                                  flexShrink={0}
                                   onClick={() => { setSelectedTrade(trade); setDetailsOpen(true) }}
                                 >
                                   View
@@ -6000,6 +6030,134 @@ const Dashboard: React.FC = () => {
                             )
                           })}
                         </Box>
+
+                        {/* Mobile: clean date-grouped cards */}
+                        <VStack spacing={0} align="stretch" display={{ base: 'flex', md: 'none' }}>
+                          {(() => {
+                            const getDateGroup = (t: Trade) => {
+                              const src = t.completed_at || t.updated_at || t.created_at
+                              const dt = new Date(src)
+                              if (Number.isNaN(dt.getTime())) return 'Unknown'
+                              const now = new Date()
+                              const todayMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+                              const tMs = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).getTime()
+                              const diff = Math.floor((todayMs - tMs) / 86400000)
+                              if (diff === 0) return 'Today'
+                              if (diff === 1) return 'Yesterday'
+                              if (diff < 7) return 'This Week'
+                              return dt.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+                            }
+                            const groups: Record<string, Trade[]> = {}
+                            const groupOrder: string[] = []
+                            paginatedTradeHistory.forEach(t => {
+                              const g = getDateGroup(t)
+                              if (!groups[g]) { groups[g] = []; groupOrder.push(g) }
+                              groups[g].push(t)
+                            })
+                            return groupOrder.map(group => (
+                              <Box key={group} mb={5}>
+                                <Text
+                                  fontSize="10px" fontWeight="700" color="gray.400"
+                                  textTransform="uppercase" letterSpacing="0.1em"
+                                  mb={2.5} px={0.5}
+                                >
+                                  {group}
+                                </Text>
+                                <VStack spacing={2.5} align="stretch">
+                                  {groups[group].map(trade => {
+                                    const partner = getTradePartnerInfo(trade)
+                                    const where = getTradeWhere(trade)
+                                    const when = getTradeWhen(trade)
+                                    const gaveTitle = getProductTitle(trade.target_product_id, trade.product_title)
+                                    const receivedTitle = getTradeReceivedTitle(trade)
+                                    const statusLabel = getTradeStatusLabel(trade)
+                                    const statusClr = badgeColor(trade.status).color
+                                    const src = trade.completed_at || trade.updated_at || trade.created_at
+                                    const dt2 = new Date(src)
+                                    const niceDate = !Number.isNaN(dt2.getTime())
+                                      ? dt2.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                      : when.date
+                                    return (
+                                      <Box
+                                        key={trade.id}
+                                        bg="white"
+                                        borderWidth="1px"
+                                        borderColor="gray.100"
+                                        borderRadius="2xl"
+                                        p={4}
+                                        boxShadow="0 1px 4px rgba(0,0,0,0.05)"
+                                        _hover={{ boxShadow: '0 3px 10px rgba(0,0,0,0.09)' }}
+                                        transition="box-shadow 0.15s"
+                                      >
+                                        {/* Row 1: image + name + date/time */}
+                                        <HStack spacing={3} align="flex-start" mb={2}>
+                                          <Box w="56px" h="56px" flexShrink={0} borderRadius="lg" overflow="hidden" bg="gray.100">
+                                            <ProductThumb pid={trade.target_product_id} src={trade.product_image_url} alt={gaveTitle} size="100%" />
+                                          </Box>
+                                          <Box flex={1} minW={0}>
+                                            <HStack justify="space-between" align="flex-start">
+                                              <Text fontWeight="700" fontSize="sm" color="gray.800" noOfLines={1} flex={1} mr={2}>
+                                                {gaveTitle}
+                                              </Text>
+                                              <VStack spacing={0} align="flex-end" flexShrink={0}>
+                                                <Text fontSize="10px" color="gray.400" fontWeight="500" whiteSpace="nowrap">{niceDate}</Text>
+                                                <Text fontSize="10px" color="gray.400">{when.time || '—'}</Text>
+                                              </VStack>
+                                            </HStack>
+                                            {/* Row 2: received */}
+                                            <Text fontSize="xs" color="gray.500" noOfLines={1} mt={0.5}>
+                                              Received:{' '}
+                                              <Text as="span" color="gray.700" fontWeight="500">{receivedTitle}</Text>
+                                            </Text>
+                                          </Box>
+                                        </HStack>
+                                        {/* Row 3: Who · Where as plain text */}
+                                        <HStack spacing={0} mb={3} flexWrap="wrap" gap={1}>
+                                          <Text fontSize="11px" color="gray.600">
+                                            <Text as="span" fontWeight="600" color="gray.500">Who:</Text>{' '}{partner.name}
+                                          </Text>
+                                          <Text fontSize="11px" color="gray.300" px={1.5}>·</Text>
+                                          <Text fontSize="11px" color="gray.600" noOfLines={1} maxW="52%">
+                                            <Text as="span" fontWeight="600" color="gray.500">Where:</Text>{' '}{where}
+                                          </Text>
+                                        </HStack>
+                                        {/* Row 4: status pill + view button */}
+                                        <HStack justify="space-between" align="center">
+                                          <Badge
+                                            colorScheme={statusClr}
+                                            variant="subtle"
+                                            rounded="full"
+                                            px={3} py={0.5}
+                                            fontSize="11px"
+                                            fontWeight="600"
+                                            textTransform="none"
+                                          >
+                                            {statusLabel}
+                                          </Badge>
+                                          <Button
+                                            size="xs"
+                                            variant="ghost"
+                                            colorScheme="gray"
+                                            color="gray.500"
+                                            fontSize="12px"
+                                            fontWeight="600"
+                                            px={3}
+                                            rightIcon={<ChevronRightIcon boxSize={3} />}
+                                            _hover={{ bg: 'gray.50', color: 'gray.700' }}
+                                            onClick={() => { setSelectedTrade(trade); setDetailsOpen(true) }}
+                                          >
+                                            View
+                                          </Button>
+                                        </HStack>
+                                      </Box>
+                                    )
+                                  })}
+                                </VStack>
+                              </Box>
+                            ))
+                          })()}
+                        </VStack>
+
                         <PaginationControls
                           currentPage={tradeHistoryPage}
                           totalPages={tradeHistoryTotalPages}
@@ -6139,96 +6297,126 @@ const Dashboard: React.FC = () => {
                         </VStack>
 
                         {/* Mobile Card View */}
-                        <VStack spacing={4} align="stretch" display={{ base: 'flex', md: 'none' }}>
-                          {paginatedTradeHistory.map((trade) => {
-                            const partner = getTradePartnerInfo(trade)
-                            const where = getTradeWhere(trade)
-                            const when = getTradeWhen(trade)
-
-                            return (
-                              <Box
-                                key={trade.id}
-                                p={4}
-                                bg="white"
-                                borderWidth="1px"
-                                borderColor={borderColor}
-                                borderRadius="lg"
-                                transition="all 0.2s"
-                                _hover={{ shadow: 'md' }}
-                              >
-                                <VStack align="stretch" spacing={3}>
-                                  {/* Header with product thumbnail and partner */}
-                                  <HStack spacing={3} justify="space-between">
-                                    <Box w="50px" h="50px" flexShrink={0} borderRadius="md" overflow="hidden" borderWidth="1px" borderColor={borderColor}>
-                                      <ProductThumb
-                                        pid={trade.target_product_id}
-                                        src={trade.product_image_url}
-                                        alt={getProductTitle(trade.target_product_id, trade.product_title)}
-                                        size="full"
-                                      />
-                                    </Box>
-                                    <VStack align="start" spacing={0} flex={1}>
-                                      <Text fontSize="xs" fontWeight="semibold" color="gray.600">WHO</Text>
-                                      <Text fontSize="sm" fontWeight="medium" color="gray.800" noOfLines={1}>
-                                        {partner.name}
-                                      </Text>
-                                      <Text fontSize="2xs" color="gray.500">{partner.direction}</Text>
-                                    </VStack>
-                                  </HStack>
-
-                                  <SimpleGrid columns={2} spacing={2}>
-                                    <Box bg="gray.50" p={2} borderRadius="md">
-                                      <Text fontSize="2xs" color="gray.500" textTransform="uppercase">Where</Text>
-                                      <Text fontSize="xs" color="gray.700" noOfLines={2}>{where}</Text>
-                                    </Box>
-                                    <Box bg="gray.50" p={2} borderRadius="md">
-                                      <Text fontSize="2xs" color="gray.500" textTransform="uppercase">When</Text>
-                                      <Text fontSize="xs" color="gray.700">{when.date}</Text>
-                                      <Text fontSize="2xs" color="gray.500">{when.time || 'N/A'}</Text>
-                                    </Box>
-                                  </SimpleGrid>
-
-                                  {/* Trade details */}
-                                  <Box bg="gray.50" p={3} borderRadius="md" borderWidth="1px" borderColor={borderColor}>
-                                    <VStack align="stretch" spacing={2}>
-                                      <VStack align="start" spacing={1}>
-                                        <Text fontSize="xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">
-                                          What: You Gave
-                                        </Text>
-                                        <Text fontSize="sm" color="gray.800">
-                                          {getProductTitle(trade.target_product_id, trade.product_title)}
-                                        </Text>
-                                      </VStack>
-
-                                      <HStack justify="center">
-                                        <Text fontSize="md" color="brand.400">?</Text>
-                                      </HStack>
-
-                                      <VStack align="start" spacing={1}>
-                                        <Text fontSize="xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">
-                                          What: You Received
-                                        </Text>
-                                        <Text fontSize="sm" color="gray.800">
-                                          {getTradeReceivedTitle(trade)}
-                                        </Text>
-                                      </VStack>
-                                    </VStack>
-                                  </Box>
-
-                                  {/* Action button */}
-                                  <Button
-                                    size="sm"
-                                    colorScheme="brand"
-                                    variant="outline"
-                                    w="full"
-                                    onClick={() => { setSelectedTrade(trade); setDetailsOpen(true) }}
-                                  >
-                                    View Details
-                                  </Button>
+                        <VStack spacing={0} align="stretch" display={{ base: 'flex', md: 'none' }}>
+                          {(() => {
+                            const getDateGroupG = (t: Trade) => {
+                              const src = t.completed_at || t.updated_at || t.created_at
+                              const dt = new Date(src)
+                              if (Number.isNaN(dt.getTime())) return 'Unknown'
+                              const now = new Date()
+                              const todayMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+                              const tMs = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).getTime()
+                              const diff = Math.floor((todayMs - tMs) / 86400000)
+                              if (diff === 0) return 'Today'
+                              if (diff === 1) return 'Yesterday'
+                              if (diff < 7) return 'This Week'
+                              return dt.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+                            }
+                            const groups: Record<string, Trade[]> = {}
+                            const groupOrder: string[] = []
+                            paginatedTradeHistory.forEach(t => {
+                              const g = getDateGroupG(t)
+                              if (!groups[g]) { groups[g] = []; groupOrder.push(g) }
+                              groups[g].push(t)
+                            })
+                            return groupOrder.map(group => (
+                              <Box key={group} mb={5}>
+                                <Text
+                                  fontSize="10px" fontWeight="700" color="gray.400"
+                                  textTransform="uppercase" letterSpacing="0.1em"
+                                  mb={2.5} px={0.5}
+                                >
+                                  {group}
+                                </Text>
+                                <VStack spacing={2.5} align="stretch">
+                                  {groups[group].map(trade => {
+                                    const partner = getTradePartnerInfo(trade)
+                                    const where = getTradeWhere(trade)
+                                    const when = getTradeWhen(trade)
+                                    const gaveTitle = getProductTitle(trade.target_product_id, trade.product_title)
+                                    const receivedTitle = getTradeReceivedTitle(trade)
+                                    const statusLabel = getTradeStatusLabel(trade)
+                                    const statusClr = badgeColor(trade.status).color
+                                    const src = trade.completed_at || trade.updated_at || trade.created_at
+                                    const dtG = new Date(src)
+                                    const niceDate = !Number.isNaN(dtG.getTime())
+                                      ? dtG.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                      : when.date
+                                    return (
+                                      <Box
+                                        key={trade.id}
+                                        bg="white"
+                                        borderWidth="1px"
+                                        borderColor="gray.100"
+                                        borderRadius="2xl"
+                                        p={4}
+                                        boxShadow="0 1px 4px rgba(0,0,0,0.05)"
+                                        _hover={{ boxShadow: '0 3px 10px rgba(0,0,0,0.09)' }}
+                                        transition="box-shadow 0.15s"
+                                      >
+                                        <HStack spacing={3} align="flex-start" mb={2}>
+                                          <Box w="56px" h="56px" flexShrink={0} borderRadius="lg" overflow="hidden" bg="gray.100">
+                                            <ProductThumb pid={trade.target_product_id} src={trade.product_image_url} alt={gaveTitle} size="100%" />
+                                          </Box>
+                                          <Box flex={1} minW={0}>
+                                            <HStack justify="space-between" align="flex-start">
+                                              <Text fontWeight="700" fontSize="sm" color="gray.800" noOfLines={1} flex={1} mr={2}>
+                                                {gaveTitle}
+                                              </Text>
+                                              <VStack spacing={0} align="flex-end" flexShrink={0}>
+                                                <Text fontSize="10px" color="gray.400" fontWeight="500" whiteSpace="nowrap">{niceDate}</Text>
+                                                <Text fontSize="10px" color="gray.400">{when.time || '—'}</Text>
+                                              </VStack>
+                                            </HStack>
+                                            <Text fontSize="xs" color="gray.500" noOfLines={1} mt={0.5}>
+                                              Received:{' '}
+                                              <Text as="span" color="gray.700" fontWeight="500">{receivedTitle}</Text>
+                                            </Text>
+                                          </Box>
+                                        </HStack>
+                                        <HStack spacing={0} mb={3} flexWrap="wrap" gap={1}>
+                                          <Text fontSize="11px" color="gray.600">
+                                            <Text as="span" fontWeight="600" color="gray.500">Who:</Text>{' '}{partner.name}
+                                          </Text>
+                                          <Text fontSize="11px" color="gray.300" px={1.5}>·</Text>
+                                          <Text fontSize="11px" color="gray.600" noOfLines={1} maxW="52%">
+                                            <Text as="span" fontWeight="600" color="gray.500">Where:</Text>{' '}{where}
+                                          </Text>
+                                        </HStack>
+                                        <HStack justify="space-between" align="center">
+                                          <Badge
+                                            colorScheme={statusClr}
+                                            variant="subtle"
+                                            rounded="full"
+                                            px={3} py={0.5}
+                                            fontSize="11px"
+                                            fontWeight="600"
+                                            textTransform="none"
+                                          >
+                                            {statusLabel}
+                                          </Badge>
+                                          <Button
+                                            size="xs"
+                                            variant="ghost"
+                                            colorScheme="gray"
+                                            color="gray.500"
+                                            fontSize="12px"
+                                            fontWeight="600"
+                                            px={3}
+                                            rightIcon={<ChevronRightIcon boxSize={3} />}
+                                            _hover={{ bg: 'gray.50', color: 'gray.700' }}
+                                            onClick={() => { setSelectedTrade(trade); setDetailsOpen(true) }}
+                                          >
+                                            View
+                                          </Button>
+                                        </HStack>
+                                      </Box>
+                                    )
+                                  })}
                                 </VStack>
                               </Box>
-                            )
-                          })}
+                            ))
+                          })()}
                         </VStack>
 
                         {/* Pagination */}
@@ -6592,6 +6780,78 @@ const Dashboard: React.FC = () => {
         imageUrl={zoomImageUrl}
         altText={zoomAltText}
       />
+
+      {/* ── Mobile sticky bulk action bar ── */}
+      <Box
+        display={{ base: 'block', md: 'none' }}
+        position="fixed"
+        bottom={0}
+        left={0}
+        right={0}
+        zIndex={150}
+        transform={selectedProductIds.size > 0 && activeTab === 0 ? 'translateY(0)' : 'translateY(110%)'}
+        transition="transform 0.25s cubic-bezier(0.4, 0, 0.2, 1)"
+        bg="white"
+        borderTop="2px solid"
+        borderColor="brand.500"
+        px={4}
+        pt={3}
+        pb="calc(12px + env(safe-area-inset-bottom, 0px))"
+        boxShadow="0 -6px 24px rgba(0,0,0,0.12)"
+      >
+        <HStack justify="space-between" align="center" mb={2}>
+          <HStack spacing={1.5}>
+            <Box w={5} h={5} bg="brand.500" borderRadius="full" display="flex" alignItems="center" justifyContent="center">
+              <Text fontSize="10px" color="white" fontWeight="800" lineHeight={1}>{selectedProductIds.size}</Text>
+            </Box>
+            <Text fontSize="sm" fontWeight="700" color="gray.800">
+              {selectedProductIds.size} item{selectedProductIds.size !== 1 ? 's' : ''} selected
+            </Text>
+          </HStack>
+          <Button
+            size="xs"
+            variant="ghost"
+            colorScheme="gray"
+            color="gray.500"
+            fontSize="xs"
+            onClick={() => {
+              setSelectedProductIds(new Set())
+              setIsProductSelectMode(false)
+            }}
+          >
+            Clear
+          </Button>
+        </HStack>
+        <HStack spacing={2}>
+          <Button
+            flex={1}
+            h="44px"
+            colorScheme="red"
+            variant="solid"
+            leftIcon={<DeleteIcon />}
+            onClick={handleBatchDelete}
+            isLoading={deleting}
+            fontWeight="700"
+            fontSize="sm"
+            borderRadius="xl"
+          >
+            Delete Selected
+          </Button>
+          <Button
+            h="44px"
+            colorScheme="brand"
+            variant="outline"
+            onClick={handleBatchLock}
+            isLoading={deleting}
+            fontWeight="600"
+            fontSize="sm"
+            borderRadius="xl"
+            px={4}
+          >
+            Lock / Unlock
+          </Button>
+        </HStack>
+      </Box>
 
     </Box>
   )

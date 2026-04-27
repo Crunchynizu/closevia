@@ -211,7 +211,15 @@ const AdvertisementCMS = () => {
       <Modal isOpen={isOpen} onClose={onClose} size="lg">
         <ModalOverlay />
         <ModalContent>
-          <form onSubmit={handleSubmit}>
+          <form
+            onSubmit={handleSubmit}
+            onKeyDown={(e) => {
+              const tag = (e.target as HTMLElement).tagName
+              if (e.key === 'Enter' && tag !== 'BUTTON' && tag !== 'TEXTAREA') {
+                e.preventDefault()
+              }
+            }}
+          >
             <ModalHeader>{editingAd?.id ? 'Edit Advertisement' : 'Create Advertisement'}</ModalHeader>
             <ModalCloseButton />
             <ModalBody>
