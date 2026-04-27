@@ -1,7 +1,15 @@
 import React from 'react'
 import { Box, Button, HStack, Text, VStack, Icon } from '@chakra-ui/react'
 import { FiDownload, FiSmartphone } from 'react-icons/fi'
-import { canShowInstallPrompt, initializeInstallPrompt, isRunningStandalone, promptInstall } from '../serviceWorkerRegistration'
+import {
+  canShowInstallPrompt,
+  initializeInstallPrompt,
+  isAppInstalled,
+  isRunningStandalone,
+  markInstallDismissed,
+  promptInstall,
+  wasInstallDismissed,
+} from '../serviceWorkerRegistration'
 
 interface InstallAppPromptProps {
   variant?: 'floating' | 'mobile-menu' | 'profile-menu'
@@ -17,7 +25,7 @@ const InstallAppPrompt: React.FC<InstallAppPromptProps> = ({
   const [isAndroid, setIsAndroid] = React.useState(false)
 
   React.useEffect(() => {
-    if (isRunningStandalone()) {
+    if (isAppInstalled() || isRunningStandalone() || wasInstallDismissed()) {
       setVisible(false)
       return
     }
@@ -27,12 +35,17 @@ const InstallAppPrompt: React.FC<InstallAppPromptProps> = ({
     setIsAndroid(/android/.test(userAgent))
 
     const cleanup = initializeInstallPrompt((isAvailable) => {
-      setVisible(isAvailable)
+      setVisible(isAvailable && !isAppInstalled() && !wasInstallDismissed())
     })
+    const hideAfterInstall = () => setVisible(false)
+    window.addEventListener('clovia:pwa-installed', hideAfterInstall)
 
     setVisible(canShowInstallPrompt())
 
-    return cleanup
+    return () => {
+      cleanup()
+      window.removeEventListener('clovia:pwa-installed', hideAfterInstall)
+    }
   }, [])
 
   const handleInstall = async () => {
@@ -50,6 +63,11 @@ const InstallAppPrompt: React.FC<InstallAppPromptProps> = ({
 
   const handleDownloadAPK = () => {
     window.location.href = '/clovia.apk'
+  }
+
+  const handleDismiss = () => {
+    markInstallDismissed()
+    setVisible(false)
   }
 
   if (!visible) {
@@ -159,6 +177,9 @@ const InstallAppPrompt: React.FC<InstallAppPromptProps> = ({
               {isAndroid ? 'Download now for the best experience' : 'Install as app for full-screen'}
             </Text>
           </VStack>
+          <Button size="xs" variant="ghost" onClick={handleDismiss}>
+            Later
+          </Button>
         </HStack>
 
         <HStack spacing={2}>

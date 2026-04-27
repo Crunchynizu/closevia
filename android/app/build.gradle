@@ -24,16 +24,16 @@ def twaManifest = [
     applicationId: 'com.sha.clovia',
     hostName: 'cloviaph.site', // The domain being opened in the TWA.
     launchUrl: '/', // The start path for the TWA. Must be relative to the domain.
-    name: 'Clovia', // The application name.
-    launcherName: 'Clovia', // The name shown on the Android Launcher.
+    name: 'CloviaPH', // The application name.
+    launcherName: 'CloviaPH', // The name shown on the Android Launcher.
     themeColor: '#319795', // The color used for the status bar.
     themeColorDark: '#000000', // The color used for the dark status bar.
     navigationColor: '#000000', // The color used for the navigation bar.
     navigationColorDark: '#000000', // The color used for the dark navbar.
     navigationDividerColor: '#000000', // The navbar divider color.
     navigationDividerColorDark: '#000000', // The dark navbar divider color.
-    backgroundColor: '#FFFFFF', // The color used for the splash screen background.
-    enableNotifications: false, // Set to true to enable notification delegation.
+    backgroundColor: '#FFFDF1', // The color used for the splash screen background.
+    enableNotifications: true, // Set to true to enable notification delegation.
     // Every shortcut must include the following fields:
     // - name: String that will show up in the shortcut.
     // - short_name: Shorter string used if |name| is too long.
@@ -41,12 +41,12 @@ def twaManifest = [
     // - icon: Name of the resource in the drawable folder to use as an icon.
     shortcuts: [],
     // The duration of fade out animation in milliseconds to be played when removing splash screen.
-    splashScreenFadeOutDuration: 0,
+    splashScreenFadeOutDuration: 300,
     generatorApp: 'bubblewrap-cli', // Application that generated the Android Project
     // The fallback strategy for when Trusted Web Activity is not available. Possible values are
     // 'customtabs' and 'webview'.
     fallbackType: 'customtabs',
-    enableSiteSettingsShortcut: 'true',
+    enableSiteSettingsShortcut: 'false',
     orientation: 'portrait-primary',
 ]
 
@@ -57,8 +57,8 @@ android {
         applicationId "com.sha.clovia"
         minSdkVersion 21
         targetSdkVersion 35
-        versionCode 3
-        versionName "1.0.0"
+        versionCode 5
+        versionName "2.0"
 
         // The name for the application
         resValue "string", "appName", twaManifest.name

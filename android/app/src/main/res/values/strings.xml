@@ -22,6 +22,12 @@
     AndroidManifest values.
   -->
   
+    <string-array name="display_override">
+      <item>window-controls-overlay</item>
+      <item>standalone</item>
+      <item>minimal-ui</item>
+    </string-array>
+  
 
   <!--
     This variable below expresses the relationship between the app and the site,

@@ -267,6 +267,8 @@ export interface Trade {
   product_title?: string
   product_image_url?: string
   target_product_pickup_address?: string
+  target_product_pickup_latitude?: number
+  target_product_pickup_longitude?: number
   buyer_completed?: boolean
   seller_completed?: boolean
   buyer_accepted?: boolean
@@ -288,6 +290,15 @@ export interface Trade {
   seller_meetup_time?: string
   buyer_met?: boolean
   seller_met?: boolean
+  buyer_arrived_at?: string
+  seller_arrived_at?: string
+  buyer_was_late?: boolean
+  seller_was_late?: boolean
+  late_penalty_applied?: boolean
+  buyer_late_penalty_applied?: boolean
+  seller_late_penalty_applied?: boolean
+  agreed_arrival_deadline?: string
+  grace_period_minutes?: number
   transaction_proof_url?: string
   trade_option?: TradeOption // 'meetup' or 'delivery'
   meeting_type?: 'meetup' | 'pickup' // Type of meeting flow: 'meetup' (mutual agreement) or 'pickup' (seller-set location)

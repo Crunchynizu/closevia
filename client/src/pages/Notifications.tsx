@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Box,
   Container,
@@ -35,6 +36,7 @@ import { formatPHP } from '../utils/currency'
 import { getProductUrl } from '../utils/productUtils'
 import { isNotificationAllowed } from '../utils/notificationPreferences'
 import { api } from '../services/api'
+import { DASHBOARD_QUERY_KEYS } from '../hooks/useDashboard'
 import FloatingTab from '../components/FloatingTab'
 
 interface Notification {
@@ -152,6 +154,10 @@ function getQuotedProductTitle(message: string): string | undefined {
   return match?.[1]?.trim() || undefined
 }
 
+function getNotificationsCacheKey(role?: string): string {
+  return `clovia_notifications_cache_${role || 'user'}`
+}
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -159,7 +165,8 @@ function getQuotedProductTitle(message: string): string | undefined {
 const Notifications: React.FC = () => {
   const { user } = useAuth()
   const { products } = useProducts()
-  const { refreshCounts } = useRealtime()
+  const { adjustNotificationCount, refreshCounts } = useRealtime()
+  const queryClient = useQueryClient()
   const navigate = useNavigate()
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [loading, setLoading] = useState(false)
@@ -183,7 +190,7 @@ const Notifications: React.FC = () => {
   useEffect(() => {
     if (user) {
       const endpoint = user?.role === 'admin' ? '/api/notifications?type=report' : '/api/notifications'
-      const cacheKey = `clovia_notifications_cache_${user?.role || 'user'}`
+      const cacheKey = getNotificationsCacheKey(user?.role)
 
       try {
         const cached = localStorage.getItem(cacheKey)
@@ -203,7 +210,7 @@ const Notifications: React.FC = () => {
 
   const fetchNotifications = async (endpointArg?: string, cacheKeyArg?: string) => {
     const endpoint = endpointArg || (user?.role === 'admin' ? '/api/notifications?type=report' : '/api/notifications')
-    const cacheKey = cacheKeyArg || `clovia_notifications_cache_${user?.role || 'user'}`
+    const cacheKey = cacheKeyArg || getNotificationsCacheKey(user?.role)
 
     try {
       if (notifications.length === 0) setLoading(true)
@@ -221,26 +228,81 @@ const Notifications: React.FC = () => {
     }
   }
 
+  const updateNotificationsCache = useCallback((next: Notification[]) => {
+    try { localStorage.setItem(getNotificationsCacheKey(user?.role), JSON.stringify(next)) } catch {}
+  }, [user?.role])
+
+  const affectsUnreadBadge = useCallback((notification: Notification) => {
+    if (notification.read) return false
+    if (notification.type === 'trade_loop') return false
+    return isNotificationAllowed((user as any)?.notification_preferences, notification)
+  }, [user])
+
+  const updateDashboardUnreadCount = useCallback((delta: number) => {
+    queryClient.setQueryData(DASHBOARD_QUERY_KEYS.counts, (old: any) => {
+      if (!old) return old
+      return {
+        ...old,
+        unread_notifications: Math.max(0, Number(old.unread_notifications || 0) + delta),
+      }
+    })
+  }, [queryClient])
+
   const markAsRead = useCallback(async (notificationId: number) => {
+    const previous = notifications
+    const target = previous.find(n => n.id === notificationId)
+    if (!target || target.read) return
+
+    const shouldDecrement = affectsUnreadBadge(target)
+    const next = previous.map(n => n.id === notificationId ? { ...n, read: true } : n)
+    setNotifications(next)
+    updateNotificationsCache(next)
+    if (shouldDecrement) {
+      adjustNotificationCount(-1)
+      updateDashboardUnreadCount(-1)
+    }
+
     try {
       await api.put(`/api/notifications/${notificationId}/read`)
-      setNotifications(prev => prev.map(n => n.id === notificationId ? { ...n, read: true } : n))
+      queryClient.invalidateQueries({ queryKey: DASHBOARD_QUERY_KEYS.counts })
       refreshCounts()
+      void fetchNotifications()
     } catch {
+      setNotifications(previous)
+      updateNotificationsCache(previous)
+      if (shouldDecrement) {
+        adjustNotificationCount(1)
+        updateDashboardUnreadCount(1)
+      }
       toast({ id: 'mark-read-error', title: 'Error', description: 'Failed to mark notification as read', status: 'error', duration: 3000, isClosable: true })
     }
-  }, [refreshCounts, toast])
+  }, [adjustNotificationCount, affectsUnreadBadge, notifications, queryClient, refreshCounts, toast, updateDashboardUnreadCount, updateNotificationsCache])
 
   const markAllAsRead = useCallback(async () => {
+    const previous = notifications
+    const unreadDelta = previous.filter(affectsUnreadBadge).length
+    if (unreadDelta === 0) return
+
+    const next = previous.map(n => ({ ...n, read: true }))
+    setNotifications(next)
+    updateNotificationsCache(next)
+    adjustNotificationCount(-unreadDelta)
+    updateDashboardUnreadCount(-unreadDelta)
+
     try {
       await api.put('/api/notifications/read-all')
-      setNotifications(prev => prev.map(n => ({ ...n, read: true })))
+      queryClient.invalidateQueries({ queryKey: DASHBOARD_QUERY_KEYS.counts })
       refreshCounts()
+      void fetchNotifications()
       toast({ id: 'mark-all-success', title: 'All caught up!', description: 'All notifications marked as read', status: 'success', duration: 2000, isClosable: true })
     } catch {
+      setNotifications(previous)
+      updateNotificationsCache(previous)
+      adjustNotificationCount(unreadDelta)
+      updateDashboardUnreadCount(unreadDelta)
       toast({ id: 'mark-all-error', title: 'Error', description: 'Failed to mark all as read', status: 'error', duration: 3000, isClosable: true })
     }
-  }, [refreshCounts, toast])
+  }, [adjustNotificationCount, affectsUnreadBadge, notifications, queryClient, refreshCounts, toast, updateDashboardUnreadCount, updateNotificationsCache])
 
   /* --- Filtering & Pagination --- */
   const filtered = useMemo(() => {

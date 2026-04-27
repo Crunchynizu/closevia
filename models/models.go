@@ -389,9 +389,20 @@ type Trade struct {
 	ProductImageURL       string   `json:"product_image_url,omitempty"`
 	// Pickup address of the target (seller's) product, surfaced at trade level
 	// so the pickup UI can show it without relying on trade_items rows.
-	TargetProductPickupAddress string `json:"target_product_pickup_address,omitempty"`
-	BuyerMet                   bool   `json:"buyer_met"`
-	SellerMet                  bool   `json:"seller_met"`
+	TargetProductPickupAddress   string     `json:"target_product_pickup_address,omitempty"`
+	TargetProductPickupLatitude  *float64   `json:"target_product_pickup_latitude,omitempty"`
+	TargetProductPickupLongitude *float64   `json:"target_product_pickup_longitude,omitempty"`
+	BuyerMet                     bool       `json:"buyer_met"`
+	SellerMet                    bool       `json:"seller_met"`
+	BuyerArrivedAt               *time.Time `json:"buyer_arrived_at,omitempty"`
+	SellerArrivedAt              *time.Time `json:"seller_arrived_at,omitempty"`
+	BuyerWasLate                 bool       `json:"buyer_was_late"`
+	SellerWasLate                bool       `json:"seller_was_late"`
+	LatePenaltyApplied           bool       `json:"late_penalty_applied"`
+	BuyerLatePenaltyApplied      bool       `json:"buyer_late_penalty_applied"`
+	SellerLatePenaltyApplied     bool       `json:"seller_late_penalty_applied"`
+	AgreedArrivalDeadline        *time.Time `json:"agreed_arrival_deadline,omitempty"`
+	GracePeriodMinutes           int        `json:"grace_period_minutes,omitempty"`
 	// Enhanced review system fields
 	BuyerReviewCreatedAt      *time.Time    `json:"buyer_review_created_at,omitempty"`  // Timestamp of initial review
 	SellerReviewCreatedAt     *time.Time    `json:"seller_review_created_at,omitempty"` // Timestamp of initial review

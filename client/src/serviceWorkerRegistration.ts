@@ -6,6 +6,8 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 let deferredInstallPrompt: BeforeInstallPromptEvent | null = null
+const PWA_INSTALLED_KEY = 'clovia_pwa_installed'
+const PWA_DISMISSED_KEY = 'clovia_install_dismissed'
 
 export const isRunningStandalone = (): boolean => {
   // Check for standalone display (PWA)
@@ -26,6 +28,22 @@ export const isRunningStandalone = (): boolean => {
                             (window as any).navigator.userAgent?.includes('NoStaticShellMode') === true
   
   return isStandaloneDisplay || isIosStandalone || isTWA || isAndroidApp || isChromeCustomTab
+}
+
+export const isAppInstalled = (): boolean => {
+  try {
+    return isRunningStandalone() || localStorage.getItem(PWA_INSTALLED_KEY) === 'true'
+  } catch {
+    return isRunningStandalone()
+  }
+}
+
+export const markInstallDismissed = (): void => {
+  try { localStorage.setItem(PWA_DISMISSED_KEY, 'true') } catch {}
+}
+
+export const wasInstallDismissed = (): boolean => {
+  try { return localStorage.getItem(PWA_DISMISSED_KEY) === 'true' } catch { return false }
 }
 
 export const registerServiceWorker = (): void => {
@@ -78,14 +96,25 @@ export const initializeInstallPrompt = (onChange?: (isAvailable: boolean) => voi
   }
 
   const handleBeforeInstallPrompt = (event: Event) => {
+    if (isAppInstalled()) {
+      deferredInstallPrompt = null
+      onChange?.(false)
+      return
+    }
     event.preventDefault()
     deferredInstallPrompt = event as BeforeInstallPromptEvent
-    onChange?.(true)
+    onChange?.(!wasInstallDismissed())
   }
 
   const handleAppInstalled = () => {
     deferredInstallPrompt = null
+    try {
+      localStorage.setItem(PWA_INSTALLED_KEY, 'true')
+      localStorage.removeItem(PWA_DISMISSED_KEY)
+      localStorage.removeItem('app-download-banner-dismissed')
+    } catch {}
     onChange?.(false)
+    window.dispatchEvent(new Event('clovia:pwa-installed'))
   }
 
   window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
@@ -97,7 +126,7 @@ export const initializeInstallPrompt = (onChange?: (isAvailable: boolean) => voi
   }
 }
 
-export const canShowInstallPrompt = (): boolean => deferredInstallPrompt !== null
+export const canShowInstallPrompt = (): boolean => deferredInstallPrompt !== null && !isAppInstalled() && !wasInstallDismissed()
 
 export const promptInstall = async (): Promise<boolean> => {
   if (!deferredInstallPrompt) {
@@ -110,6 +139,12 @@ export const promptInstall = async (): Promise<boolean> => {
 
   if (accepted) {
     deferredInstallPrompt = null
+    try {
+      localStorage.setItem(PWA_INSTALLED_KEY, 'true')
+      localStorage.removeItem(PWA_DISMISSED_KEY)
+      localStorage.removeItem('app-download-banner-dismissed')
+    } catch {}
+    window.dispatchEvent(new Event('clovia:pwa-installed'))
   }
 
   return accepted

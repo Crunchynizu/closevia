@@ -1,8 +1,8 @@
 {
   "packageId": "com.sha.clovia",
   "host": "cloviaph.site",
-  "name": "Clovia",
-  "launcherName": "Clovia",
+  "name": "CloviaPH",
+  "launcherName": "CloviaPH",
   "display": "standalone",
   "themeColor": "#319795",
   "themeColorDark": "#000000",
@@ -10,7 +10,7 @@
   "navigationColorDark": "#000000",
   "navigationDividerColor": "#000000",
   "navigationDividerColorDark": "#000000",
-  "backgroundColor": "#FFFFFF",
+  "backgroundColor": "#FFFDF1",
   "enableNotifications": true,
   "startUrl": "/",
   "iconUrl": "https://cloviaph.site/icon-192.png",
@@ -34,7 +34,14 @@
   "isMetaQuest": false,
   "minSdkVersion": 21,
   "orientation": "portrait-primary",
-  "fingerprints": [],
+  "fingerprints": [
+    {
+      "value": "37:84:49:DE:A8:14:54:86:7C:53:8F:B4:5A:96:4B:0C:70:43:57:24:29:A7:0D:8A:A6:56:0A:BC:5C:E5:FC:1F"
+    },
+    {
+      "value": "B9:C1:E9:5A:37:61:B3:4F:9F:51:4E:DE:5D:4E:CD:70:09:87:B8:AA:AA:A2:14:BC:54:64:19:08:85:D9:27:6C"
+    }
+  ],
   "additionalTrustedOrigins": [],
   "retainedBundles": [],
   "displayOverride": [

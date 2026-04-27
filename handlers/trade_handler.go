@@ -60,8 +60,9 @@ func collectionMethodEnabled(setup productCollectionSetup, method string) bool {
 	return false
 }
 
-const meetupConfirmRadiusMeters = 100.0
-const meetupMaxAccuracyMeters = 100.0
+const meetupConfirmRadiusMeters = 10.0
+const meetupMaxAccuracyMeters = 10.0
+const meetupGracePeriodMinutes = 10
 
 func validCoordinate(lat, lng float64) bool {
 	return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 && !(lat == 0 && lng == 0)
@@ -76,6 +77,35 @@ func resolveMeetupCoordinates(location string, lat, lng *float64) (sql.NullFloat
 		return sql.NullFloat64{}, sql.NullFloat64{}, err
 	}
 	return sql.NullFloat64{Float64: coords.Latitude, Valid: true}, sql.NullFloat64{Float64: coords.Longitude, Valid: true}, nil
+}
+
+func parseTradeArrivalDeadline(value string) (time.Time, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return time.Time{}, false
+	}
+	location, err := time.LoadLocation("Asia/Manila")
+	if err != nil {
+		location = time.Local
+	}
+	layouts := []string{
+		"2006-01-02 15:04",
+		"2006-01-02 15:04:05",
+		time.RFC3339,
+		"15:04",
+	}
+	for _, layout := range layouts {
+		parsed, err := time.ParseInLocation(layout, trimmed, location)
+		if err != nil {
+			continue
+		}
+		if layout == "15:04" {
+			now := time.Now().In(location)
+			parsed = time.Date(now.Year(), now.Month(), now.Day(), parsed.Hour(), parsed.Minute(), 0, 0, location)
+		}
+		return parsed, true
+	}
+	return time.Time{}, false
 }
 
 // Keep legacy trade-match and multiway helpers compiled and available while the
@@ -237,6 +267,15 @@ func (h *TradeHandler) ensureTradeRuntimeColumns() {
 		{"buyer_meetup_time", "VARCHAR(100) NULL"},
 		{"seller_meetup_location", "VARCHAR(500) NULL"},
 		{"seller_meetup_time", "VARCHAR(100) NULL"},
+		{"buyer_arrived_at", "TIMESTAMP NULL"},
+		{"seller_arrived_at", "TIMESTAMP NULL"},
+		{"buyer_was_late", "BOOLEAN DEFAULT FALSE"},
+		{"seller_was_late", "BOOLEAN DEFAULT FALSE"},
+		{"late_penalty_applied", "BOOLEAN DEFAULT FALSE"},
+		{"buyer_late_penalty_applied", "BOOLEAN DEFAULT FALSE"},
+		{"seller_late_penalty_applied", "BOOLEAN DEFAULT FALSE"},
+		{"agreed_arrival_deadline", "TIMESTAMP NULL"},
+		{"grace_period_minutes", "INT DEFAULT 10"},
 	}
 
 	for _, col := range columns {
@@ -311,6 +350,27 @@ func (h *TradeHandler) applyCancellationPenalty(userID int, wasActive bool) {
 			fmt.Sprintf("Heads up: your trust score has been reduced for cancelling an ongoing trade (%d/3 strikes in the last 30 days).", recentActiveCancels),
 		)
 	}
+}
+
+func (h *TradeHandler) applyMeetupLatePenalty(userID int, tradeID int, roleLabel string) {
+	var role string
+	_ = h.db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&role)
+	if role == "admin" {
+		return
+	}
+	if _, err := h.db.Exec("UPDATE users SET strikes = COALESCE(strikes, 0) + 1 WHERE id = ?", userID); err != nil {
+		log.Printf("applyMeetupLatePenalty: failed to increment strikes for user %d: %v", userID, err)
+		return
+	}
+	_, _ = h.db.Exec(`
+		INSERT INTO user_strikes (user_id, admin_id, dispute_id, reason)
+		VALUES (?, 1, NULL, ?)
+	`, userID, fmt.Sprintf("Late arrival for trade #%d (%s)", tradeID, roleLabel))
+	_, _ = h.db.Exec(
+		"INSERT INTO notifications (user_id, type, message, is_read) VALUES (?, 'account', ?, FALSE)",
+		userID,
+		"Your trust score has been reduced because you confirmed arrival after the agreed meetup grace period.",
+	)
 }
 
 func (h *TradeHandler) AddTradeLike(c *fiber.Ctx) error {
@@ -1917,11 +1977,21 @@ func (h *TradeHandler) GetTrades(c *fiber.Ctx) error {
           COALESCE(t.buyer_meetup_location, '') as buyer_meetup_location, COALESCE(t.buyer_meetup_time, '') as buyer_meetup_time,
           COALESCE(t.seller_meetup_location, '') as seller_meetup_location, COALESCE(t.seller_meetup_time, '') as seller_meetup_time,
 		  COALESCE(t.buyer_met, FALSE) as buyer_met, COALESCE(t.seller_met, FALSE) as seller_met,
+		  t.buyer_arrived_at, t.seller_arrived_at,
+		  COALESCE(t.buyer_was_late, FALSE) as buyer_was_late,
+		  COALESCE(t.seller_was_late, FALSE) as seller_was_late,
+		  COALESCE(t.late_penalty_applied, FALSE) as late_penalty_applied,
+		  COALESCE(t.buyer_late_penalty_applied, FALSE) as buyer_late_penalty_applied,
+		  COALESCE(t.seller_late_penalty_applied, FALSE) as seller_late_penalty_applied,
+		  t.agreed_arrival_deadline,
+		  COALESCE(t.grace_period_minutes, 10) as grace_period_minutes,
 		  COALESCE(t.countered_by, 0) as countered_by,
 		  t.parent_trade_id,
           ub.name AS buyer_name, us.name AS seller_name, COALESCE(p.title, 'Deleted product') AS product_title,
           p.image_url AS product_image_url, p.image_urls AS product_image_urls,
-          COALESCE(NULLIF(p.pickup_address, ''), NULLIF(us.home_address, ''), '') AS target_product_pickup_address
+          COALESCE(NULLIF(p.pickup_address, ''), NULLIF(us.home_address, ''), '') AS target_product_pickup_address,
+          p.pickup_latitude AS target_product_pickup_latitude,
+          p.pickup_longitude AS target_product_pickup_longitude
         FROM trades t
         JOIN users ub ON ub.id = t.buyer_id
         JOIN users us ON us.id = t.seller_id
@@ -1945,18 +2015,35 @@ func (h *TradeHandler) GetTrades(c *fiber.Ctx) error {
 		var proofOfDelivery sql.NullString
 		var pimg, pimgs sql.NullString
 		var targetPickupAddr sql.NullString
+		var targetPickupLat, targetPickupLng sql.NullFloat64
 		var offeredCashNull sql.NullFloat64
 		var meetupLatNull, meetupLngNull sql.NullFloat64
+		var buyerArrivedAt, sellerArrivedAt, agreedDeadline sql.NullTime
 
-		if err := rows.Scan(&tr.ID, &tr.BuyerID, &tr.SellerID, &tr.TargetProductID, &tr.Status, &tr.Message, &offeredCashNull, &tr.CreatedAt, &tr.UpdatedAt, &tr.BuyerCompleted, &tr.SellerCompleted, &tr.BuyerAccepted, &tr.SellerAccepted, &tr.CompletedAt, &tr.TradeOption, &tr.MeetingType, &tr.DeliveryAddress, &deliveryType, &paymentMethod, &paymentConfirmed, &deliveryInstructions, &proofOfDelivery, &buyerConfirmedReceipt, &sellerConfirmedDelivery, &tr.MeetupLocation, &tr.MeetupLabel, &tr.BuyerMeetupConfirmed, &tr.SellerMeetupConfirmed, &meetupLatNull, &meetupLngNull, &tr.BuyerMeetupLocation, &tr.BuyerMeetupTime, &tr.SellerMeetupLocation, &tr.SellerMeetupTime, &tr.BuyerMet, &tr.SellerMet, &tr.CounteredBy, &tr.ParentTradeID, &tr.BuyerName, &tr.SellerName, &tr.ProductTitle, &pimg, &pimgs, &targetPickupAddr); err == nil {
+		if err := rows.Scan(&tr.ID, &tr.BuyerID, &tr.SellerID, &tr.TargetProductID, &tr.Status, &tr.Message, &offeredCashNull, &tr.CreatedAt, &tr.UpdatedAt, &tr.BuyerCompleted, &tr.SellerCompleted, &tr.BuyerAccepted, &tr.SellerAccepted, &tr.CompletedAt, &tr.TradeOption, &tr.MeetingType, &tr.DeliveryAddress, &deliveryType, &paymentMethod, &paymentConfirmed, &deliveryInstructions, &proofOfDelivery, &buyerConfirmedReceipt, &sellerConfirmedDelivery, &tr.MeetupLocation, &tr.MeetupLabel, &tr.BuyerMeetupConfirmed, &tr.SellerMeetupConfirmed, &meetupLatNull, &meetupLngNull, &tr.BuyerMeetupLocation, &tr.BuyerMeetupTime, &tr.SellerMeetupLocation, &tr.SellerMeetupTime, &tr.BuyerMet, &tr.SellerMet, &buyerArrivedAt, &sellerArrivedAt, &tr.BuyerWasLate, &tr.SellerWasLate, &tr.LatePenaltyApplied, &tr.BuyerLatePenaltyApplied, &tr.SellerLatePenaltyApplied, &agreedDeadline, &tr.GracePeriodMinutes, &tr.CounteredBy, &tr.ParentTradeID, &tr.BuyerName, &tr.SellerName, &tr.ProductTitle, &pimg, &pimgs, &targetPickupAddr, &targetPickupLat, &targetPickupLng); err == nil {
 			if meetupLatNull.Valid {
 				tr.MeetupLat = &meetupLatNull.Float64
 			}
 			if meetupLngNull.Valid {
 				tr.MeetupLng = &meetupLngNull.Float64
 			}
+			if buyerArrivedAt.Valid {
+				tr.BuyerArrivedAt = &buyerArrivedAt.Time
+			}
+			if sellerArrivedAt.Valid {
+				tr.SellerArrivedAt = &sellerArrivedAt.Time
+			}
+			if agreedDeadline.Valid {
+				tr.AgreedArrivalDeadline = &agreedDeadline.Time
+			}
 			if targetPickupAddr.Valid {
 				tr.TargetProductPickupAddress = targetPickupAddr.String
+			}
+			if targetPickupLat.Valid {
+				tr.TargetProductPickupLatitude = &targetPickupLat.Float64
+			}
+			if targetPickupLng.Valid {
+				tr.TargetProductPickupLongitude = &targetPickupLng.Float64
 			}
 			// Set offered cash if valid
 			if offeredCashNull.Valid {
@@ -3100,8 +3187,16 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 		log.Printf("User %d attempting to confirm meetup for trade %d", userID, tradeID)
 
 		// Check if this is actually a meetup trade
-		var tradeOption string
-		err = h.db.QueryRow("SELECT COALESCE(trade_option, 'meetup') FROM trades WHERE id = ?", tradeID).Scan(&tradeOption)
+		var tradeOption, meetingType string
+		var pickupLat, pickupLng sql.NullFloat64
+		err = h.db.QueryRow(`
+			SELECT COALESCE(t.trade_option, 'meetup'),
+			       COALESCE(t.meeting_type, 'meetup'),
+			       p.pickup_latitude,
+			       p.pickup_longitude
+			FROM trades t
+			LEFT JOIN products p ON p.id = t.target_product_id
+			WHERE t.id = ?`, tradeID).Scan(&tradeOption, &meetingType, &pickupLat, &pickupLng)
 		if err != nil {
 			return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to get trade option"})
 		}
@@ -3122,7 +3217,16 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 		if payload.MeetupDate != "" {
 			meetupTimeValue = payload.MeetupDate + " " + payload.MeetupTime
 		}
-		meetupLat, meetupLng, coordErr := resolveMeetupCoordinates(payload.MeetupLocation, payload.MeetupLat, payload.MeetupLng)
+		var meetupLat, meetupLng sql.NullFloat64
+		var coordErr error
+		if meetingType == "pickup" {
+			if pickupLat.Valid && pickupLng.Valid && validCoordinate(pickupLat.Float64, pickupLng.Float64) {
+				meetupLat = pickupLat
+				meetupLng = pickupLng
+			}
+		} else {
+			meetupLat, meetupLng, coordErr = resolveMeetupCoordinates(payload.MeetupLocation, payload.MeetupLat, payload.MeetupLng)
+		}
 		if coordErr != nil {
 			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Could not verify the meetup location coordinates. Please choose a mapped location."})
 		}
@@ -3179,17 +3283,35 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 			sTime := strings.ToLower(strings.TrimSpace(sellerTime.String))
 
 			if bLoc == sLoc && bTime == sTime {
+				arrivalDeadline, hasArrivalDeadline := parseTradeArrivalDeadline(buyerTime.String)
 				// Selections match! Update trade status to active and set the final meetup details
-				_, activateErr := h.db.Exec(`
-					UPDATE trades
-					SET status='active',
-					    buyer_accepted=TRUE,
-					    seller_accepted=TRUE,
-					    meetup_location=?,
-					    meetup_label=?,
-					    meetup_time=?,
-					    updated_at=CURRENT_TIMESTAMP
-					WHERE id = ?`, buyerLocation.String, buyerLocation.String, buyerTime.String, tradeID)
+				var activateErr error
+				if hasArrivalDeadline {
+					_, activateErr = h.db.Exec(`
+						UPDATE trades
+						SET status='active',
+						    buyer_accepted=TRUE,
+						    seller_accepted=TRUE,
+						    meetup_location=?,
+						    meetup_label=?,
+						    meetup_time=?,
+						    agreed_arrival_deadline=?,
+						    grace_period_minutes=?,
+						    updated_at=CURRENT_TIMESTAMP
+						WHERE id = ?`, buyerLocation.String, buyerLocation.String, buyerTime.String, arrivalDeadline, meetupGracePeriodMinutes, tradeID)
+				} else {
+					_, activateErr = h.db.Exec(`
+						UPDATE trades
+						SET status='active',
+						    buyer_accepted=TRUE,
+						    seller_accepted=TRUE,
+						    meetup_location=?,
+						    meetup_label=?,
+						    meetup_time=?,
+						    grace_period_minutes=?,
+						    updated_at=CURRENT_TIMESTAMP
+						WHERE id = ?`, buyerLocation.String, buyerLocation.String, buyerTime.String, meetupGracePeriodMinutes, tradeID)
+				}
 				if activateErr == nil {
 					_, _ = h.db.Exec(`
 						UPDATE products
@@ -3289,21 +3411,33 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "This trade can no longer confirm meetup completion"})
 		}
 
-		var tradeOption, meetupLocation, meetupTime string
-		var meetupLat, meetupLng sql.NullFloat64
+		var tradeOption, meetingType, meetupLocation, meetupTime string
+		var meetupLat, meetupLng, pickupLat, pickupLng sql.NullFloat64
+		var agreedDeadline sql.NullTime
 		var buyerConfirmed, sellerConfirmed bool
+		var buyerLatePenaltyApplied, sellerLatePenaltyApplied bool
 		var buyerLocation, buyerTime, sellerLocation, sellerTime sql.NullString
 		err = h.db.QueryRow(`
 			SELECT COALESCE(trade_option, 'meetup'),
+			       COALESCE(meeting_type, 'meetup'),
 			       COALESCE(meetup_location, ''), COALESCE(meetup_time, ''),
 			       meetup_lat, meetup_lng,
+			       p.pickup_latitude, p.pickup_longitude,
+			       agreed_arrival_deadline,
+			       COALESCE(buyer_late_penalty_applied, FALSE), COALESCE(seller_late_penalty_applied, FALSE),
 			       COALESCE(buyer_meetup_confirmed, FALSE), COALESCE(seller_meetup_confirmed, FALSE),
 			       buyer_meetup_location, buyer_meetup_time,
 			       seller_meetup_location, seller_meetup_time
-			FROM trades WHERE id = ?`, tradeID).Scan(
+			FROM trades t
+			LEFT JOIN products p ON p.id = t.target_product_id
+			WHERE t.id = ?`, tradeID).Scan(
 			&tradeOption,
+			&meetingType,
 			&meetupLocation, &meetupTime,
 			&meetupLat, &meetupLng,
+			&pickupLat, &pickupLng,
+			&agreedDeadline,
+			&buyerLatePenaltyApplied, &sellerLatePenaltyApplied,
 			&buyerConfirmed, &sellerConfirmed,
 			&buyerLocation, &buyerTime,
 			&sellerLocation, &sellerTime,
@@ -3334,6 +3468,20 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 		if strings.TrimSpace(meetupTime) == "" {
 			meetupTime = buyerTime.String
 		}
+		if !agreedDeadline.Valid {
+			if parsedDeadline, ok := parseTradeArrivalDeadline(meetupTime); ok {
+				agreedDeadline = sql.NullTime{Time: parsedDeadline, Valid: true}
+				_, _ = h.db.Exec("UPDATE trades SET agreed_arrival_deadline=?, grace_period_minutes=COALESCE(grace_period_minutes, ?) WHERE id=?", parsedDeadline, meetupGracePeriodMinutes, tradeID)
+			}
+		}
+		if meetingType == "pickup" {
+			if !pickupLat.Valid || !pickupLng.Valid || !validCoordinate(pickupLat.Float64, pickupLng.Float64) {
+				return c.Status(400).JSON(models.APIResponse{Success: false, Error: "This pickup location has no map pin yet. Ask the product owner to update the location before confirmation."})
+			}
+			meetupLat = pickupLat
+			meetupLng = pickupLng
+			_, _ = h.db.Exec("UPDATE trades SET meetup_label=COALESCE(NULLIF(meetup_label, ''), ?), meetup_lat=?, meetup_lng=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", meetupLocation, meetupLat.Float64, meetupLng.Float64, tradeID)
+		}
 		if !meetupLat.Valid || !meetupLng.Valid {
 			var coordErr error
 			meetupLat, meetupLng, coordErr = resolveMeetupCoordinates(meetupLocation, nil, nil)
@@ -3342,17 +3490,21 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 			}
 			_, _ = h.db.Exec("UPDATE trades SET meetup_label=COALESCE(NULLIF(meetup_label, ''), ?), meetup_lat=?, meetup_lng=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", meetupLocation, meetupLat, meetupLng, tradeID)
 		}
-		if payload.UserLat == nil || payload.UserLng == nil {
+		if meetingType == "pickup" && userID == sellerID {
+			var buyerMet bool
+			_ = h.db.QueryRow("SELECT COALESCE(buyer_met, FALSE) FROM trades WHERE id = ?", tradeID).Scan(&buyerMet)
+			if !buyerMet {
+				return c.Status(400).JSON(models.APIResponse{Success: false, Error: "The traveling user must confirm arrival before the product owner can confirm."})
+			}
+		} else if meetingType == "pickup" && userID != buyerID {
+			return c.Status(403).JSON(models.APIResponse{Success: false, Error: "Not authorized for this pickup confirmation"})
+		} else if payload.UserLat == nil || payload.UserLng == nil {
 			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Location access is required to confirm meetup."})
-		}
-		if payload.LocationAccuracyM == nil || *payload.LocationAccuracyM > meetupMaxAccuracyMeters {
+		} else if payload.LocationAccuracyM == nil || *payload.LocationAccuracyM > meetupMaxAccuracyMeters {
 			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "We could not verify your location accurately. Please try again."})
-		}
-		if !validCoordinate(*payload.UserLat, *payload.UserLng) {
+		} else if !validCoordinate(*payload.UserLat, *payload.UserLng) {
 			return c.Status(400).JSON(models.APIResponse{Success: false, Error: "Invalid current location."})
-		}
-		distance := services.CalculateDistance(*payload.UserLat, *payload.UserLng, meetupLat.Float64, meetupLng.Float64)
-		if distance.DistanceM > meetupConfirmRadiusMeters {
+		} else if distance := services.CalculateDistance(*payload.UserLat, *payload.UserLng, meetupLat.Float64, meetupLng.Float64); distance.DistanceM > meetupConfirmRadiusMeters {
 			return c.Status(403).JSON(models.APIResponse{Success: false, Error: "You must be near the meetup point to confirm that you met."})
 		}
 
@@ -3368,13 +3520,40 @@ func (h *TradeHandler) UpdateTrade(c *fiber.Ctx) error {
 			publishToUser(sellerID, sseEvent{Type: "trade_updated", Data: fiber.Map{"trade_id": tradeID, "status": "active", "meetup_agreed": true}})
 		}
 
+		now := time.Now()
+		wasLate := false
+		if agreedDeadline.Valid {
+			wasLate = now.After(agreedDeadline.Time.Add(time.Duration(meetupGracePeriodMinutes) * time.Minute))
+		}
+		if meetingType == "pickup" && userID == sellerID {
+			wasLate = false
+		}
+		arrivedColumn := "buyer_arrived_at"
+		lateColumn := "buyer_was_late"
+		penaltyColumn := "buyer_late_penalty_applied"
+		penaltyAlreadyApplied := buyerLatePenaltyApplied
+		shouldApplyPenalty := wasLate
 		column := "buyer_met"
 		if userID == sellerID {
 			column = "seller_met"
+			arrivedColumn = "seller_arrived_at"
+			lateColumn = "seller_was_late"
+			penaltyColumn = "seller_late_penalty_applied"
+			penaltyAlreadyApplied = sellerLatePenaltyApplied
+			shouldApplyPenalty = wasLate && meetingType != "pickup"
 		}
-		if _, err := h.db.Exec("UPDATE trades SET "+column+"=TRUE, updated_at=CURRENT_TIMESTAMP WHERE id = ?", tradeID); err != nil {
+		if _, err := h.db.Exec("UPDATE trades SET "+column+"=TRUE, "+arrivedColumn+"=COALESCE("+arrivedColumn+", ?), "+lateColumn+"=?, updated_at=CURRENT_TIMESTAMP WHERE id = ?", now, wasLate, tradeID); err != nil {
 			log.Printf("Failed to confirm meetup done for trade %d: %v", tradeID, err)
 			return c.Status(500).JSON(models.APIResponse{Success: false, Error: "Failed to confirm meetup completion"})
+		}
+		if shouldApplyPenalty && !penaltyAlreadyApplied {
+			h.applyMeetupLatePenalty(userID, tradeID, func() string {
+				if userID == buyerID {
+					return "buyer"
+				}
+				return "seller"
+			}())
+			_, _ = h.db.Exec("UPDATE trades SET "+penaltyColumn+"=TRUE, late_penalty_applied=TRUE, updated_at=CURRENT_TIMESTAMP WHERE id = ?", tradeID)
 		}
 
 		// Notify the other party
@@ -4068,10 +4247,21 @@ func (h *TradeHandler) GetTrade(c *fiber.Ctx) error {
           COALESCE(t.seller_meetup_time, '') as seller_meetup_time,
 					COALESCE(t.buyer_met, FALSE) as buyer_met,
 					COALESCE(t.seller_met, FALSE) as seller_met,
+					t.buyer_arrived_at,
+					t.seller_arrived_at,
+					COALESCE(t.buyer_was_late, FALSE) as buyer_was_late,
+					COALESCE(t.seller_was_late, FALSE) as seller_was_late,
+					COALESCE(t.late_penalty_applied, FALSE) as late_penalty_applied,
+					COALESCE(t.buyer_late_penalty_applied, FALSE) as buyer_late_penalty_applied,
+					COALESCE(t.seller_late_penalty_applied, FALSE) as seller_late_penalty_applied,
+					t.agreed_arrival_deadline,
+					COALESCE(t.grace_period_minutes, 10) as grace_period_minutes,
 					COALESCE(t.countered_by, 0) as countered_by,
 					t.parent_trade_id,
           ub.name AS buyer_name, us.name AS seller_name, COALESCE(p.title, 'Deleted product') AS product_title,
-          COALESCE(NULLIF(p.pickup_address, ''), NULLIF(us.home_address, ''), '') AS target_product_pickup_address
+          COALESCE(NULLIF(p.pickup_address, ''), NULLIF(us.home_address, ''), '') AS target_product_pickup_address,
+          p.pickup_latitude AS target_product_pickup_latitude,
+          p.pickup_longitude AS target_product_pickup_longitude
         FROM trades t
         JOIN users ub ON ub.id = t.buyer_id
         JOIN users us ON us.id = t.seller_id
@@ -4083,16 +4273,33 @@ func (h *TradeHandler) GetTrade(c *fiber.Ctx) error {
 	var proofOfDelivery sql.NullString
 	var offeredCashNull sql.NullFloat64
 	var targetPickupAddr sql.NullString
+	var targetPickupLat, targetPickupLng sql.NullFloat64
 	var meetupLatNull, meetupLngNull sql.NullFloat64
-	err = h.db.QueryRow(query, tradeID).Scan(&tr.ID, &tr.BuyerID, &tr.SellerID, &tr.TargetProductID, &tr.Status, &tr.Message, &offeredCashNull, &tr.CreatedAt, &tr.UpdatedAt, &tr.BuyerCompleted, &tr.SellerCompleted, &tr.BuyerAccepted, &tr.SellerAccepted, &tr.CompletedAt, &tr.TradeOption, &tr.MeetingType, &tr.DeliveryAddress, &deliveryType, &paymentMethod, &paymentConfirmed, &deliveryInstructions, &proofOfDelivery, &buyerConfirmedReceipt, &sellerConfirmedDelivery, &tr.MeetupLocation, &tr.MeetupLabel, &tr.MeetupTime, &meetupLatNull, &meetupLngNull, &tr.BuyerMeetupConfirmed, &tr.SellerMeetupConfirmed, &tr.BuyerMeetupLocation, &tr.BuyerMeetupTime, &tr.SellerMeetupLocation, &tr.SellerMeetupTime, &tr.BuyerMet, &tr.SellerMet, &tr.CounteredBy, &tr.ParentTradeID, &tr.BuyerName, &tr.SellerName, &tr.ProductTitle, &targetPickupAddr)
+	var buyerArrivedAt, sellerArrivedAt, agreedDeadline sql.NullTime
+	err = h.db.QueryRow(query, tradeID).Scan(&tr.ID, &tr.BuyerID, &tr.SellerID, &tr.TargetProductID, &tr.Status, &tr.Message, &offeredCashNull, &tr.CreatedAt, &tr.UpdatedAt, &tr.BuyerCompleted, &tr.SellerCompleted, &tr.BuyerAccepted, &tr.SellerAccepted, &tr.CompletedAt, &tr.TradeOption, &tr.MeetingType, &tr.DeliveryAddress, &deliveryType, &paymentMethod, &paymentConfirmed, &deliveryInstructions, &proofOfDelivery, &buyerConfirmedReceipt, &sellerConfirmedDelivery, &tr.MeetupLocation, &tr.MeetupLabel, &tr.MeetupTime, &meetupLatNull, &meetupLngNull, &tr.BuyerMeetupConfirmed, &tr.SellerMeetupConfirmed, &tr.BuyerMeetupLocation, &tr.BuyerMeetupTime, &tr.SellerMeetupLocation, &tr.SellerMeetupTime, &tr.BuyerMet, &tr.SellerMet, &buyerArrivedAt, &sellerArrivedAt, &tr.BuyerWasLate, &tr.SellerWasLate, &tr.LatePenaltyApplied, &tr.BuyerLatePenaltyApplied, &tr.SellerLatePenaltyApplied, &agreedDeadline, &tr.GracePeriodMinutes, &tr.CounteredBy, &tr.ParentTradeID, &tr.BuyerName, &tr.SellerName, &tr.ProductTitle, &targetPickupAddr, &targetPickupLat, &targetPickupLng)
 	if meetupLatNull.Valid {
 		tr.MeetupLat = &meetupLatNull.Float64
 	}
 	if meetupLngNull.Valid {
 		tr.MeetupLng = &meetupLngNull.Float64
 	}
+	if buyerArrivedAt.Valid {
+		tr.BuyerArrivedAt = &buyerArrivedAt.Time
+	}
+	if sellerArrivedAt.Valid {
+		tr.SellerArrivedAt = &sellerArrivedAt.Time
+	}
+	if agreedDeadline.Valid {
+		tr.AgreedArrivalDeadline = &agreedDeadline.Time
+	}
 	if targetPickupAddr.Valid {
 		tr.TargetProductPickupAddress = targetPickupAddr.String
+	}
+	if targetPickupLat.Valid {
+		tr.TargetProductPickupLatitude = &targetPickupLat.Float64
+	}
+	if targetPickupLng.Valid {
+		tr.TargetProductPickupLongitude = &targetPickupLng.Float64
 	}
 	if offeredCashNull.Valid {
 		val := offeredCashNull.Float64

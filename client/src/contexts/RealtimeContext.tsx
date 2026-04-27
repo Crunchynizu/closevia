@@ -9,6 +9,8 @@ import { isNotificationAllowed } from '../utils/notificationPreferences'
 type RealtimeContextValue = {
   offerCount: number
   notificationCount: number
+  adjustNotificationCount: (delta: number) => void
+  setNotificationCountImmediate: (count: number) => void
   refreshCounts: () => void
   refreshProducts: () => void
   refreshSentOffers: () => void
@@ -22,6 +24,8 @@ type RealtimeContextValue = {
 const RealtimeContext = createContext<RealtimeContextValue>({
   offerCount: 0,
   notificationCount: 0,
+  adjustNotificationCount: () => { },
+  setNotificationCountImmediate: () => { },
   refreshCounts: () => { },
   refreshProducts: () => { },
   refreshSentOffers: () => { },
@@ -63,6 +67,14 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [offerCount, setOfferCount] = useState(0)
   const [notificationCount, setNotificationCount] = useState(0)
   const userNotificationPreferences = (user as any)?.notification_preferences
+
+  const adjustNotificationCount = useCallback((delta: number) => {
+    setNotificationCount((current) => Math.max(0, current + delta))
+  }, [])
+
+  const setNotificationCountImmediate = useCallback((count: number) => {
+    setNotificationCount(Math.max(0, count))
+  }, [])
 
   const shouldNotify = useCallback((notification: { type?: string; notification_type?: string; message?: string; participant_count?: number | string }) => {
     return isNotificationAllowed(userNotificationPreferences, notification)
@@ -395,6 +407,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     <RealtimeContext.Provider value={{
       offerCount,
       notificationCount,
+      adjustNotificationCount,
+      setNotificationCountImmediate,
       refreshCounts,
       refreshProducts,
       refreshSentOffers,

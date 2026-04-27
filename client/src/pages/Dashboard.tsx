@@ -77,7 +77,6 @@ import DeliveryRequestModal from '../components/DeliveryRequestModal'
 import { SuggestedTradesModal } from '../components/SuggestedTradesModal'
 import TradeModal from '../components/TradeModal'
 import DeliveryTracking from '../components/DeliveryTracking'
-import MultiWayTradeUI from '../components/MultiWayTradeUI'
 import MultiWayTradeModal from '../components/MultiWayTradeModal'
 import DisputeReportModal from '../components/DisputeReportModal'
 import { fetchMultiWayTrade, hopIntoMultiwayChain } from '../services/tradeService'
@@ -3327,6 +3326,123 @@ const Dashboard: React.FC = () => {
     )
   })
 
+  const OngoingMultiWayCompactCard: React.FC<{
+    trade: any
+    onView: (trade: any) => void
+  }> = React.memo(({ trade, onView }) => {
+    const participants = Array.isArray(trade?.participants) ? trade.participants : []
+    const summary = getMultiWayTradeSummary(trade)
+    const loopLabel = participants.length <= 2 ? 'Trade Connect' : 'Multi-Way'
+    const currentUserID = Number(user?.id || 0)
+    const yourParticipantIndex = participants.findIndex((p: any) => Number(p?.id || p?.user_id) === currentUserID)
+    const yourParticipant = yourParticipantIndex >= 0 ? participants[yourParticipantIndex] : participants[0]
+    const nextParticipant = yourParticipantIndex >= 0 && participants.length > 0
+      ? participants[(yourParticipantIndex + 1) % participants.length]
+      : participants[1] || participants[0]
+    const yourProductImage = resolveParticipantImage(yourParticipant)
+    const incomingProductImage = resolveParticipantImage(nextParticipant)
+    const updatedLabel = getTimeAgo(trade.updated_at || trade.created_at)
+
+    return (
+      <Box
+        bg="white"
+        border="1px"
+        borderColor={borderColor}
+        borderLeftWidth="4px"
+        borderLeftColor="brand.400"
+        borderRadius="lg"
+        p={{ base: 3, md: 3.5 }}
+        cursor="pointer"
+        transition="all 0.2s ease"
+        _hover={{ bg: 'gray.50', shadow: 'sm', transform: 'translateY(-1px)' }}
+        onClick={() => onView(trade)}
+      >
+        <Flex
+          align={{ base: 'stretch', md: 'center' }}
+          direction={{ base: 'column', md: 'row' }}
+          gap={{ base: 3, md: 4 }}
+          minW={0}
+        >
+          <HStack spacing={3} flex={1} minW={0} align="center">
+            <HStack spacing={1} flexShrink={0}>
+              {[yourProductImage, incomingProductImage].map((src, index) => (
+                <Box
+                  key={`${trade.id || trade.loop_id || trade.chain_id}-${index}`}
+                  w={{ base: '46px', md: '52px' }}
+                  h={{ base: '46px', md: '52px' }}
+                  borderRadius="md"
+                  overflow="hidden"
+                  bg="gray.100"
+                >
+                  {src ? (
+                    <Image src={src} alt={index === 0 ? 'Your item' : 'Matched item'} w="100%" h="100%" objectFit="cover" />
+                  ) : (
+                    <Center w="100%" h="100%">
+                      <Icon as={FaHandshake} color="gray.300" boxSize={4} />
+                    </Center>
+                  )}
+                </Box>
+              ))}
+            </HStack>
+
+            <VStack align="start" spacing={1} minW={0} flex={1}>
+              <HStack spacing={1.5} flexWrap="wrap">
+                <Badge colorScheme="brand" variant="solid" fontSize="2xs" px={1.5} py={0.5}>
+                  {loopLabel}
+                </Badge>
+                <Badge colorScheme="green" variant="subtle" fontSize="2xs" px={1.5} py={0.5}>
+                  Ongoing
+                </Badge>
+              </HStack>
+              <Text fontWeight="semibold" fontSize={{ base: 'sm', md: 'md' }} noOfLines={1} color="gray.800">
+                {summary.yourGive}
+              </Text>
+              <Text fontSize="xs" color="gray.500" noOfLines={1}>
+                for {summary.yourGet}
+              </Text>
+              <HStack spacing={2} color="gray.500">
+                <HStack spacing={-2}>
+                  {participants.slice(0, 3).map((p: any, i: number) => (
+                    <Avatar
+                      key={p.user_id || p.id || i}
+                      name={p.user_name || 'User'}
+                      size="2xs"
+                      bg="brand.500"
+                      color="white"
+                      boxShadow="0 0 0 2px white"
+                    />
+                  ))}
+                </HStack>
+                <Text fontSize="xs" noOfLines={1}>
+                  {participants.length} participant{participants.length === 1 ? '' : 's'}
+                </Text>
+              </HStack>
+            </VStack>
+          </HStack>
+
+          <VStack align={{ base: 'stretch', md: 'end' }} spacing={2} flexShrink={0}>
+            <Text fontSize="xs" color="gray.500" noOfLines={1}>
+              {updatedLabel}
+            </Text>
+            <Button
+              size="sm"
+              colorScheme="brand"
+              variant="outline"
+              minW={{ base: 'full', md: '88px' }}
+              leftIcon={<Icon as={ViewIcon} boxSize={3} />}
+              onClick={(e) => {
+                e.stopPropagation()
+                onView(trade)
+              }}
+            >
+              View
+            </Button>
+          </VStack>
+        </Flex>
+      </Box>
+    )
+  })
+
   const getTimeAgo = (dateString: string): string => {
     const date = new Date(dateString)
     const now = new Date()
@@ -5137,7 +5253,7 @@ const Dashboard: React.FC = () => {
                                 </Text>
                               </Box>
                             </>
-                          ) : offersViewMode === 'list' ? (
+                          ) : true ? (
                             <>
                               <Box border="1px" borderColor={borderColor} borderRadius="lg" overflow="hidden" bg={cardBg}>
                                 <Box
@@ -5213,7 +5329,6 @@ const Dashboard: React.FC = () => {
                                 {visibleOngoingMultiWayTrades.map((trade: any) => {
                                   const participants = Array.isArray(trade?.participants) ? trade.participants : []
                                   if (participants.length < 2) return null
-                                  const summary = getMultiWayTradeSummary(trade)
                                   const loopId = String(trade.id || trade.loop_id || trade.chain_id)
 
                                   return (
@@ -5222,26 +5337,10 @@ const Dashboard: React.FC = () => {
                                       p={3}
                                       borderBottom="1px"
                                       borderColor={borderColor}
-                                      bg="purple.50"
                                     >
-                                      <MultiWayTradeUI
-                                        participants={participants.map((participant: any) => ({
-                                          id: Number(participant?.id ?? participant?.user_id),
-                                          user_name: participant?.user_name || 'Unknown User',
-                                          user_avatar: participant?.user_avatar,
-                                          product_id: Number(participant?.product_id || participant?.offered_product_id || 0),
-                                          product_title: participant?.product_title || 'Trade item',
-                                          product_image: resolveParticipantImage(participant) || undefined,
-                                          status: participant?.status || participant?.trade_status || 'confirmed',
-                                        }))}
-                                        viewMode="initiator"
-                                        loopStatus={trade?.status || 'ongoing'}
-                                        yourGive={summary.yourGive}
-                                        yourGet={summary.yourGet}
-                                        chainLabel={summary.chainLabel}
-                                        canJoin={false}
-                                        canDecline={false}
-                                        onViewDetails={() => handleViewMultiWayTradeDetails(trade)}
+                                      <OngoingMultiWayCompactCard
+                                        trade={trade}
+                                        onView={handleViewMultiWayTradeDetails}
                                       />
                                     </Box>
                                   )
