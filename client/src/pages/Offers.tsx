@@ -526,49 +526,6 @@ const Offers: React.FC = () => {
     }
   }
 
-  const renderOfferedItems = (t: Trade) => {
-    const offered = (t.items || []).filter((i: any) => {
-      const ob = (i?.offered_by ?? i?.offeredBy ?? i?.sender ?? i?.from_user_role)
-      if (typeof ob === 'string') {
-        const v = ob.toLowerCase()
-        return v === 'buyer' || v === 'from_buyer' || v === 'sender'
-      }
-      return false
-    })
-    if (offered.length === 0) return <Text color="gray.500" fontSize="sm">No items attached</Text>
-    return (
-      <HStack spacing={2} mt={2} wrap="wrap">
-        {offered.map((it: any) => {
-          const pid = it.product_id ?? it.productId
-          const ptitle = it.product_title ?? it.productTitle
-          const pimg = it.product_image_url ?? it.productImageUrl
-          const pstatus = it.product_status ?? it.productStatus
-          return (
-            <HStack key={it.id} spacing={2} borderWidth="1px" borderColor="gray.200" rounded="md" p={2} align="center">
-              {/* Use ProductThumb: if pimg exists it's used, otherwise it will fetch product by id */}
-              <ProductThumb pid={Number(pid)} src={pimg} alt={getProductTitle(Number(pid), ptitle)} />
-              <VStack spacing={0} align="start">
-                <Link 
-                  href={`/products/${it.product_slug || pid}`} 
-                  color="brand.600" 
-                  fontSize="sm"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    const slug = it.product_slug || pid
-                    window.location.href = `/products/${slug}`
-                  }}
-                >
-                  {getProductTitle(Number(pid), ptitle)}
-                </Link>
-                <Text fontSize="xs" color="gray.500">{pstatus}</Text>
-              </VStack>
-            </HStack>
-          )
-        })}
-      </HStack>
-    )
-  }
-
   // Grid Card Component for offers
   const OfferGridCard = React.memo(({ trade, type, onViewDetails, onAction, onSecondaryAction }: {
     trade: Trade
