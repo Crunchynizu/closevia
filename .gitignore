@@ -1,56 +1,79 @@
-# Environment files - ONLY ignore .env, NOT .env.production
+# Environment files
 .env
 .env.local
 .env.*.local
+.env.local.bak
+!.env.example
 
-# Deployment config
-# render.yaml (tracked in git)
-
-# Environment variables
-.env
-.env.local
-.env.*.local
-
-# Secrets
+# Local secrets and certificates
 *.key
 *.pem
 !ca.pem
-
-# Node modules
-node_modules/
-dist/
-client/dist/
-
-# Build artifacts
-*.o
-*.a
-*.so
-
-# Android build outputs
-android/app/build/
-android/.gradle/
-android/local.properties
 *.keystore
 *.jks
-# *.apk - commented out to allow deploying clovia.apk
-# *.apk
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
+# Dependency folders
+node_modules/
+client/node_modules/
+mobile/node_modules/
+shared/node_modules/
 
-# Local Netlify folder
-.netlify
+# Root npm files are not used by the deployed Go backend or Netlify client build.
+/package.json
+/package-lock.json
 
-# Temporary and Build Files
-tmp/
+# Frontend build outputs
+dist/
+client/dist/
+client/dist_buildcheck/
 *.tsbuildinfo
+
+# Go/native build outputs
 *.exe
 *.exe~
 *.dll
+*.o
+*.a
 *.so
 *.dylib
 binary/
 bin/
+test_build
+
+# Mobile and Android build outputs
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android-app-build/build/
+*.apk
+*.aab
+*.idsig
+
+# Runtime uploads and local data
+uploads/
+private_uploads/
+database.db
+
+# Logs, reports, and temporary output
+*.log
+*_out.txt
+*_output.txt
+build_log.txt
+git_status_out.txt
+models_dump.txt
+products_raw.txt
+query_output.txt
+query_results.json
+users_cols.txt
+build/reports/
+tmp/
+
+# Local Netlify folder
+.netlify/
+
+# IDE/editor files
+.vscode/
+.idea/
+*.swp
+*.swo

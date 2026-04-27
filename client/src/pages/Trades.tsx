@@ -1,42 +1,38 @@
-import React, { useEffect, useState } from 'react'
+import React, { useState } from 'react'
 import { Box, Heading, VStack, HStack, Text, Badge, Button, Spinner, Center, useToast, Input, Divider, Tabs, TabList, TabPanels, Tab, TabPanel, useColorModeValue } from '@chakra-ui/react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../services/api'
-import { Trade, TradeAction } from '../types'
+import { fetchTrades as fetchTradesList } from '../services/tradeService'
+import { TradeAction } from '../types'
 import TradeLoopsDisplay from '../components/TradeLoopsDisplay'
 import TradeLoopNotificationsPanel from '../components/TradeLoopNotificationsPanel'
 
 const Trades: React.FC = () => {
-  const [trades, setTrades] = useState<Trade[]>([])
-  const [loading, setLoading] = useState(true)
   const [activeTabIndex, setActiveTabIndex] = useState(0)
   const [isProcessing, setIsProcessing] = useState(false)
   const toast = useToast()
+  const queryClient = useQueryClient()
   const cardBg = useColorModeValue('white', 'gray.800')
   const borderColor = useColorModeValue('gray.200', 'gray.700')
 
-  const fetchTrades = async () => {
-    try {
-      setLoading(true)
-      // Fetch both incoming AND outgoing trades
-      const [incomingRes, outgoingRes] = await Promise.all([
-        api.get('/api/trades', { params: { direction: 'incoming' } }),
-        api.get('/api/trades', { params: { direction: 'outgoing' } }),
-      ])
-      
-      const incomingTrades = Array.isArray(incomingRes.data?.data) ? incomingRes.data.data : []
-      const outgoingTrades = Array.isArray(outgoingRes.data?.data) ? outgoingRes.data.data : []
-      
-      // Combine both incoming and outgoing trades
-      setTrades([...incomingTrades, ...outgoingTrades])
-    } catch (e: any) {
-      toast({
-        id: "trades-error", title: 'Error', description: e?.response?.data?.error || 'Failed to load trades', status: 'error' })
-    } finally {
-      setLoading(false)
-    }
+  const getErrorMessage = (error: unknown, fallback: string): string => {
+    const apiError = error as { response?: { data?: { error?: string } } }
+    return apiError.response?.data?.error || fallback
   }
 
-  useEffect(() => { fetchTrades() }, [])
+  const tradesQuery = useQuery({
+    queryKey: ['trades', 'page', 'all'],
+    queryFn: async () => {
+      const [incomingTrades, outgoingTrades] = await Promise.all([
+        fetchTradesList({ direction: 'incoming', limit: 100 }),
+        fetchTradesList({ direction: 'outgoing', limit: 100 }),
+      ])
+
+      return [...incomingTrades, ...outgoingTrades]
+    },
+    staleTime: 1000 * 30,
+  })
+  const trades = tradesQuery.data || []
 
   const [activeTradeId, setActiveTradeId] = useState<number | null>(null)
   const [messages, setMessages] = useState<Array<{id:number; trade_id:number; sender_id:number; content:string; created_at:string}>>([])
@@ -48,7 +44,9 @@ const Trades: React.FC = () => {
     try {
       const res = await api.get(`/api/trades/${id}/messages`)
       setMessages(Array.isArray(res.data?.data) ? res.data.data : [])
-    } catch {}
+    } catch {
+      setMessages([])
+    }
   }
 
   const sendMessage = async () => {
@@ -58,9 +56,9 @@ const Trades: React.FC = () => {
       setNewMessage('')
       const res = await api.get(`/api/trades/${activeTradeId}/messages`)
       setMessages(Array.isArray(res.data?.data) ? res.data.data : [])
-    } catch (e:any) {
+    } catch (e: unknown) {
       toast({
-        id: "trades-error-2", title: 'Error', description: e?.response?.data?.error || 'Failed to send message', status: 'error' })
+        id: "trades-error-2", title: 'Error', description: getErrorMessage(e, 'Failed to send message'), status: 'error' })
     }
   }
 
@@ -73,10 +71,10 @@ const Trades: React.FC = () => {
       await api.put(`/api/trades/${id}`, action)
       toast({
         id: "trades-success", title: 'Success', description: 'Trade updated', status: 'success' })
-      fetchTrades()
-    } catch (e: any) {
+      queryClient.invalidateQueries({ queryKey: ['trades'] })
+    } catch (e: unknown) {
       toast({
-        id: "trades-error-3", title: 'Error', description: e?.response?.data?.error || 'Failed to update trade', status: 'error' })
+        id: "trades-error-3", title: 'Error', description: getErrorMessage(e, 'Failed to update trade'), status: 'error' })
     } finally {
       setIsProcessing(false)
     }
@@ -86,7 +84,7 @@ const Trades: React.FC = () => {
     setActiveTabIndex(1)
   }
 
-  if (loading) {
+  if (tradesQuery.isLoading) {
     return (
       <Center h="50vh"><Spinner size="xl" color="brand.500" /></Center>
     )

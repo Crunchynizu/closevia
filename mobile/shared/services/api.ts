@@ -1,8 +1,12 @@
+import Constants from 'expo-constants'
 import axios, { AxiosError, AxiosRequestConfig } from 'axios'
 
-// API Base URL - hardcoded to production for React Native
-// (Environment variables in React Native/Expo require different setup via app.config.js)
-export const API_BASE_URL = 'https://clovia-backend.onrender.com'
+const configuredApiBaseUrl =
+    process.env.EXPO_PUBLIC_API_URL ||
+    Constants.expoConfig?.extra?.apiBaseUrl ||
+    Constants.manifest2?.extra?.expoClient?.extra?.apiBaseUrl
+
+export const API_BASE_URL = configuredApiBaseUrl || 'https://clovia-backend.onrender.com'
 
 // Storage abstraction - will be overridden in mobile with AsyncStorage
 export interface StorageAdapter {

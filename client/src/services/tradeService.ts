@@ -10,19 +10,26 @@ import { Trade, TradeLoop, MultiWayTrade, TradeAction, APIResponse } from '../ty
  * @param status Optional: filter by status (pending, accepted, completed, etc.)
  * @param direction Optional: 'incoming', 'outgoing', or both
  */
+export type FetchTradesOptions = {
+  status?: string
+  direction?: string
+  limit?: number
+  page?: number
+  include?: string
+}
+
 export const fetchTrades = async (
-  status?: string,
+  statusOrOptions?: string | FetchTradesOptions,
   direction?: string
 ): Promise<Trade[]> => {
   try {
-    let url = '/api/trades'
-    const params = new URLSearchParams()
-    if (status) params.append('status', status)
-    if (direction) params.append('direction', direction)
-    if (params.toString()) {
-      url += `?${params.toString()}`
-    }
-    const response = await api.get<APIResponse<Trade[]>>(url)
+    const params = typeof statusOrOptions === 'object'
+      ? statusOrOptions
+      : { status: statusOrOptions, direction }
+
+    const response = await api.get<APIResponse<Trade[]>>('/api/trades', {
+      params,
+    })
     return response.data?.data || []
   } catch (error) {
     console.error('Failed to fetch trades:', error)
